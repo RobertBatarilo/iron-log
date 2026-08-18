@@ -1,0 +1,2957 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>IRON LOG — Trainingstracker</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1B1D21">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Iron Log">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  :root{
+    --graphite-900:#1B1D21;
+    --graphite-800:#232629;
+    --iron-700:#333740;
+    --iron-600:#40454F;
+    --iron-500:#565C68;
+    --chalk-50:#F1EDE4;
+    --chalk-200:#D8D2C2;
+    --plate-red:#C8443C;
+    --plate-red-dim:#8E2F2A;
+    --chalk-yellow:#E8B93F;
+    --success-green:#6B9E63;
+    --font-display:'Oswald',sans-serif;
+    --font-body:'Inter',sans-serif;
+    --font-mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--graphite-900);
+    color:var(--chalk-50);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--chalk-yellow);color:var(--graphite-900);}
+  button{font-family:inherit;}
+  input,select,textarea{
+    font-family:var(--font-body);
+    background:var(--graphite-800);
+    border:1px solid var(--iron-600);
+    color:var(--chalk-50);
+    border-radius:8px;
+    padding:10px 12px;
+    font-size:15px;
+    width:100%;
+  }
+  input:focus,select:focus,textarea:focus{
+    outline:2px solid var(--chalk-yellow);
+    outline-offset:1px;
+    border-color:var(--chalk-yellow);
+  }
+  label{
+    display:block;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--chalk-200);
+    margin-bottom:4px;
+    font-weight:600;
+  }
+  .field{margin-bottom:14px;}
+  .app{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    background:var(--graphite-900);
+  }
+  header.top{
+    padding:22px 20px 16px;
+    border-bottom:1px solid var(--iron-700);
+    position:sticky;
+    top:0;
+    background:var(--graphite-900);
+    z-index:5;
+  }
+  header.top h1{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:26px;
+    letter-spacing:0.03em;
+    margin:0;
+    color:var(--chalk-50);
+  }
+  header.top h1 span{color:var(--plate-red);}
+  header.top p{
+    margin:2px 0 0;
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--iron-500);
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+  }
+  main#content{
+    flex:1;
+    padding:18px 20px 100px;
+  }
+  .card{
+    background:var(--graphite-800);
+    border:1px solid var(--iron-700);
+    border-radius:14px;
+    padding:16px;
+    margin-bottom:16px;
+  }
+  .card h2{
+    font-family:var(--font-display);
+    font-size:15px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin:0 0 12px;
+    color:var(--chalk-yellow);
+    font-weight:600;
+  }
+  .card h2.small{font-size:12px;color:var(--iron-500);}
+  .row{display:flex;gap:10px;}
+  .row > *{flex:1;}
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    border:none;
+    border-radius:9px;
+    padding:12px 16px;
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+    width:100%;
+  }
+  .btn-primary{background:var(--plate-red);color:var(--chalk-50);}
+  .btn-primary:active{background:var(--plate-red-dim);}
+  .btn-ghost{background:var(--iron-700);color:var(--chalk-50);}
+  .btn-ghost:active{background:var(--iron-600);}
+  .btn-sm{padding:8px 10px;font-size:12px;width:auto;}
+  .btn-danger{background:transparent;color:var(--plate-red);border:1px solid var(--plate-red-dim);}
+  .feel-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
+  .feel-btn{
+    background:var(--graphite-900);
+    border:1px solid var(--iron-600);
+    color:var(--chalk-50);
+    border-radius:9px;
+    padding:10px 6px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .feel-btn.active{background:var(--chalk-yellow);color:var(--graphite-900);border-color:var(--chalk-yellow);}
+  .stat-num{
+    font-family:var(--font-mono);
+    font-weight:600;
+    font-size:30px;
+    color:var(--chalk-50);
+    line-height:1;
+  }
+  .stat-num.accent{color:var(--plate-red);}
+  .stat-label{
+    font-size:11px;
+    color:var(--iron-500);
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    margin-top:4px;
+  }
+  .suggestion-box{
+    background:var(--graphite-900);
+    border:1px dashed var(--chalk-yellow);
+    border-radius:10px;
+    padding:14px;
+    margin:12px 0;
+    text-align:center;
+  }
+  .suggestion-box .stat-num{color:var(--chalk-yellow);font-size:34px;}
+  .last-perf{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding:10px 0;
+    border-bottom:1px solid var(--iron-700);
+    margin-bottom:10px;
+  }
+  .history-item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:8px 0;
+    border-bottom:1px solid var(--iron-700);
+    font-size:13px;
+  }
+  .history-item:last-child{border-bottom:none;}
+  .history-item .date{color:var(--iron-500);font-family:var(--font-mono);font-size:11px;}
+  .history-item .val{font-family:var(--font-mono);font-weight:600;}
+  .wod-move-row{
+    background:var(--graphite-900);
+    border:1px solid var(--iron-700);
+    border-radius:10px;
+    padding:12px;
+    margin-bottom:10px;
+  }
+  .wod-move-row .top{display:flex;gap:8px;margin-bottom:8px;}
+  .set-block{
+    background:var(--graphite-800);
+    border-top:1px dashed var(--iron-600);
+    padding:10px 0 4px;
+    margin-top:6px;
+  }
+  .set-block:first-of-type{border-top:none;padding-top:0;margin-top:0;}
+  .checkbox-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    color:var(--chalk-200);
+    margin:8px 0 4px;
+    cursor:pointer;
+  }
+  .checkbox-row input[type="checkbox"]{width:auto;accent-color:var(--chalk-yellow);}
+  .wod-result{
+    font-family:var(--font-mono);
+    color:var(--plate-red);
+    font-weight:600;
+    font-size:22px;
+    text-align:right;
+    margin-top:6px;
+  }
+  .wod-result small{font-family:var(--font-body);color:var(--iron-500);font-weight:400;font-size:11px;}
+  .remove-row{background:none;border:none;color:var(--iron-500);cursor:pointer;font-size:18px;line-height:1;padding:4px 8px;}
+  .empty-state{
+    text-align:center;
+    padding:30px 10px;
+    color:var(--iron-500);
+  }
+  .empty-state .glyph{font-size:32px;display:block;margin-bottom:8px;}
+  .wod-card{
+    border-left:3px solid var(--chalk-yellow);
+    padding-left:12px;
+    margin-bottom:14px;
+  }
+  .wod-card .wname{font-family:var(--font-display);font-size:16px;font-weight:600;}
+  .wod-card .wdate{font-family:var(--font-mono);font-size:11px;color:var(--iron-500);}
+  .wod-card .moves{margin-top:6px;font-size:13px;}
+  .wod-card .moves div{display:flex;justify-content:space-between;padding:3px 0;}
+  .chip{
+    display:inline-block;
+    font-size:10px;
+    font-family:var(--font-mono);
+    background:var(--iron-700);
+    color:var(--chalk-200);
+    padding:2px 7px;
+    border-radius:20px;
+    margin-left:6px;
+  }
+  nav.bottom{
+    position:fixed;
+    bottom:0;left:0;right:0;
+    max-width:480px;
+    margin:0 auto;
+    background:var(--graphite-800);
+    border-top:1px solid var(--iron-700);
+    display:flex;
+    padding:8px 4px calc(8px + env(safe-area-inset-bottom));
+    z-index:10;
+  }
+  nav.bottom button{
+    flex:1;
+    background:none;
+    border:none;
+    color:var(--iron-500);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:3px;
+    font-size:10px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    cursor:pointer;
+    padding:6px 2px;
+  }
+  nav.bottom button.active{color:var(--chalk-yellow);}
+  nav.bottom svg{width:20px;height:20px;}
+  .toast{
+    position:fixed;
+    bottom:90px;left:50%;
+    transform:translateX(-50%);
+    background:var(--chalk-yellow);
+    color:var(--graphite-900);
+    padding:10px 18px;
+    border-radius:20px;
+    font-weight:600;
+    font-size:13px;
+    z-index:20;
+    box-shadow:0 4px 14px rgba(0,0,0,0.4);
+  }
+  .chart-wrap{position:relative;height:180px;margin-top:6px;}
+  .add-move-btn{
+    background:none;
+    border:1px dashed var(--iron-600);
+    color:var(--chalk-200);
+    border-radius:9px;
+    padding:10px;
+    width:100%;
+    font-size:13px;
+    cursor:pointer;
+    margin-bottom:6px;
+  }
+  .loading{
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;color:var(--iron-500);font-family:var(--font-mono);font-size:13px;
+  }
+  hr.hairline{border:none;border-top:1px solid var(--iron-700);margin:14px 0;}
+  .note{font-size:12px;color:var(--iron-500);margin-top:4px;}
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,0.6);
+    display:flex; align-items:flex-end; justify-content:center;
+    z-index:50;
+  }
+  .modal-box{
+    background:var(--graphite-800);
+    border:1px solid var(--iron-700);
+    border-radius:16px 16px 0 0;
+    padding:20px;
+    width:100%; max-width:480px;
+    max-height:85vh; overflow-y:auto;
+  }
+  .modal-box h2{
+    font-family:var(--font-display); font-size:16px; text-transform:uppercase;
+    letter-spacing:0.05em; margin:0 0 14px; color:var(--chalk-yellow); font-weight:600;
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="loading" id="loadingScreen">Lade deine Daten …</div>
+</div>
+
+<script>
+/* ---------- Storage helpers ---------- */
+async function loadKey(key, fallback){
+  try{
+    const raw = localStorage.getItem('ironlog:'+key);
+    return raw!=null ? JSON.parse(raw) : fallback;
+  }catch(e){
+    return fallback;
+  }
+}
+async function saveKey(key, value){
+  try{
+    localStorage.setItem('ironlog:'+key, JSON.stringify(value));
+  }catch(e){
+    console.error('Speichern fehlgeschlagen', key, e);
+  }
+}
+async function deleteKey(key){
+  try{ localStorage.removeItem('ironlog:'+key); }catch(e){}
+}
+
+/* ---------- App State ---------- */
+const DEFAULT_EXERCISES_RAW = [
+  {name:'Back Squat', type:'weighted'}, {name:'Front Squat', type:'weighted'}, {name:'Deadlift', type:'weighted'},
+  {name:'Bench Press', type:'weighted'}, {name:'Overhead Press', type:'weighted'}, {name:'Push Press', type:'weighted'},
+  {name:'Strict Press', type:'weighted'}, {name:'Clean', type:'weighted'}, {name:'Power Clean', type:'weighted'},
+  {name:'Snatch', type:'weighted'}, {name:'Power Snatch', type:'weighted'}, {name:'Clean & Jerk', type:'weighted'},
+  {name:'Thruster', type:'weighted'}, {name:'Pull-up', type:'bodyweight'}, {name:'Bent-over Row', type:'weighted'},
+  {name:'Row', type:'cardio'}, {name:'Air Bike', type:'cardio'}, {name:'Bike', type:'cardio'}, {name:'Ski Erg', type:'cardio'}
+];
+const DEFAULT_EXERCISES = DEFAULT_EXERCISES_RAW.map(e => ({id: slug(e.name), name: e.name, custom:false, type: e.type}));
+function cloneDefaultExercises(){ return DEFAULT_EXERCISES.map(e=>({...e})); }
+function getExerciseType(ex){ return (ex && ex.type) || 'weighted'; }
+
+function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')+ '-' + Math.random().toString(36).slice(2,6);}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function todayStr(){return new Date().toISOString().slice(0,10);}
+function fmtDate(d){
+  const dt = new Date(d+'T00:00:00');
+  return dt.toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit',year:'2-digit'});
+}
+
+function defaultTmp(){
+  return {
+    wodFormat:'strength',
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null,
+    live:null,
+    forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null,
+    emomMin:1, emomSec:30, emomRounds:10,
+    timer:{
+      mode:'stopwatch',
+      swRunning:false, swElapsed:0, swStartedAt:null, swLaps:[],
+      cdRunning:false, cdMin:1, cdSec:0, cdRemaining:0, cdTotal:0, cdStartedAt:null,
+      ivRunning:false, ivWorkSec:20, ivRestSec:10, ivRounds:8, ivRound:1, ivPhase:'work', ivRemaining:0, ivStartedAt:null
+    },
+    planForm:null,
+    exerciseModal:null,
+    prExerciseSelection:null,
+    confirmReset:false
+  };
+}
+
+let state = {
+  profile:null,
+  exercises:[],
+  workouts:[],
+  nutritionLogs:[],
+  measurements:[],
+  prEntries:[],
+  timeRecords:[],
+  trainingPlan:null,
+  activeTab:'today',
+  tmp: defaultTmp() // transient UI state
+};
+
+let charts = {}; // chart.js instances keyed by canvas id
+
+/* ---------- Math ---------- */
+function estimate1RM(weight, reps){
+  reps = Math.max(1, reps);
+  if(reps === 1) return weight;
+  return weight * (1 + reps/30);
+}
+function weightForReps(e1rm, reps){
+  reps = Math.max(1, reps);
+  if(reps === 1) return e1rm;
+  return e1rm / (1 + reps/30);
+}
+function roundToIncrement(v, inc=2.5){
+  return Math.round(v/inc)*inc;
+}
+
+/* ---------- Einheiten (Gewicht kg/lbs, Distanz m/mi) — intern immer kg/Meter ---------- */
+const KG_PER_LBS = 0.453592;
+const M_PER_MILE = 1609.34;
+function weightUnitLabel(){ return (state.profile && state.profile.weightUnit==='lbs') ? 'lbs' : 'kg'; }
+function distanceUnitLabel(){ return (state.profile && state.profile.distanceUnit==='mi') ? 'mi' : 'm'; }
+function toDisplayWeight(kg){
+  if(kg===null || kg===undefined || kg===''){ return ''; }
+  const v = weightUnitLabel()==='lbs' ? kg/KG_PER_LBS : kg;
+  return Math.round(v*100)/100;
+}
+function fromDisplayWeight(val){
+  const v = parseFloat(val)||0;
+  return weightUnitLabel()==='lbs' ? v*KG_PER_LBS : v;
+}
+function toDisplayDistance(m){
+  if(m===null || m===undefined || m===''){ return ''; }
+  const v = distanceUnitLabel()==='mi' ? m/M_PER_MILE : m;
+  return Math.round(v*100)/100;
+}
+function fromDisplayDistance(val){
+  const v = parseFloat(val)||0;
+  return distanceUnitLabel()==='mi' ? v*M_PER_MILE : v;
+}
+function fmtWeight(kg){
+  const v = toDisplayWeight(kg);
+  return v===''? '' : `${v.toLocaleString('de-AT')}${weightUnitLabel()}`;
+}
+const FEELING_LABELS = {
+  schlechter:'Schlechter', gleich:'Gleich', besser:'Besser', viel_besser:'Viel besser'
+};
+const FEELING_ADJUST = {
+  schlechter:0.95, gleich:1.01, besser:1.03, viel_besser:1.06
+};
+
+/* ---------- Grundübungen + Skalierungen (Bodyweight/Gymnastics) ---------- */
+const EXERCISE_LIBRARY = [
+  { id:'pull-up', name:'Pull-up', variants:[
+    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
+    {id:'banded', label:'Banded', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
+    {id:'jumping', label:'Jumping', detail:null},
+    {id:'kipping', label:'Kipping', detail:null},
+    {id:'butterfly', label:'Butterfly', detail:null},
+    {id:'strict', label:'Strict', detail:null},
+    {id:'chest-to-bar', label:'Chest-to-Bar', detail:null},
+    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}}
+  ]},
+  { id:'push-up', name:'Push-up', variants:[
+    {id:'knee', label:'Knee', detail:null},
+    {id:'incline', label:'Incline', detail:null},
+    {id:'deficit', label:'Deficit', detail:null},
+    {id:'ring', label:'Ring', detail:null},
+    {id:'clapping', label:'Clapping/Plyo', detail:null}
+  ]},
+  { id:'hspu', name:'Handstand Push-up', variants:[
+    {id:'pike', label:'Pike Push-up', detail:null},
+    {id:'box-pike', label:'Box/Elevated Pike', detail:null},
+    {id:'wall-assisted', label:'Wall-assisted', detail:null},
+    {id:'kipping', label:'Kipping', detail:null},
+    {id:'strict', label:'Strict', detail:null},
+    {id:'deficit', label:'Deficit', detail:null}
+  ]},
+  { id:'dip', name:'Dip', variants:[
+    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
+    {id:'bar', label:'Bar/Parallette', detail:null},
+    {id:'ring', label:'Ring', detail:null},
+    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}}
+  ]},
+  { id:'muscle-up', name:'Muscle-up', variants:[
+    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
+    {id:'jumping', label:'Jumping', detail:null},
+    {id:'bar', label:'Bar', detail:null},
+    {id:'ring', label:'Ring', detail:null}
+  ]},
+  { id:'toes-to-bar', name:'Toes-to-Bar', variants:[
+    {id:'hanging-knee-raise', label:'Hanging Knee Raise', detail:null},
+    {id:'knees-to-chest', label:'Knees-to-Chest', detail:null},
+    {id:'kipping', label:'Kipping', detail:null},
+    {id:'strict', label:'Strict', detail:null}
+  ]},
+  { id:'pistol-squat', name:'Pistol Squat', variants:[
+    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe / Box-Höhe', placeholder:'z.B. Grün oder 30cm'}}
+  ]},
+  { id:'rope-climb', name:'Rope Climb', variants:[
+    {id:'foot-assisted', label:'Foot-assisted', detail:null},
+    {id:'legless', label:'Legless', detail:null}
+  ]},
+  { id:'box-jump', name:'Box Jump', variants:[
+    {id:'step-up', label:'Box Step-up', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}},
+    {id:'jump', label:'Jump', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}}
+  ]},
+  { id:'hs-walk', name:'Handstand Walk', variants:[
+    {id:'wall-assisted', label:'Wall-assisted', detail:null},
+    {id:'freestanding', label:'Freestanding', detail:null}
+  ]}
+];
+EXERCISE_LIBRARY.forEach(b=>{ b.variants.unshift({id:'standard', label:'Standard', detail:null}); });
+function composeVariantName(base, variant, detailVal){
+  if(!variant || variant.id==='standard') return base.name;
+  let name = `${variant.label} ${base.name}`;
+  if(variant.detail && detailVal){
+    const val = variant.detail.numeric ? `+${detailVal}kg` : detailVal;
+    name += ` (${val})`;
+  }
+  return name;
+}
+
+/* ---------- CrossFit-Bibliothek (für automatische Trainingsplan-Erstellung) ---------- */
+const CROSSFIT_WODS = [
+  { id:'fran', name:'Fran', level:'intermediate', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
+    movements:[{name:'Thruster'},{name:'Pull-up'}] },
+  { id:'cindy', name:'Cindy', level:'beginner', equipment:['pullup-bar'], format:'amrap', durationSec:1200,
+    movements:[{name:'Pull-up', reps:5},{name:'Push-up', reps:10},{name:'Air Squat', reps:15}] },
+  { id:'annie', name:'Annie', level:'beginner', equipment:[], format:'for-time', repScheme:'50-40-30-20-10',
+    movements:[{name:'Double-under'},{name:'Sit-up'}] },
+  { id:'grace', name:'Grace', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'30',
+    movements:[{name:'Clean & Jerk'}] },
+  { id:'helen', name:'Helen', level:'intermediate', equipment:['kettlebell','pullup-bar'], format:'for-time', rounds:3,
+    movements:[{name:'Run 400m', reps:400},{name:'Kettlebell Swing', reps:21},{name:'Pull-up', reps:12}] },
+  { id:'diane', name:'Diane', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
+    movements:[{name:'Deadlift'},{name:'Handstand Push-up'}] },
+  { id:'murph', name:'Murph', level:'advanced', equipment:['pullup-bar'], format:'for-time', rounds:1,
+    movements:[{name:'Run 1600m', reps:1600},{name:'Pull-up', reps:100},{name:'Push-up', reps:200},{name:'Air Squat', reps:300},{name:'Run 1600m', reps:1600}] }
+];
+const STRENGTH_PROGRESSIONS = [
+  { id:'squat-linear', name:'Back Squat – Lineare Progression', exerciseName:'Back Squat', level:'beginner', equipment:['barbell'], setsCount:5, pctList:'70,75,80,80,80' },
+  { id:'deadlift-linear', name:'Deadlift – Lineare Progression', exerciseName:'Deadlift', level:'beginner', equipment:['barbell'], setsCount:5, pctList:'70,75,80,80,80' },
+  { id:'press-linear', name:'Overhead Press – Lineare Progression', exerciseName:'Overhead Press', level:'beginner', equipment:['barbell'], setsCount:5, pctList:'65,70,75,75,75' },
+  { id:'squat-heavy', name:'Back Squat – Schwer', exerciseName:'Back Squat', level:'advanced', equipment:['barbell'], setsCount:5, pctList:'75,80,85,90,90' },
+  { id:'clean-technik', name:'Clean – Technik', exerciseName:'Power Clean', level:'intermediate', equipment:['barbell'], setsCount:5, pctList:'65,70,70,75,75' },
+  { id:'bodyweight-basics', name:'Bodyweight Grundlagen', exerciseName:'Air Squat', level:'beginner', equipment:[], setsCount:5, pctList:'' }
+];
+const LOCATION_EQUIPMENT = {
+  'box': ['barbell','pullup-bar','kettlebell'],
+  'zuhause-geraete': ['pullup-bar','kettlebell'],
+  'zuhause-ohne': []
+};
+const WEEKDAY_LABELS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+const PLAN_DAY_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+const PLAN_LEVEL_RANK = {beginner:0, intermediate:1, advanced:2};
+const PLAN_STATUS_TO_LEVEL = {anfaenger:'beginner', fortgeschritten:'intermediate', profi:'advanced'};
+
+function generateTrainingPlan(status, location, frequency){
+  frequency = Math.min(7, Math.max(1, parseInt(frequency)||3));
+  const patterns = {
+    1:['wed'], 2:['mon','thu'], 3:['mon','wed','fri'], 4:['mon','tue','thu','fri'],
+    5:['mon','tue','wed','thu','fri'], 6:['mon','tue','wed','thu','fri','sat'],
+    7:['mon','tue','wed','thu','fri','sat','sun']
+  };
+  const selectedDays = patterns[frequency];
+  const allowedEquipment = LOCATION_EQUIPMENT[location] || [];
+  const targetLevel = PLAN_STATUS_TO_LEVEL[status] || 'beginner';
+  const fitsEquipment = (eq)=> (eq||[]).every(tag=>allowedEquipment.includes(tag));
+  const fitsLevel = (lvl)=> PLAN_LEVEL_RANK[lvl] <= PLAN_LEVEL_RANK[targetLevel];
+
+  let wodPool = CROSSFIT_WODS.filter(w=>fitsEquipment(w.equipment) && fitsLevel(w.level));
+  if(!wodPool.length) wodPool = CROSSFIT_WODS.filter(w=>fitsEquipment(w.equipment));
+  let progPool = STRENGTH_PROGRESSIONS.filter(p=>fitsEquipment(p.equipment) && fitsLevel(p.level));
+  if(!progPool.length) progPool = STRENGTH_PROGRESSIONS.filter(p=>fitsEquipment(p.equipment));
+
+  const days = {};
+  let wodCounter = 0, progCounter = 0;
+  selectedDays.forEach((dayKey, i)=>{
+    const useWod = i % 2 === 0;
+    if(useWod && wodPool.length){
+      days[dayKey] = { type:'wod', refId: wodPool[wodCounter % wodPool.length].id };
+      wodCounter++;
+    } else if(progPool.length){
+      days[dayKey] = { type:'strength', refId: progPool[progCounter % progPool.length].id };
+      progCounter++;
+    } else if(wodPool.length){
+      days[dayKey] = { type:'wod', refId: wodPool[wodCounter % wodPool.length].id };
+      wodCounter++;
+    }
+  });
+  return { status, location, frequency, days };
+}
+function todaysPlanKey(){
+  return PLAN_DAY_KEYS[(new Date().getDay()+6)%7];
+}
+const CARDIO_MACHINE_NAMES = ['Row','Air Bike','Bike','Ski Erg'];
+function guessExerciseType(name){
+  const n = name.toLowerCase();
+  if(CARDIO_MACHINE_NAMES.some(c=>n.includes(c.toLowerCase()))) return 'cardio';
+  if(EXERCISE_LIBRARY.some(b=>n.includes(b.name.toLowerCase()))) return 'bodyweight';
+  return 'weighted';
+}
+function findOrCreateExerciseId(name, type){
+  const existing = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
+  if(existing) return existing.id;
+  const ex = {id: slug(name), name, custom:true, type: type || guessExerciseType(name)};
+  state.exercises.push(ex);
+  saveKey('exercises', state.exercises);
+  return ex.id;
+}
+function buildLibraryMovement(m){
+  const exId = findOrCreateExerciseId(m.name);
+  const type = getExerciseType(state.exercises.find(e=>e.id===exId));
+  return {exerciseId: exId, reps: m.reps ? String(m.reps) : '', weight:'', unit: type==='cardio' ? 'kcal' : 'reps'};
+}
+function buildForTimeBuilderFromWod(wod){
+  return {
+    phase:'build',
+    movements: wod.movements.map(buildLibraryMovement),
+    rounds: String(wod.rounds||1),
+    repScheme: wod.repScheme||'',
+    timeCapMin:'', timeCapSec:'',
+    startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null
+  };
+}
+function buildAmrapBuilderFromWod(wod){
+  const totalSec = wod.durationSec||1200;
+  return {
+    phase:'build',
+    movements: wod.movements.map(buildLibraryMovement),
+    durationMin: String(Math.floor(totalSec/60)), durationSec: String(totalSec%60),
+    startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false
+  };
+}
+function buildTemplateFromProgression(prog){
+  if(!prog) return null;
+  return [{
+    exerciseId: findOrCreateExerciseId(prog.exerciseName),
+    timing: '',
+    setsCount: String(prog.setsCount||5),
+    pctList: prog.pctList || ''
+  }];
+}
+/* ---------- Exercise-Modal (ersetzt window.prompt, das in der Hosting-Umgebung blockiert ist) ---------- */
+function openExerciseModal(onSelect){
+  state.tmp.exerciseModal = { open:true, onSelect, mode:'library', baseId:'', variantId:'', variantDetail:'', customName:'', customType:'weighted' };
+  render();
+}
+function closeExerciseModal(){
+  state.tmp.exerciseModal = null;
+  render();
+}
+function setExerciseModalMode(mode){
+  state.tmp.exerciseModal.mode = mode;
+  render();
+}
+function updateExerciseModal(field, val){
+  const m = state.tmp.exerciseModal;
+  m[field] = val;
+  if(field==='baseId'){
+    const base = EXERCISE_LIBRARY.find(b=>b.id===val);
+    m.variantId = base ? base.variants[0].id : '';
+    m.variantDetail = '';
+    render();
+    return;
+  }
+  if(field==='variantId'){
+    m.variantDetail = '';
+    render();
+    return;
+  }
+  // customName / variantDetail: just update state + live preview text, no full re-render (keeps input focus)
+  updateExerciseModalPreview();
+}
+function updateExerciseModalPreview(){
+  const m = state.tmp.exerciseModal;
+  if(m.mode!=='library') return;
+  const base = EXERCISE_LIBRARY.find(b=>b.id===m.baseId);
+  if(!base) return;
+  const variant = base.variants.find(v=>v.id===m.variantId) || base.variants[0];
+  const el = document.getElementById('exerciseModalPreview');
+  if(el) el.textContent = composeVariantName(base, variant, m.variantDetail);
+}
+function confirmExerciseModal(){
+  const m = state.tmp.exerciseModal;
+  let name, type;
+  if(m.mode==='custom'){
+    name = (m.customName||'').trim();
+    if(!name){ showToast('Bitte einen Namen eingeben'); return; }
+    type = m.customType || 'weighted';
+  } else {
+    const base = EXERCISE_LIBRARY.find(b=>b.id===m.baseId);
+    if(!base){ showToast('Bitte eine Grundübung wählen'); return; }
+    const variant = base.variants.find(v=>v.id===m.variantId) || base.variants[0];
+    if(variant.detail && !String(m.variantDetail||'').trim()){
+      showToast(`Bitte ${variant.detail.label} angeben`);
+      return;
+    }
+    name = composeVariantName(base, variant, m.variantDetail);
+    type = variant.id==='weighted' ? 'weighted' : 'bodyweight';
+  }
+  const exId = findOrCreateExerciseId(name, type);
+  const cb = m.onSelect;
+  state.tmp.exerciseModal = null;
+  if(cb) cb(exId);
+  render();
+}
+function renderExerciseModalRoot(){
+  const m = state.tmp.exerciseModal;
+  if(!m || !m.open) return '';
+  const base = EXERCISE_LIBRARY.find(b=>b.id===m.baseId);
+  const variant = base ? (base.variants.find(v=>v.id===m.variantId) || base.variants[0]) : null;
+  const libraryBody = `
+    <div class="field"><label>Grundübung</label>
+      <select onchange="updateExerciseModal('baseId',this.value)">
+        <option value="">– wählen –</option>
+        ${EXERCISE_LIBRARY.map(b=>`<option value="${b.id}" ${b.id===m.baseId?'selected':''}>${b.name}</option>`).join('')}
+      </select>
+    </div>
+    ${base ? `
+    <div class="field"><label>Variante</label>
+      <select onchange="updateExerciseModal('variantId',this.value)">
+        ${base.variants.map(v=>`<option value="${v.id}" ${v.id===m.variantId?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>` : ''}
+    ${variant && variant.detail ? `
+    <div class="field"><label>${variant.detail.label}</label>
+      <input type="${variant.detail.numeric?'number':'text'}" value="${escapeHtml(m.variantDetail||'')}" oninput="updateExerciseModal('variantDetail',this.value)" placeholder="${variant.detail.placeholder||''}">
+    </div>` : ''}
+    ${base ? `<div class="note">Ergebnis: <strong id="exerciseModalPreview" style="color:var(--chalk-50)">${escapeHtml(composeVariantName(base, variant, m.variantDetail))}</strong></div>` : ''}
+  `;
+  const customBody = `
+    <div class="field"><label>Name der Übung</label>
+      <input type="text" value="${escapeHtml(m.customName||'')}" oninput="updateExerciseModal('customName',this.value)" placeholder="z.B. Devils Press">
+    </div>
+    <div class="field"><label>Typ</label>
+      <select onchange="updateExerciseModal('customType',this.value)">
+        <option value="weighted" ${m.customType==='weighted'?'selected':''}>Mit Gewicht (Hantel/Kettlebell/Dumbbell)</option>
+        <option value="bodyweight" ${m.customType==='bodyweight'?'selected':''}>Bodyweight / Gymnastics</option>
+        <option value="cardio" ${m.customType==='cardio'?'selected':''}>Cardio (Row/Bike/Laufen)</option>
+      </select>
+      <div class="note">Bestimmt, ob beim Loggen ein Gewichts- bzw. Kalorien-/Meter-Feld angeboten wird.</div>
+    </div>
+  `;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closeExerciseModal()">
+      <div class="modal-box">
+        <h2>Übung hinzufügen</h2>
+        <div class="row" style="margin-bottom:14px;">
+          <button class="btn ${m.mode==='library'?'btn-primary':'btn-ghost'}" onclick="setExerciseModalMode('library')">Bibliothek</button>
+          <button class="btn ${m.mode==='custom'?'btn-primary':'btn-ghost'}" onclick="setExerciseModalMode('custom')">Eigener Name</button>
+        </div>
+        ${m.mode==='library' ? libraryBody : customBody}
+        <div class="row" style="margin-top:14px;">
+          <button class="btn btn-ghost" onclick="closeExerciseModal()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="confirmExerciseModal()">Übernehmen</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function planEntryLabel(planDay){
+  if(!planDay) return null;
+  if(planDay.type==='wod') return (CROSSFIT_WODS.find(w=>w.id===planDay.refId)||{}).name;
+  return (STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId)||{}).name;
+}
+
+/* ---------- Migration (old separate Training/WOD format -> unified Workout format) ---------- */
+function migrateToWorkouts(oldTrainingLogs, oldWods){
+  const workouts = [];
+  (oldWods||[]).forEach(w=>{
+    const movements = (w.movements||[]).map(m=>{
+      let sets;
+      if(m.sets){
+        sets = m.sets.map(s=>({
+          reps: s.reps!==undefined ? s.reps : '',
+          weight: s.weight!==undefined ? s.weight : (s.calcWeight||''),
+          rmCheck: !!(s.percent),
+          pct: s.percent||null,
+          rmReps: s.percent ? 1 : null
+        }));
+      } else {
+        sets = [{reps:'', weight:m.calcWeight||'', rmCheck: !!m.percent, pct:m.percent||null, rmReps: m.percent?1:null}];
+      }
+      return { exerciseId:m.exerciseId, sets };
+    });
+    workouts.push({ id:w.id, date:w.date, name:w.name||'', note:w.note||'', movements });
+  });
+  (oldTrainingLogs||[]).forEach(e=>{
+    const sets = (e.sets||[{weight:e.weight,reps:e.reps}]).map(s=>({reps:s.reps, weight:s.weight, rmCheck:false, pct:null, rmReps:null}));
+    workouts.push({ id:e.id, date:e.date, name:'', note:'', movements:[{exerciseId:e.exerciseId, sets}] });
+  });
+  return workouts;
+}
+
+/* ---------- Init ---------- */
+async function init(){
+  const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan] = await Promise.all([
+    loadKey('profile', null),
+    loadKey('exercises', null),
+    loadKey('workouts', null),
+    loadKey('trainingLogs', []),
+    loadKey('wods', []),
+    loadKey('nutritionLogs', []),
+    loadKey('measurements', []),
+    loadKey('prEntries', []),
+    loadKey('timeRecords', []),
+    loadKey('trainingPlan', null)
+  ]);
+  state.profile = profile;
+  state.trainingPlan = trainingPlan;
+  if(exercises && exercises.length){
+    state.exercises = exercises;
+  } else {
+    state.exercises = cloneDefaultExercises();
+    await saveKey('exercises', state.exercises);
+  }
+  if(workoutsStored){
+    state.workouts = workoutsStored;
+  } else {
+    state.workouts = migrateToWorkouts(oldTrainingLogs, oldWods);
+    await saveKey('workouts', state.workouts);
+  }
+  state.nutritionLogs = nutritionLogs;
+  state.measurements = measurements;
+  state.prEntries = prEntries;
+  state.timeRecords = timeRecords;
+
+  document.getElementById('app').innerHTML = appShell();
+  render();
+}
+
+function bottomNavHtml(){
+  return [
+    navBtn('today','Today', iconHome()),
+    navBtn('workout','Workout', iconBarbell()),
+    navBtn('timer','Timer', iconStopwatch()),
+    navBtn('erfolge','Erfolge', iconTrophy()),
+    navBtn('progress','Fortschritt', iconChart()),
+    navBtn('profile','Profil', iconUser())
+  ].join('');
+}
+function appShell(){
+  return `
+    <header class="top">
+      <h1>IRON<span>LOG</span></h1>
+      <p>Dein CrossFit-Trainingstracker</p>
+    </header>
+    <main id="content"></main>
+    <nav class="bottom" id="bottomNav">${bottomNavHtml()}</nav>
+    <div id="modalRoot"></div>
+  `;
+}
+function navBtn(tab,label,icon){
+  return `<button class="${state.activeTab===tab?'active':''}" onclick="setTab('${tab}')">${icon}${label}</button>`;
+}
+function setTab(tab){
+  if(tab !== state.activeTab && tickHandle){
+    if(activeTicker==='timer') pauseActiveTimer();
+    else if(activeTicker==='live') pauseLiveRest();
+  }
+  state.activeTab = tab;
+  render();
+}
+function render(){
+  document.getElementById('bottomNav').innerHTML = bottomNavHtml();
+  const content = document.getElementById('content');
+  if(state.activeTab==='today') content.innerHTML = renderToday();
+  if(state.activeTab==='workout') content.innerHTML = renderWorkout();
+  if(state.activeTab==='timer') content.innerHTML = renderTimer();
+  if(state.activeTab==='erfolge') content.innerHTML = renderErfolge();
+  if(state.activeTab==='progress') content.innerHTML = renderProgress();
+  if(state.activeTab==='profile') content.innerHTML = renderProfile();
+
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot();
+
+  if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
+}
+
+/* ---------- Icons (minimal inline svg) ---------- */
+function iconBarbell(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="10" width="3" height="4"/><rect x="5" y="8" width="2.5" height="8"/><line x1="8" y1="12" x2="16" y2="12"/><rect x="16.5" y="8" width="2.5" height="8"/><rect x="20" y="10" width="3" height="4"/></svg>`;}
+function iconClipboard(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="8" y="1.5" width="8" height="3" rx="1"/><line x1="7.5" y1="9" x2="16.5" y2="9"/><line x1="7.5" y1="13" x2="16.5" y2="13"/><line x1="7.5" y1="17" x2="13" y2="17"/></svg>`;}
+function iconApple(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7c-3-3-8-1-8 4 0 5 4 9 7 9 1 0 1.5-.5 2-.5s1 .5 2 .5c2 0 6-3 6-7 0-3-2-5-4.5-5-1.2 0-2 .5-2.5.5"/><path d="M12 7c0-2 1-3 2.5-3.5"/></svg>`;}
+function iconChart(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="4" y1="20" x2="20" y2="20"/></svg>`;}
+function iconUser(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.5-4 4-6 7.5-6s6 2 7.5 6"/></svg>`;}
+function iconTrophy(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H4a3 3 0 0 0 3 5"/><path d="M17 5h3a3 3 0 0 1-3 5"/><line x1="12" y1="13" x2="12" y2="17"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="17" x2="12" y2="20"/></svg>`;}
+function iconHome(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></svg>`;}
+function iconStopwatch(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><line x1="12" y1="13" x2="12" y2="9"/><line x1="9" y1="3" x2="15" y2="3"/><line x1="12" y1="3" x2="12" y2="5"/></svg>`;}
+
+/* ---------- TODAY TAB ---------- */
+function weekDates(){
+  const today = new Date();
+  const dayIdx = (today.getDay()+6)%7; // 0=Mo
+  const monday = new Date(today); monday.setDate(today.getDate()-dayIdx);
+  const days = [];
+  for(let i=0;i<7;i++){
+    const d = new Date(monday); d.setDate(monday.getDate()+i);
+    days.push(d.toISOString().slice(0,10));
+  }
+  return days;
+}
+function renderToday(){
+  const dates = weekDates();
+  const trainedDates = new Set(state.workouts.map(w=>w.date));
+  const todayD = todayStr();
+
+  const weekStrip = dates.map((d,i)=>{
+    const trained = trainedDates.has(d);
+    const isToday = d===todayD;
+    const circleStyle = isToday
+      ? 'background:var(--chalk-yellow);color:var(--graphite-900);'
+      : trained
+        ? 'background:var(--success-green);color:var(--chalk-50);'
+        : 'border:1px solid var(--iron-700);color:var(--iron-500);';
+    return `
+      <div style="text-align:center;flex:1;">
+        <div class="stat-label">${WEEKDAY_LABELS[i]}</div>
+        <div style="width:34px;height:34px;margin:4px auto 0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:600;${circleStyle}">${d.slice(8,10)}</div>
+      </div>`;
+  }).join('');
+
+  const planDay = state.trainingPlan && state.trainingPlan.days ? state.trainingPlan.days[todaysPlanKey()] : null;
+  let planHtml;
+  if(planDay){
+    planHtml = `
+      <div class="suggestion-box">
+        <div class="stat-label">Heute geplant</div>
+        <div class="stat-num" style="font-size:22px;">${escapeHtml(planEntryLabel(planDay)||'Training')}</div>
+      </div>
+      <button class="btn btn-primary" onclick="startPlannedWorkout()">Training starten</button>
+    `;
+  } else if(state.trainingPlan){
+    planHtml = `
+      <div class="note" style="text-align:center;">Heute ist laut Plan kein Training vorgesehen.</div>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="setTab('workout')">Trotzdem trainieren</button>
+    `;
+  } else {
+    planHtml = `
+      <div class="empty-state">Noch kein Trainingsplan erstellt.</div>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="setTab('profile')">Plan erstellen</button>
+    `;
+  }
+
+  const lastWorkout = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
+
+  return `
+    <div class="card">
+      <h2 class="small">Diese Woche</h2>
+      <div class="row" style="gap:4px;">${weekStrip}</div>
+    </div>
+    <div class="card">
+      <h2>Heute</h2>
+      ${planHtml}
+    </div>
+    <div class="card">
+      <h2 class="small">Letztes Training</h2>
+      ${lastWorkout
+        ? `<div class="history-item"><span class="date">${fmtDate(lastWorkout.date)}</span><span class="val">${escapeHtml(lastWorkout.name)||'Workout'}</span></div>`
+        : `<div class="note">Noch kein Training erfasst.</div>`}
+      <button class="btn btn-ghost" style="margin-top:12px;" onclick="setTab('workout')">Neues Workout erfassen</button>
+    </div>
+  `;
+}
+function startPlannedWorkout(){
+  const planDay = state.trainingPlan.days[todaysPlanKey()];
+  if(!planDay){ setTab('workout'); return; }
+  if(planDay.type==='wod'){
+    const wod = CROSSFIT_WODS.find(w=>w.id===planDay.refId);
+    if(wod){
+      state.tmp.wodName = wod.name;
+      if(wod.format==='amrap'){
+        state.tmp.wodFormat = 'amrap';
+        state.tmp.amrapBuilder = buildAmrapBuilderFromWod(wod);
+      } else {
+        state.tmp.wodFormat = 'for-time';
+        state.tmp.forTimeBuilder = buildForTimeBuilderFromWod(wod);
+      }
+    }
+  } else {
+    const template = buildTemplateFromProgression(STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId));
+    if(template){
+      state.tmp.wodFormat = 'strength';
+      state.tmp.wodTemplate = template;
+      state.tmp.wodName = planEntryLabel(planDay) || '';
+      state.tmp.wodPhase = 'template';
+    }
+  }
+  setTab('workout');
+}
+
+/* ---------- WORKOUT TAB (merged Training + WOD, two-phase: template -> generated rows) ---------- */
+function exerciseLogs(exId){
+  const out = [];
+  state.workouts.forEach(w=>{
+    (w.movements||[]).forEach(m=>{
+      if(m.exerciseId===exId){
+        const sets = m.sets.filter(s=>s.weight && s.reps);
+        if(sets.length) out.push({ date: w.date, sets });
+      }
+    });
+  });
+  return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function topSet(entry){
+  return entry.sets.reduce((best,s)=> estimate1RM(s.weight,s.reps) > estimate1RM(best.weight,best.reps) ? s : best, entry.sets[0]);
+}
+function sessionE1RM(entry){
+  return entry.sets.reduce((max,s)=> Math.max(max, estimate1RM(s.weight,s.reps)), 0);
+}
+function computedBest(exId){
+  const logs = exerciseLogs(exId);
+  return logs.length ? logs.reduce((max,e)=>Math.max(max, sessionE1RM(e)), 0) : null;
+}
+function prEntriesFor(exId){
+  return state.prEntries.filter(p=>p.exerciseId===exId).sort((a,b)=> b.value-a.value || b.date.localeCompare(a.date));
+}
+function manualBest(exId){
+  const list = prEntriesFor(exId);
+  return list.length ? list[0].value : null;
+}
+function bestE1RM(exId){
+  const c = computedBest(exId), m = manualBest(exId);
+  if(c==null && m==null) return null;
+  return Math.max(c||0, m||0);
+}
+function parsePctList(str){
+  return (str||'').split(/[,\/\s]+/).map(s=>parseFloat(s)).filter(n=>!isNaN(n));
+}
+function pctForIndex(arr, i){
+  if(!arr.length) return null;
+  return arr[i] !== undefined ? arr[i] : arr[arr.length-1];
+}
+function blankRowSet(){ return {reps:'', weight:'', pct:null, autoFilled:false}; }
+function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:''}; }
+function ensureWodTemplate(){
+  if(!state.tmp.wodTemplate){
+    state.tmp.wodTemplate = [blankTemplateMove()];
+    state.tmp.wodPhase = 'template';
+  }
+}
+function isTemplateEmpty(){
+  return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.timing && !t.setsCount && !t.pctList);
+}
+function findWorkoutByName(name){
+  const n = (name||'').trim().toLowerCase();
+  if(!n) return null;
+  const matches = state.workouts.filter(w=>(w.name||'').trim().toLowerCase()===n).sort((a,b)=>a.date.localeCompare(b.date));
+  return matches.length ? matches[matches.length-1] : null;
+}
+
+function isWodInProgress(){
+  if(state.tmp.wodPhase==='rows' || state.tmp.wodPhase==='live') return true;
+  const b = state.tmp.forTimeBuilder;
+  if(b && b.phase!=='build') return true;
+  const a = state.tmp.amrapBuilder;
+  if(a && a.phase!=='build') return true;
+  const f = state.tmp.forLoadBuilder;
+  if(f && f.phase!=='build') return true;
+  return false;
+}
+function renderFormatSelector(){
+  const formats = [
+    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'},
+    {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
+    {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.'},
+    {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
+    {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'}
+  ];
+  const current = formats.find(f=>f.id===state.tmp.wodFormat) || formats[0];
+  return `
+    <div class="card">
+      <h2>Workout-Format</h2>
+      <div class="row" style="flex-wrap:wrap;gap:8px;">
+        ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
+      </div>
+      <div class="note" style="margin-top:8px;">${current.hint}</div>
+    </div>
+  `;
+}
+function setWodFormat(fmt){
+  if(state.tmp.wodFormat === fmt) return;
+  state.tmp.wodFormat = fmt;
+  state.tmp.wodTemplate = null;
+  state.tmp.wodMoves = null;
+  state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null;
+  state.tmp.amrapBuilder = null;
+  state.tmp.forLoadBuilder = null;
+  render();
+}
+function renderWorkoutHistory(){
+  const history = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date));
+  const html = history.length ? history.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Noch keine Workouts gespeichert.</div>`;
+  return `
+    <div class="card">
+      <h2 class="small">Verlauf</h2>
+      ${html}
+    </div>
+  `;
+}
+function formatMovementLine(m){
+  const ex = state.exercises.find(e=>e.id===m.exerciseId);
+  const name = ex ? ex.name : '—';
+  const type = getExerciseType(ex);
+  if(type==='cardio'){
+    if(m.unit==='m') return `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}`;
+    return `${m.reps||0} kcal ${name}`;
+  }
+  let line = `${m.reps||0}x ${name}`;
+  if(type==='weighted' && m.weight){
+    line += ` - ${fmtWeight(m.weight)}`;
+  }
+  return line;
+}
+function renderWorkoutHistoryEntry(w){
+  const format = w.format || 'strength';
+  let body;
+  if(format==='for-time'){
+    const ft = w.forTime || {};
+    const timeLabel = ft.elapsedSec!=null ? fmtClock(ft.elapsedSec*1000,false) : '—';
+    body = `<div class="moves">
+      <div><span>Zeit</span><span>${timeLabel}${ft.capped?' (Time Cap)':''}</span></div>
+      ${(ft.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+      ${ft.repScheme ? `<div class="note">Schema: ${escapeHtml(ft.repScheme)}</div>` : (ft.rounds>1 ? `<div class="note">${ft.rounds} Runden</div>` : '')}
+    </div>`;
+  } else if(format==='amrap'){
+    const am = w.amrap || {};
+    body = `<div class="moves">
+      <div><span>Ergebnis</span><span>${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}</span></div>
+      ${(am.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+      <div class="note">${fmtClock((am.durationSec||0)*1000,false)} Zeitlimit</div>
+    </div>`;
+  } else if(format==='for-load'){
+    const fl = w.forLoad || {};
+    const ex = state.exercises.find(e=>e.id===fl.exerciseId);
+    body = `<div class="moves">
+      <div><span>${ex?ex.name:'—'}</span><span>${fmtWeight(fl.achievedWeight)}</span></div>
+      <div><span>Ziel-Wdh.</span><span>${fl.targetReps||'—'}</span></div>
+    </div>`;
+  } else {
+    body = `<div class="moves">
+      ${w.movements.map(m=>{
+        const ex = state.exercises.find(e=>e.id===m.exerciseId);
+        const prefix = m.timing ? `[${escapeHtml(m.timing)}] ` : '';
+        return m.sets.map(s=>`<div><span>${prefix}${ex?ex.name:'—'}: ${s.reps}×${s.weight}kg${s.pct? ' ('+s.pct+'% 1RM)':''}</span></div>`).join('');
+      }).join('')}
+    </div>`;
+  }
+  return `
+    <div class="wod-card">
+      <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
+      ${body}
+      ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderWorkout(){
+  if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
+  const historyHtml = renderWorkoutHistory();
+  const formatSelector = isWodInProgress() ? '' : renderFormatSelector();
+
+  if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
+  if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
+  if(state.tmp.wodFormat==='for-load') return formatSelector + renderForLoadFlow(historyHtml);
+
+  ensureWodTemplate();
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const headerFields = buildHeaderFields(uniqueNames);
+
+  if(state.tmp.wodPhase==='live') return renderWodLivePhase();
+  return formatSelector + (state.tmp.wodPhase==='rows'
+    ? renderWodRowsPhase(headerFields, historyHtml)
+    : renderWodTemplatePhase(headerFields, historyHtml));
+}
+
+function buildHeaderFields(uniqueNames){
+  const disabledAttr = isWodInProgress() ? 'disabled' : '';
+  return `
+    <div class="row">
+      <div class="field"><label>Datum</label><input type="date" id="wodDate" value="${state.tmp.wodDate||todayStr()}" ${disabledAttr} onchange="state.tmp.wodDate=this.value"></div>
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="wodName" list="wodNameList" value="${escapeHtml(state.tmp.wodName||'')}" ${disabledAttr} onchange="onWodNameChange(this.value)" placeholder="z.B. Fran">
+        <datalist id="wodNameList">${uniqueNames.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+      </div>
+    </div>
+  `;
+}
+
+function getEmomIntervalSec(){
+  return (parseInt(state.tmp.emomMin)||0)*60 + (parseInt(state.tmp.emomSec)||0);
+}
+function renderWodTemplatePhase(headerFields, historyHtml){
+  const isEmom = state.tmp.wodFormat==='emom';
+  const refNote = state.tmp.wodNameMatch
+    ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
+    : '';
+
+  const emomFields = isEmom ? `
+    <div class="row">
+      <div class="field"><label>Intervall Min.</label><input type="number" step="1" min="0" value="${state.tmp.emomMin}" onchange="state.tmp.emomMin=this.value"></div>
+      <div class="field"><label>Intervall Sek.</label><input type="number" step="1" min="0" max="59" value="${state.tmp.emomSec}" onchange="state.tmp.emomSec=this.value"></div>
+      <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value"></div>
+    </div>
+  ` : '';
+
+  const moveBlocks = state.tmp.wodTemplate.map((t,mi)=>`
+    <div class="wod-move-row" data-idx="${mi}">
+      <div class="top">
+        <select onchange="updateTemplateField(${mi},'exerciseId',this.value)">
+          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===t.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+        </select>
+        <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateTemplateField(${mi},'exerciseId',exId))">➕</button>
+        ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
+      </div>
+      ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe (optional)</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
+      <div class="row">
+        <div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':'(optional)'}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>
+        <div class="field" style="margin-bottom:0;"><label>% vom 1RM (optional)</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75 oder 75,80,85"></div>
+      </div>
+    </div>
+  `).join('');
+
+  return `
+    <div class="card">
+      <h2>Neues Workout</h2>
+      ${headerFields}
+      ${emomFields}
+      ${refNote}
+      ${moveBlocks}
+      <button class="add-move-btn" onclick="addTemplateMove()">+ Bewegung hinzufügen</button>
+      <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+
+function renderWodRowsPhase(headerFields, historyHtml){
+  let refBlock = '';
+  if(state.tmp.wodNameMatch){
+    refBlock += `<div class="note" style="margin-bottom:10px;">Letztes Mal <strong style="color:var(--chalk-50)">"${escapeHtml(state.tmp.wodNameMatch.name)}"</strong> am ${fmtDate(state.tmp.wodNameMatch.date)} gemacht.</div>`;
+    refBlock += `<div class="stat-label" style="margin-bottom:6px;">Wie fühlst du dich heute im Vergleich zum letzten Mal?</div>`;
+    refBlock += `<div class="feel-grid">`;
+    Object.keys(FEELING_LABELS).forEach(f=>{
+      refBlock += `<button class="feel-btn ${state.tmp.wodFeeling===f?'active':''}" onclick="pickWodFeeling('${f}')">${FEELING_LABELS[f]}</button>`;
+    });
+    refBlock += `</div>`;
+  }
+
+  const moveBlocks = state.tmp.wodMoves.map((mv,mi)=>{
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    const prescriptionBits = [];
+    if(mv.timing) prescriptionBits.push(mv.timing);
+    if(mv.setsCountRaw) prescriptionBits.push(mv.setsCountRaw+' Sätze');
+    if(mv.pctList) prescriptionBits.push(mv.pctList+'% 1RM');
+    const known1rm = bestE1RM(mv.exerciseId);
+
+    const setsHtml = mv.sets.map((s,si)=>`
+      <div class="set-block">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span class="stat-label" style="margin:0;">Satz ${si+1}${s.pct?' — '+s.pct+'% 1RM':''}</span>
+          ${mv.sets.length>1 ? `<button class="remove-row" onclick="removeWodSet(${mi},${si})">✕</button>` : ''}
+        </div>
+        <div class="row">
+          <div class="field" style="margin-bottom:0;"><label>Wiederholungen</label><input type="number" step="1" value="${s.reps}" oninput="updateSetField(${mi},${si},'reps',this.value)" placeholder="z.B. 5"></div>
+          <div class="field" style="margin-bottom:0;"><label>kg</label><input type="number" step="0.5" value="${s.weight}" oninput="updateSetField(${mi},${si},'weight',this.value)" placeholder="z.B. 48"></div>
+        </div>
+      </div>`).join('');
+
+    return `
+    <div class="wod-move-row" data-idx="${mi}">
+      <div class="wname" style="font-size:16px;margin-bottom:2px;">${ex?ex.name:'—'}</div>
+      ${prescriptionBits.length ? `<div class="note" style="margin-bottom:8px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
+      ${known1rm ? `<div class="note" style="margin-bottom:10px;">bisher bestes 1RM: <strong style="color:var(--chalk-50)">${Math.round(known1rm)}kg</strong></div>` : ''}
+      ${setsHtml}
+      <button class="add-move-btn" onclick="addWodSet(${mi})">+ Satz hinzufügen</button>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2>Neues Workout</h2>
+      ${headerFields}
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="backToTemplate()">← Vorlage bearbeiten</button>
+      ${refBlock}
+      ${moveBlocks}
+      <div class="field"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="startLiveWorkout()">▶ Geführt starten</button>
+      <button class="btn btn-primary" onclick="saveWod()">Workout speichern</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+
+/* ---------- LIVE-MODUS (geführte Trainingsdurchführung) ---------- */
+function startLiveWorkout(){
+  const flat = [];
+  state.tmp.wodMoves.forEach((mv,mi)=>{
+    mv.sets.forEach((s,si)=>{ flat.push({mi,si}); });
+  });
+  if(!flat.length){ showToast('Keine Sätze vorhanden'); return; }
+  state.tmp.live = {
+    startedAt: Date.now(),
+    flat,
+    pos: 0,
+    resting: false,
+    restRunning: false,
+    restRemaining: 0,
+    restTotal: 0,
+    restStartedAt: null,
+    finished: false
+  };
+  state.tmp.wodPhase = 'live';
+  render();
+}
+function renderWodLivePhase(){
+  const live = state.tmp.live;
+  if(live.finished) return renderWodSummaryPhase();
+  if(live.resting) return renderRestScreen(live);
+
+  const {mi,si} = live.flat[live.pos];
+  const mv = state.tmp.wodMoves[mi];
+  const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+  const s = mv.sets[si];
+  const prescriptionBits = [];
+  if(mv.timing) prescriptionBits.push(mv.timing);
+  if(s.pct) prescriptionBits.push(s.pct+'% 1RM');
+
+  return `
+    <div class="card">
+      <div class="stat-label">Satz ${live.pos+1} / ${live.flat.length}</div>
+      <h2 style="margin-top:4px;">${ex?ex.name:'—'}</h2>
+      ${prescriptionBits.length ? `<div class="note" style="margin-bottom:14px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
+      <div class="row">
+        <div class="field"><label>Wiederholungen</label><input type="number" step="1" id="liveReps" value="${s.reps}" placeholder="z.B. 5"></div>
+        <div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight" value="${s.weight}" placeholder="z.B. 48"></div>
+      </div>
+      <button class="btn btn-primary" onclick="completeLiveSet()">✓ Satz erledigt</button>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
+    </div>
+  `;
+}
+function completeLiveSet(){
+  const live = state.tmp.live;
+  const {mi,si} = live.flat[live.pos];
+  state.tmp.wodMoves[mi].sets[si].reps = document.getElementById('liveReps').value;
+  state.tmp.wodMoves[mi].sets[si].weight = document.getElementById('liveWeight').value;
+  state.tmp.wodMoves[mi].sets[si].autoFilled = false;
+
+  if(live.pos >= live.flat.length-1){
+    live.finished = true;
+    render();
+    return;
+  }
+  live.pos += 1;
+  const restSec = (state.tmp.wodFormat==='emom' && getEmomIntervalSec()>0) ? getEmomIntervalSec() : 90;
+  beginRest(restSec);
+}
+function beginRest(seconds){
+  const live = state.tmp.live;
+  live.resting = true;
+  live.restTotal = seconds*1000;
+  live.restRemaining = live.restTotal;
+  live.restStartedAt = Date.now();
+  live.restRunning = true;
+  startTicking('live', tickRest);
+  render();
+}
+function tickRest(){
+  const live = state.tmp.live;
+  if(!live || !live.resting){ stopTicking(); return; }
+  const remaining = live.restRemaining - (Date.now()-live.restStartedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(remaining<=0){
+    live.restRemaining = 0;
+    live.restRunning = false;
+    stopTicking();
+    beep();
+    finishRest();
+    return;
+  }
+  if(display) display.textContent = fmtClock(remaining,false);
+}
+function finishRest(){
+  state.tmp.live.resting = false;
+  render();
+}
+function setRestPreset(seconds){ beginRest(seconds); }
+function pauseRest(){
+  const live = state.tmp.live;
+  if(live.restRunning){ live.restRemaining = Math.max(0, live.restRemaining - (Date.now()-live.restStartedAt)); }
+  live.restRunning = false;
+  stopTicking();
+  render();
+}
+function resumeRest(){
+  const live = state.tmp.live;
+  live.restStartedAt = Date.now();
+  live.restRunning = true;
+  startTicking('live', tickRest);
+  render();
+}
+function pauseLiveRest(){
+  const live = state.tmp.live;
+  if(live && live.resting && live.restRunning){ pauseRest(); return; }
+  const ft = state.tmp.forTimeBuilder;
+  if(ft && ft.phase==='running' && ft.running){ pauseForTimeClock(); return; }
+  const am = state.tmp.amrapBuilder;
+  if(am && am.phase==='running' && am.running){ pauseAmrapClock(); return; }
+  const fl = state.tmp.forLoadBuilder;
+  if(fl && fl.phase==='running' && fl.running){ pauseForLoadClock(); return; }
+}
+function skipRest(){
+  stopTicking();
+  finishRest();
+}
+function renderRestScreen(live){
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">Pause</div>
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(live.restRemaining,false)}</div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn btn-ghost" onclick="setRestPreset(60)">1 Min</button>
+        <button class="btn btn-ghost" onclick="setRestPreset(120)">2 Min</button>
+        <button class="btn btn-ghost" onclick="setRestPreset(180)">3 Min</button>
+      </div>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="${live.restRunning?'pauseRest()':'resumeRest()'}">${live.restRunning?'Pause':'Weiter'}</button>
+        <button class="btn btn-primary" onclick="skipRest()">Weiter zum nächsten Satz</button>
+      </div>
+    </div>
+  `;
+}
+function exitLiveWorkout(){
+  stopTicking();
+  state.tmp.wodPhase = 'rows';
+  state.tmp.live = null;
+  render();
+}
+function renderWodSummaryPhase(){
+  const live = state.tmp.live;
+  const durationMs = Date.now() - live.startedAt;
+  let totalWeight = 0, totalSets = 0;
+  state.tmp.wodMoves.forEach(mv=>{
+    mv.sets.forEach(s=>{
+      if(s.reps && s.weight){ totalWeight += parseFloat(s.weight)*parseInt(s.reps); totalSets++; }
+    });
+  });
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>Workout abgeschlossen 🏁</h2>
+      <div class="row" style="margin:16px 0;">
+        <div><div class="stat-num">${fmtClock(durationMs,false)}</div><div class="stat-label">Dauer</div></div>
+        <div><div class="stat-num">${Math.round(totalWeight)}</div><div class="stat-label">kg gesamt</div></div>
+        <div><div class="stat-num">${totalSets}</div><div class="stat-label">Sätze</div></div>
+      </div>
+      <div class="field" style="text-align:left;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <button class="btn btn-primary" onclick="finishAndSaveWorkout()">Workout speichern</button>
+    </div>
+  `;
+}
+function finishAndSaveWorkout(){
+  stopTicking();
+  state.tmp.live = null;
+  saveWod();
+}
+
+/* ---------- FOR TIME ---------- */
+function blankForTimeMove(){
+  const ex = state.exercises[0];
+  return {exerciseId: ex?.id, reps:'', weight:'', unit: getExerciseType(ex)==='cardio' ? 'kcal' : 'reps'};
+}
+function ensureForTimeBuilder(){
+  if(!state.tmp.forTimeBuilder){
+    state.tmp.forTimeBuilder = { phase:'build', movements:[blankForTimeMove()], rounds:'1', repScheme:'', timeCapMin:'', timeCapSec:'', startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null };
+  }
+}
+function renderForTimeFlow(historyHtml){
+  ensureForTimeBuilder();
+  const b = state.tmp.forTimeBuilder;
+  if(b.phase==='summary') return renderForTimeSummary(b);
+  if(b.phase==='running') return renderForTimeRunning(b);
+
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const headerFields = buildHeaderFields(uniqueNames);
+  const moveBlocks = b.movements.map((m,mi)=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio';
+    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
+    const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
+    const qtyHandler = isCardio ? `updateForTimeMoveQty(${mi},this.value)` : `updateForTimeMove(${mi},'reps',this.value)`;
+    const unitToggle = isCardio ? `
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'kcal')">Kalorien</button>
+        <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+      </div>` : '';
+    const weightField = type==='weighted' ? `
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    return `
+    <div class="wod-move-row" data-idx="${mi}">
+      <div class="top">
+        <select onchange="updateForTimeMove(${mi},'exerciseId',this.value)">
+          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+        </select>
+        <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForTimeMove(${mi},'exerciseId',exId))">➕</button>
+        ${b.movements.length>1 ? `<button class="remove-row" onclick="removeForTimeMove(${mi})">✕</button>` : ''}
+      </div>
+      ${unitToggle}
+      <div class="row">
+        <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 30"></div>
+        ${weightField}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2>Neues For Time</h2>
+      ${headerFields}
+      ${moveBlocks}
+      <button class="add-move-btn" onclick="addForTimeMove()">+ Bewegung hinzufügen</button>
+      <div class="row">
+        <div class="field"><label>Runden (falls kein Rep-Schema)</label><input type="number" step="1" min="1" value="${b.rounds}" oninput="updateForTimeField('rounds',this.value)"></div>
+        <div class="field"><label>Rep-Schema (optional)</label><input type="text" value="${escapeHtml(b.repScheme)}" oninput="updateForTimeField('repScheme',this.value)" placeholder="z.B. 21-15-9"></div>
+      </div>
+      <div class="note" style="margin-bottom:14px;">Rep-Schema überschreibt bei Angabe die Wiederholungen oben — z.B. "21-15-9" erzeugt 3 Runden mit diesen Werten für jede Übung.</div>
+      <div class="row">
+        <div class="field"><label>Time Cap Min. (optional)</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForTimeField('timeCapMin',this.value)"></div>
+        <div class="field"><label>Time Cap Sek. (optional)</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForTimeField('timeCapSec',this.value)"></div>
+      </div>
+      <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+function updateForTimeMove(mi, field, val){
+  const b = state.tmp.forTimeBuilder;
+  b.movements[mi][field] = val;
+  if(field==='exerciseId'){
+    const ex = state.exercises.find(e=>e.id===val);
+    const type = getExerciseType(ex);
+    b.movements[mi].unit = type==='cardio' ? 'kcal' : 'reps';
+    if(type!=='weighted') b.movements[mi].weight = '';
+    render();
+  }
+}
+function updateForTimeMoveQty(mi, displayVal){
+  const b = state.tmp.forTimeBuilder;
+  const m = b.movements[mi];
+  m.reps = (m.unit==='m' && displayVal!=='') ? String(fromDisplayDistance(displayVal)) : displayVal;
+}
+function updateForTimeMoveWeight(mi, displayVal){
+  const b = state.tmp.forTimeBuilder;
+  b.movements[mi].weight = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
+}
+function setForTimeMoveUnit(mi, unit){
+  state.tmp.forTimeBuilder.movements[mi].unit = unit;
+  render();
+}
+function addForTimeMove(){
+  state.tmp.forTimeBuilder.movements.push(blankForTimeMove());
+  render();
+}
+function removeForTimeMove(mi){
+  const b = state.tmp.forTimeBuilder;
+  b.movements.splice(mi,1);
+  if(!b.movements.length) b.movements.push(blankForTimeMove());
+  render();
+}
+function updateForTimeField(field, val){
+  state.tmp.forTimeBuilder[field] = val;
+}
+function startForTimeWod(){
+  const b = state.tmp.forTimeBuilder;
+  state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
+  state.tmp.wodName = document.getElementById('wodName').value.trim();
+  if(!b.movements.length){ showToast('Bitte mindestens eine Übung hinzufügen'); return; }
+  b.timeCapMs = (parseInt(b.timeCapMin)||0)*60000 + (parseInt(b.timeCapSec)||0)*1000;
+  b.capped = false;
+  b.elapsedMs = 0;
+  b.startedAt = Date.now();
+  b.running = true;
+  b.phase = 'running';
+  startTicking('live', tickForTime);
+  render();
+}
+function tickForTime(){
+  const b = state.tmp.forTimeBuilder;
+  if(!b || b.phase!=='running'){ stopTicking(); return; }
+  const elapsed = b.elapsedMs + (Date.now()-b.startedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(b.timeCapMs>0 && elapsed>=b.timeCapMs){
+    b.elapsedMs = b.timeCapMs;
+    b.running = false;
+    b.capped = true;
+    stopTicking();
+    beep();
+    finishForTime();
+    return;
+  }
+  if(display) display.textContent = fmtClock(elapsed,false);
+}
+function finishForTime(){
+  const b = state.tmp.forTimeBuilder;
+  if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
+  stopTicking();
+  b.finalElapsedSec = Math.round(b.elapsedMs/1000);
+  b.phase = 'summary';
+  render();
+}
+function pauseForTimeClock(){
+  const b = state.tmp.forTimeBuilder;
+  if(b && b.running){
+    b.elapsedMs += Date.now()-b.startedAt;
+    b.running = false;
+    stopTicking();
+  }
+  render();
+}
+function resumeForTimeClock(){
+  const b = state.tmp.forTimeBuilder;
+  b.startedAt = Date.now();
+  b.running = true;
+  startTicking('live', tickForTime);
+  render();
+}
+function renderForTimeRunning(b){
+  const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">${b.timeCapMs>0?'Verbleibend (Time Cap)':'Zeit läuft'}</div>
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
+      <div class="moves" style="text-align:left;margin-bottom:14px;">
+        ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+        ${b.repScheme ? `<div class="note">Schema: ${escapeHtml(b.repScheme)}</div>` : (parseInt(b.rounds)>1 ? `<div class="note">${b.rounds} Runden</div>` : '')}
+      </div>
+      <div class="row">
+        <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForTimeClock()':'resumeForTimeClock()'}">${b.running?'Pause':'Weiter'}</button>
+        <button class="btn btn-primary" onclick="finishForTime()">Fertig</button>
+      </div>
+    </div>
+  `;
+}
+function renderForTimeSummary(b){
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>Workout abgeschlossen 🏁</h2>
+      <div class="stat-num" style="font-size:40px;margin:14px 0;">${fmtClock((b.finalElapsedSec||0)*1000,false)}</div>
+      ${b.capped ? `<div class="chip">Time Cap erreicht</div>` : ''}
+      <div class="field" style="text-align:left;margin-top:14px;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <label class="checkbox-row"><input type="checkbox" id="forTimeSaveAsBest" checked> Als Bestzeit in Erfolge speichern</label>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="saveForTimeWorkout()">Workout speichern</button>
+    </div>
+  `;
+}
+async function saveForTimeWorkout(){
+  const b = state.tmp.forTimeBuilder;
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const note = state.tmp.wodNote || '';
+  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const workout = {
+    id: uid(), date, name, note, format:'for-time', movements: [],
+    forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped }
+  };
+  state.workouts.push(workout);
+  await saveKey('workouts', state.workouts);
+  if(name && document.getElementById('forTimeSaveAsBest')?.checked && b.finalElapsedSec!=null){
+    state.timeRecords.push({id:uid(), name, time: fmtClock(b.finalElapsedSec*1000,false), date, note: b.capped?'Time Cap':''});
+    await saveKey('timeRecords', state.timeRecords);
+  }
+  state.tmp.forTimeBuilder = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  showToast('Workout gespeichert 🏋️');
+  render();
+}
+
+/* ---------- AMRAP ---------- */
+function blankAmrapMove(){
+  const ex = state.exercises[0];
+  return {exerciseId: ex?.id, reps:'', weight:'', unit: getExerciseType(ex)==='cardio' ? 'kcal' : 'reps'};
+}
+function ensureAmrapBuilder(){
+  if(!state.tmp.amrapBuilder){
+    state.tmp.amrapBuilder = { phase:'build', movements:[blankAmrapMove()], durationMin:'20', durationSec:'0', startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false };
+  }
+}
+function renderAmrapFlow(historyHtml){
+  ensureAmrapBuilder();
+  const b = state.tmp.amrapBuilder;
+  if(b.phase==='summary') return renderAmrapSummary(b);
+  if(b.phase==='running') return renderAmrapRunning(b);
+
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const headerFields = buildHeaderFields(uniqueNames);
+  const moveBlocks = b.movements.map((m,mi)=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio';
+    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen pro Runde';
+    const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
+    const qtyHandler = isCardio ? `updateAmrapMoveQty(${mi},this.value)` : `updateAmrapMove(${mi},'reps',this.value)`;
+    const unitToggle = isCardio ? `
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'kcal')">Kalorien</button>
+        <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+      </div>` : '';
+    const weightField = type==='weighted' ? `
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    return `
+    <div class="wod-move-row" data-idx="${mi}">
+      <div class="top">
+        <select onchange="updateAmrapMove(${mi},'exerciseId',this.value)">
+          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+        </select>
+        <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateAmrapMove(${mi},'exerciseId',exId))">➕</button>
+        ${b.movements.length>1 ? `<button class="remove-row" onclick="removeAmrapMove(${mi})">✕</button>` : ''}
+      </div>
+      ${unitToggle}
+      <div class="row">
+        <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 10"></div>
+        ${weightField}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2>Neues AMRAP</h2>
+      ${headerFields}
+      ${moveBlocks}
+      <button class="add-move-btn" onclick="addAmrapMove()">+ Bewegung hinzufügen</button>
+      <div class="row">
+        <div class="field"><label>Dauer Min.</label><input type="number" step="1" min="0" value="${b.durationMin}" oninput="updateAmrapField('durationMin',this.value)"></div>
+        <div class="field"><label>Dauer Sek.</label><input type="number" step="1" min="0" max="59" value="${b.durationSec}" oninput="updateAmrapField('durationSec',this.value)"></div>
+      </div>
+      <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+function updateAmrapMove(mi, field, val){
+  const b = state.tmp.amrapBuilder;
+  b.movements[mi][field] = val;
+  if(field==='exerciseId'){
+    const ex = state.exercises.find(e=>e.id===val);
+    const type = getExerciseType(ex);
+    b.movements[mi].unit = type==='cardio' ? 'kcal' : 'reps';
+    if(type!=='weighted') b.movements[mi].weight = '';
+    render();
+  }
+}
+function updateAmrapMoveQty(mi, displayVal){
+  const b = state.tmp.amrapBuilder;
+  const m = b.movements[mi];
+  m.reps = (m.unit==='m' && displayVal!=='') ? String(fromDisplayDistance(displayVal)) : displayVal;
+}
+function updateAmrapMoveWeight(mi, displayVal){
+  const b = state.tmp.amrapBuilder;
+  b.movements[mi].weight = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
+}
+function setAmrapMoveUnit(mi, unit){
+  state.tmp.amrapBuilder.movements[mi].unit = unit;
+  render();
+}
+function addAmrapMove(){
+  state.tmp.amrapBuilder.movements.push(blankAmrapMove());
+  render();
+}
+function removeAmrapMove(mi){
+  const b = state.tmp.amrapBuilder;
+  b.movements.splice(mi,1);
+  if(!b.movements.length) b.movements.push(blankAmrapMove());
+  render();
+}
+function updateAmrapField(field, val){
+  state.tmp.amrapBuilder[field] = val;
+}
+function startAmrapWod(){
+  const b = state.tmp.amrapBuilder;
+  state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
+  state.tmp.wodName = document.getElementById('wodName').value.trim();
+  if(!b.movements.length){ showToast('Bitte mindestens eine Übung hinzufügen'); return; }
+  b.durationMs = (parseInt(b.durationMin)||0)*60000 + (parseInt(b.durationSec)||0)*1000;
+  if(b.durationMs<=0){ showToast('Bitte eine Dauer eingeben'); return; }
+  b.remainingMs = b.durationMs;
+  b.roundsCompleted = 0;
+  b.timedOut = false;
+  b.startedAt = Date.now();
+  b.running = true;
+  b.phase = 'running';
+  startTicking('live', tickAmrap);
+  render();
+}
+function tickAmrap(){
+  const b = state.tmp.amrapBuilder;
+  if(!b || b.phase!=='running'){ stopTicking(); return; }
+  const remaining = b.remainingMs - (Date.now()-b.startedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(remaining<=0){
+    b.remainingMs = 0;
+    b.running = false;
+    b.timedOut = true;
+    stopTicking();
+    beep();
+    render();
+    return;
+  }
+  if(display) display.textContent = fmtClock(remaining,false);
+}
+function incrementAmrapRound(delta){
+  const b = state.tmp.amrapBuilder;
+  b.roundsCompleted = Math.max(0, b.roundsCompleted + delta);
+  render();
+}
+function finishAmrap(){
+  const b = state.tmp.amrapBuilder;
+  if(b.running){ b.remainingMs = Math.max(0, b.remainingMs - (Date.now()-b.startedAt)); b.running=false; }
+  stopTicking();
+  b.timedOut = true;
+  render();
+}
+function pauseAmrapClock(){
+  const b = state.tmp.amrapBuilder;
+  if(b && b.running){
+    b.remainingMs = Math.max(0, b.remainingMs - (Date.now()-b.startedAt));
+    b.running = false;
+    stopTicking();
+  }
+  render();
+}
+function resumeAmrapClock(){
+  const b = state.tmp.amrapBuilder;
+  b.startedAt = Date.now();
+  b.running = true;
+  startTicking('live', tickAmrap);
+  render();
+}
+function confirmAmrapExtraReps(){
+  const b = state.tmp.amrapBuilder;
+  b.extraReps = document.getElementById('amrapExtraReps').value || '0';
+  b.phase = 'summary';
+  render();
+}
+function renderAmrapRunning(b){
+  if(b.timedOut){
+    return `
+      <div class="card" style="text-align:center;">
+        <div class="stat-label">Zeit abgelaufen</div>
+        <div class="stat-num accent" style="margin:10px 0;">${b.roundsCompleted} Runden</div>
+        <div class="field" style="text-align:left;"><label>Weitere Wiederholungen in der laufenden Runde</label><input type="number" step="1" min="0" id="amrapExtraReps" value="${b.extraReps}" placeholder="z.B. 12"></div>
+        <button class="btn btn-primary" onclick="confirmAmrapExtraReps()">Weiter</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">Verbleibend</div>
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
+      <div class="moves" style="text-align:left;margin-bottom:14px;">
+        ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+      </div>
+      <div class="stat-num" style="margin:10px 0;">${b.roundsCompleted}<span style="font-size:16px;"> Runden</span></div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn btn-ghost" onclick="incrementAmrapRound(-1)">-1 Runde</button>
+        <button class="btn btn-primary" onclick="incrementAmrapRound(1)">+1 Runde</button>
+      </div>
+      <div class="row">
+        <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseAmrapClock()':'resumeAmrapClock()'}">${b.running?'Pause':'Weiter'}</button>
+        <button class="btn btn-primary" onclick="finishAmrap()">Fertig</button>
+      </div>
+    </div>
+  `;
+}
+function renderAmrapSummary(b){
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>Workout abgeschlossen 🏁</h2>
+      <div class="stat-num" style="font-size:34px;margin:14px 0;">${b.roundsCompleted} Runden${parseInt(b.extraReps)?' + '+b.extraReps+' Wdh.':''}</div>
+      <div class="field" style="text-align:left;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="saveAmrapWorkout()">Workout speichern</button>
+    </div>
+  `;
+}
+async function saveAmrapWorkout(){
+  const b = state.tmp.amrapBuilder;
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const note = state.tmp.wodNote || '';
+  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const workout = {
+    id: uid(), date, name, note, format:'amrap', movements: [],
+    amrap: { movements, durationSec: Math.round(b.durationMs/1000), roundsCompleted: b.roundsCompleted, extraReps: parseInt(b.extraReps)||0 }
+  };
+  state.workouts.push(workout);
+  await saveKey('workouts', state.workouts);
+  state.tmp.amrapBuilder = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  showToast('Workout gespeichert 🏋️');
+  render();
+}
+
+/* ---------- FOR LOAD ---------- */
+function ensureForLoadBuilder(){
+  if(!state.tmp.forLoadBuilder){
+    state.tmp.forLoadBuilder = { phase:'build', exerciseId: state.exercises[0]?.id, targetReps:'3', timeCapMin:'10', timeCapSec:'0', startedAt:null, running:false, elapsedMs:0, timeCapMs:0, achievedWeight:'' };
+  }
+}
+function renderForLoadFlow(historyHtml){
+  ensureForLoadBuilder();
+  const b = state.tmp.forLoadBuilder;
+  if(b.phase==='summary') return renderForLoadSummary(b);
+  if(b.phase==='running') return renderForLoadRunning(b);
+
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const headerFields = buildHeaderFields(uniqueNames);
+  return `
+    <div class="card">
+      <h2>Neues For Load</h2>
+      ${headerFields}
+      <div class="wod-move-row">
+        <div class="top">
+          <select onchange="updateForLoadField('exerciseId',this.value)">
+            ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===b.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+          </select>
+          <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
+        </div>
+        <div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div class="field"><label>Time Cap Min. (optional)</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForLoadField('timeCapMin',this.value)"></div>
+        <div class="field"><label>Time Cap Sek. (optional)</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForLoadField('timeCapSec',this.value)"></div>
+      </div>
+      <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+function updateForLoadField(field, val){
+  const b = state.tmp.forLoadBuilder;
+  b[field] = val;
+  if(field==='exerciseId') render();
+}
+function startForLoadWod(){
+  const b = state.tmp.forLoadBuilder;
+  state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
+  state.tmp.wodName = document.getElementById('wodName').value.trim();
+  b.timeCapMs = (parseInt(b.timeCapMin)||0)*60000 + (parseInt(b.timeCapSec)||0)*1000;
+  b.elapsedMs = 0;
+  b.startedAt = Date.now();
+  b.running = true;
+  b.phase = 'running';
+  startTicking('live', tickForLoad);
+  render();
+}
+function tickForLoad(){
+  const b = state.tmp.forLoadBuilder;
+  if(!b || b.phase!=='running'){ stopTicking(); return; }
+  const elapsed = b.elapsedMs + (Date.now()-b.startedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(b.timeCapMs>0 && elapsed>=b.timeCapMs){
+    b.elapsedMs = b.timeCapMs;
+    b.running = false;
+    stopTicking();
+    beep();
+    render();
+    return;
+  }
+  if(display) display.textContent = fmtClock(b.timeCapMs>0 ? Math.max(0,b.timeCapMs-elapsed) : elapsed, false);
+}
+function pauseForLoadClock(){
+  const b = state.tmp.forLoadBuilder;
+  if(b && b.running){
+    b.elapsedMs += Date.now()-b.startedAt;
+    b.running = false;
+    stopTicking();
+  }
+  render();
+}
+function resumeForLoadClock(){
+  const b = state.tmp.forLoadBuilder;
+  b.startedAt = Date.now();
+  b.running = true;
+  startTicking('live', tickForLoad);
+  render();
+}
+function updateForLoadWeight(val){
+  state.tmp.forLoadBuilder.achievedWeight = val==='' ? '' : String(fromDisplayWeight(val));
+}
+function finishForLoad(){
+  const b = state.tmp.forLoadBuilder;
+  if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
+  stopTicking();
+  b.phase = 'summary';
+  render();
+}
+function renderForLoadRunning(b){
+  const ex = state.exercises.find(e=>e.id===b.exerciseId);
+  const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">${ex?ex.name:'—'} · Ziel: ${b.targetReps} Wdh.</div>
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
+      <div class="field" style="text-align:left;"><label>Erreichtes Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(b.achievedWeight)}" oninput="updateForLoadWeight(this.value)" placeholder="z.B. 82.5"></div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForLoadClock()':'resumeForLoadClock()'}">${b.running?'Pause':'Weiter'}</button>
+        <button class="btn btn-primary" onclick="finishForLoad()">Fertig</button>
+      </div>
+    </div>
+  `;
+}
+function renderForLoadSummary(b){
+  const weight = parseFloat(b.achievedWeight)||0;
+  const reps = parseInt(b.targetReps)||1;
+  const est = weight ? estimate1RM(weight, reps) : 0;
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>Workout abgeschlossen 🏁</h2>
+      <div class="stat-num" style="font-size:34px;margin:14px 0;">${fmtWeight(weight)} <span style="font-size:16px;">@ ${reps} Wdh.</span></div>
+      ${weight ? `<div class="note">geschätztes 1RM: ${fmtWeight(est)}</div>` : ''}
+      <div class="field" style="text-align:left;margin-top:14px;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <label class="checkbox-row"><input type="checkbox" id="forLoadSaveAsPr" ${weight?'checked':''}> Als 1RM-Rekord in Erfolge übernehmen</label>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="saveForLoadWorkout()">Workout speichern</button>
+    </div>
+  `;
+}
+async function saveForLoadWorkout(){
+  const b = state.tmp.forLoadBuilder;
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const note = state.tmp.wodNote || '';
+  const weight = parseFloat(b.achievedWeight)||0;
+  const reps = parseInt(b.targetReps)||1;
+  const workout = {
+    id: uid(), date, name, note, format:'for-load', movements: [],
+    forLoad: { exerciseId: b.exerciseId, targetReps: reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight }
+  };
+  state.workouts.push(workout);
+  await saveKey('workouts', state.workouts);
+  if(weight && document.getElementById('forLoadSaveAsPr')?.checked){
+    state.prEntries.push({id:uid(), exerciseId: b.exerciseId, value: weight, date});
+    await saveKey('prEntries', state.prEntries);
+  }
+  state.tmp.forLoadBuilder = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  showToast('Workout gespeichert 🏋️');
+  render();
+}
+
+function updateTemplateField(mi, field, val){
+  state.tmp.wodTemplate[mi][field] = val;
+  render();
+}
+function addTemplateMove(){
+  state.tmp.wodTemplate.push(blankTemplateMove());
+  render();
+}
+function removeTemplateMove(mi){
+  state.tmp.wodTemplate.splice(mi,1);
+  if(!state.tmp.wodTemplate.length) state.tmp.wodTemplate.push(blankTemplateMove());
+  render();
+}
+function onWodNameChange(val){
+  state.tmp.wodName = val;
+  const match = findWorkoutByName(val);
+  state.tmp.wodNameMatch = match || null;
+  state.tmp.wodFeeling = null;
+  if(match && isTemplateEmpty()){
+    state.tmp.wodTemplate = match.movements.map(m=>{
+      const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
+      return {
+        exerciseId: m.exerciseId,
+        timing: m.timing || '',
+        setsCount: String(m.sets.length || ''),
+        pctList: pcts.length ? pcts.join(',') : ''
+      };
+    });
+  }
+  render();
+}
+function generateWodRows(){
+  state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
+  state.tmp.wodName = document.getElementById('wodName').value.trim();
+  const isEmom = state.tmp.wodFormat==='emom';
+  state.tmp.wodMoves = state.tmp.wodTemplate.map(t=>{
+    const pctArr = parsePctList(t.pctList);
+    let setsCount = parseInt(t.setsCount) || Math.max(pctArr.length,1);
+    if(isEmom && !t.setsCount){
+      setsCount = parseInt(state.tmp.emomRounds) || setsCount;
+    }
+    const known1rm = bestE1RM(t.exerciseId);
+    const sets = [];
+    for(let si=0; si<setsCount; si++){
+      const pct = pctForIndex(pctArr, si);
+      let weight='', autoFilled=false;
+      if(pct && known1rm){
+        weight = roundToIncrement(known1rm*pct/100);
+        autoFilled = true;
+      }
+      sets.push({reps:'', weight, pct: pct||null, autoFilled});
+    }
+    const timing = isEmom ? `Every ${state.tmp.emomMin}:${String(state.tmp.emomSec).padStart(2,'0')}` : t.timing;
+    return { exerciseId:t.exerciseId, timing, pctList:t.pctList, setsCountRaw:t.setsCount, sets };
+  });
+  state.tmp.wodPhase = 'rows';
+  applyFeelingFillIfNeeded();
+  render();
+}
+function backToTemplate(){
+  state.tmp.wodPhase = 'template';
+  render();
+}
+function applyFeelingFillIfNeeded(){
+  if(!state.tmp.wodNameMatch || !state.tmp.wodFeeling) return;
+  state.tmp.wodMoves.forEach((mv,mi)=>{
+    const prevMv = state.tmp.wodNameMatch.movements[mi];
+    if(!prevMv) return;
+    mv.sets.forEach((s,si)=>{
+      if(s.weight==='' || s.autoFilled){
+        const prevSet = prevMv.sets[si];
+        if(prevSet && prevSet.weight){
+          s.weight = roundToIncrement(prevSet.weight * FEELING_ADJUST[state.tmp.wodFeeling]);
+          s.autoFilled = true;
+        }
+      }
+    });
+  });
+}
+function pickWodFeeling(f){
+  state.tmp.wodFeeling = f;
+  applyFeelingFillIfNeeded();
+  render();
+}
+function updateSetField(mi, si, field, val){
+  state.tmp.wodMoves[mi].sets[si][field] = val;
+  if(field==='weight') state.tmp.wodMoves[mi].sets[si].autoFilled = false;
+}
+function addWodSet(mi){
+  state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  render();
+}
+function removeWodSet(mi, si){
+  state.tmp.wodMoves[mi].sets.splice(si,1);
+  if(!state.tmp.wodMoves[mi].sets.length) state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  render();
+}
+async function saveWod(){
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const note = state.tmp.wodNote || '';
+  const movements = state.tmp.wodMoves.map(mv=>{
+    const sets = mv.sets.filter(s=>s.reps && s.weight).map(s=>({
+      reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null
+    }));
+    return { exerciseId: mv.exerciseId, timing: mv.timing || '', sets };
+  }).filter(mv=>mv.sets.length>0);
+  if(!movements.length){ showToast('Bitte mindestens einen Satz mit Wiederholungen und kg eingeben'); return; }
+  state.workouts.push({id:uid(), date, name, note, movements});
+  await saveKey('workouts', state.workouts);
+  state.tmp.wodTemplate = null;
+  state.tmp.wodMoves = null;
+  state.tmp.wodPhase = 'template';
+  state.tmp.wodDate = null;
+  state.tmp.wodName = null;
+  state.tmp.wodNameMatch = null;
+  state.tmp.wodFeeling = null;
+  state.tmp.wodNote = null;
+  showToast('Workout gespeichert 🏋️');
+  render();
+}
+
+/* ---------- SHARED TICK ENGINE (used by Timer tab & Live-Workout rest pause) ---------- */
+let tickHandle = null;
+let activeTicker = null; // 'timer' | 'live' | null
+function startTicking(owner, onTick){
+  stopTicking();
+  activeTicker = owner;
+  tickHandle = setInterval(onTick, 100);
+  onTick();
+}
+function stopTicking(){
+  if(tickHandle){ clearInterval(tickHandle); tickHandle = null; }
+  activeTicker = null;
+}
+function beep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.35);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime+0.35);
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate(200);
+}
+function fmtClock(ms, withTenths){
+  ms = Math.max(0, ms);
+  const totalSec = ms/1000;
+  const m = Math.floor(totalSec/60);
+  const s = Math.floor(totalSec%60);
+  const base = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  if(withTenths){
+    const t = Math.floor((ms%1000)/100);
+    return `${base}.${t}`;
+  }
+  return base;
+}
+
+/* ---------- TIMER TAB (Stoppuhr / Countdown / Intervall) ---------- */
+function switchTimerMode(mode){
+  pauseActiveTimer();
+  state.tmp.timer.mode = mode;
+  render();
+}
+function pauseActiveTimer(){
+  const t = state.tmp.timer;
+  if(t.swRunning) pauseStopwatch();
+  else if(t.cdRunning) pauseCountdown();
+  else if(t.ivRunning) pauseInterval();
+}
+/* Stoppuhr */
+function startStopwatch(){
+  const t = state.tmp.timer;
+  t.swRunning = true;
+  t.swStartedAt = Date.now();
+  startTicking('timer', tickStopwatch);
+  render();
+}
+function tickStopwatch(){
+  const t = state.tmp.timer;
+  const display = document.getElementById('timerBigDisplay');
+  const currentElapsed = t.swElapsed + (Date.now()-t.swStartedAt);
+  if(display) display.textContent = fmtClock(currentElapsed, true);
+}
+function pauseStopwatch(){
+  const t = state.tmp.timer;
+  if(t.swRunning){ t.swElapsed += Date.now()-t.swStartedAt; }
+  t.swRunning = false;
+  stopTicking();
+  render();
+}
+function resetStopwatch(){
+  const t = state.tmp.timer;
+  if(t.swRunning) stopTicking();
+  t.swRunning = false; t.swElapsed = 0; t.swStartedAt = null; t.swLaps = [];
+  render();
+}
+function lapStopwatch(){
+  const t = state.tmp.timer;
+  if(!t.swRunning) return;
+  t.swLaps.unshift(t.swElapsed + (Date.now()-t.swStartedAt));
+  render();
+}
+/* Countdown */
+function updateCountdownInput(field, val){ state.tmp.timer[field] = val; }
+function startCountdown(){
+  const t = state.tmp.timer;
+  if(t.cdRemaining<=0){
+    t.cdTotal = (parseInt(t.cdMin)||0)*60000 + (parseInt(t.cdSec)||0)*1000;
+    if(t.cdTotal<=0){ showToast('Bitte eine Dauer eingeben'); return; }
+    t.cdRemaining = t.cdTotal;
+  }
+  t.cdRunning = true;
+  t.cdStartedAt = Date.now();
+  startTicking('timer', tickCountdown);
+  render();
+}
+function tickCountdown(){
+  const t = state.tmp.timer;
+  const remaining = t.cdRemaining - (Date.now()-t.cdStartedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(remaining<=0){
+    if(display) display.textContent = fmtClock(0,false);
+    t.cdRemaining = 0; t.cdRunning = false;
+    stopTicking();
+    beep();
+    showToast('Countdown beendet ⏰');
+    render();
+    return;
+  }
+  if(display) display.textContent = fmtClock(remaining,false);
+}
+function pauseCountdown(){
+  const t = state.tmp.timer;
+  if(t.cdRunning){ t.cdRemaining = Math.max(0, t.cdRemaining - (Date.now()-t.cdStartedAt)); }
+  t.cdRunning = false;
+  stopTicking();
+  render();
+}
+function resetCountdown(){
+  const t = state.tmp.timer;
+  stopTicking();
+  t.cdRunning = false; t.cdRemaining = 0; t.cdTotal = 0; t.cdStartedAt = null;
+  render();
+}
+/* Intervalltimer */
+function updateIntervalInput(field, val){ state.tmp.timer[field] = val; }
+function startInterval(){
+  const t = state.tmp.timer;
+  if(t.ivRemaining<=0 || t.ivPhase==='done'){
+    t.ivWorkSec = parseInt(t.ivWorkSec)||20;
+    t.ivRestSec = parseInt(t.ivRestSec)||0;
+    t.ivRounds = parseInt(t.ivRounds)||1;
+    t.ivRound = 1;
+    t.ivPhase = 'work';
+    t.ivRemaining = t.ivWorkSec*1000;
+  }
+  t.ivRunning = true;
+  t.ivStartedAt = Date.now();
+  startTicking('timer', tickInterval);
+  render();
+}
+function advanceIntervalRound(t){
+  if(t.ivRound >= t.ivRounds){
+    t.ivPhase = 'done';
+  } else {
+    t.ivRound += 1;
+    t.ivPhase = 'work';
+    t.ivRemaining = t.ivWorkSec*1000;
+    t.ivStartedAt = Date.now();
+  }
+}
+function tickInterval(){
+  const t = state.tmp.timer;
+  const remaining = t.ivRemaining - (Date.now()-t.ivStartedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(remaining>0){
+    if(display) display.textContent = fmtClock(remaining,false);
+    return;
+  }
+  beep();
+  if(t.ivPhase==='work' && t.ivRestSec>0){
+    t.ivPhase = 'rest';
+    t.ivRemaining = t.ivRestSec*1000;
+    t.ivStartedAt = Date.now();
+  } else {
+    advanceIntervalRound(t);
+  }
+  if(t.ivPhase==='done'){
+    t.ivRunning = false;
+    stopTicking();
+    showToast('Intervall-Timer fertig 🔥');
+  }
+  render();
+}
+function pauseInterval(){
+  const t = state.tmp.timer;
+  if(t.ivRunning){ t.ivRemaining = Math.max(0, t.ivRemaining - (Date.now()-t.ivStartedAt)); }
+  t.ivRunning = false;
+  stopTicking();
+  render();
+}
+function resetInterval(){
+  const t = state.tmp.timer;
+  stopTicking();
+  t.ivRunning = false; t.ivRound = 1; t.ivPhase = 'work'; t.ivRemaining = 0; t.ivStartedAt = null;
+  render();
+}
+function renderTimer(){
+  const t = state.tmp.timer;
+  const modeBtn = (m,label)=>`<button class="btn ${t.mode===m?'btn-primary':'btn-ghost'}" style="flex:1;" onclick="switchTimerMode('${m}')">${label}</button>`;
+  let body = '';
+  if(t.mode==='stopwatch') body = renderStopwatchUI(t);
+  if(t.mode==='countdown') body = renderCountdownUI(t);
+  if(t.mode==='interval') body = renderIntervalUI(t);
+  return `
+    <div class="card">
+      <h2>Timer</h2>
+      <div class="row" style="margin-bottom:16px;">
+        ${modeBtn('stopwatch','Stoppuhr')}
+        ${modeBtn('countdown','Countdown')}
+        ${modeBtn('interval','Intervall')}
+      </div>
+      ${body}
+    </div>
+  `;
+}
+function renderStopwatchUI(t){
+  const running = t.swRunning;
+  const lapsHtml = t.swLaps.length ? t.swLaps.map((l,i)=>`
+    <div class="history-item"><span class="date">Runde ${t.swLaps.length-i}</span><span class="val">${fmtClock(l,true)}</span></div>
+  `).join('') : '';
+  return `
+    <div style="text-align:center;padding:20px 0;">
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;">${fmtClock(t.swElapsed,true)}</div>
+    </div>
+    <div class="row">
+      ${running
+        ? `<button class="btn btn-ghost" onclick="pauseStopwatch()">Pause</button><button class="btn btn-primary" onclick="lapStopwatch()">Runde</button>`
+        : `<button class="btn btn-primary" onclick="startStopwatch()">${t.swElapsed>0?'Weiter':'Start'}</button><button class="btn btn-ghost" onclick="resetStopwatch()">Reset</button>`
+      }
+    </div>
+    ${lapsHtml ? `<hr class="hairline"><div class="stat-label" style="margin-bottom:6px;">Runden</div>${lapsHtml}` : ''}
+  `;
+}
+function renderCountdownUI(t){
+  const running = t.cdRunning;
+  const configuring = !running && t.cdRemaining<=0;
+  const displayMs = t.cdRemaining>0 ? t.cdRemaining : ((parseInt(t.cdMin)||0)*60000 + (parseInt(t.cdSec)||0)*1000);
+  return `
+    ${configuring ? `
+    <div class="row">
+      <div class="field"><label>Minuten</label><input type="number" step="1" min="0" value="${t.cdMin}" oninput="updateCountdownInput('cdMin',this.value)"></div>
+      <div class="field"><label>Sekunden</label><input type="number" step="1" min="0" max="59" value="${t.cdSec}" oninput="updateCountdownInput('cdSec',this.value)"></div>
+    </div>` : ''}
+    <div style="text-align:center;padding:20px 0;">
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;">${fmtClock(displayMs,false)}</div>
+    </div>
+    <div class="row">
+      ${running
+        ? `<button class="btn btn-ghost" onclick="pauseCountdown()">Pause</button>`
+        : `<button class="btn btn-primary" onclick="startCountdown()">${t.cdRemaining>0?'Weiter':'Start'}</button>`
+      }
+      <button class="btn btn-ghost" onclick="resetCountdown()">Reset</button>
+    </div>
+  `;
+}
+function renderIntervalUI(t){
+  const running = t.ivRunning;
+  const configuring = !running && t.ivPhase!=='done' && t.ivRemaining<=0;
+  const phaseLabel = t.ivPhase==='work' ? 'Belastung' : t.ivPhase==='rest' ? 'Pause' : 'Fertig';
+  const displayMs = t.ivRemaining>0 ? t.ivRemaining : ((parseInt(t.ivWorkSec)||0)*1000);
+  return `
+    ${configuring ? `
+    <div class="row">
+      <div class="field"><label>Belastung (Sek.)</label><input type="number" step="1" min="1" value="${t.ivWorkSec}" oninput="updateIntervalInput('ivWorkSec',this.value)"></div>
+      <div class="field"><label>Pause (Sek.)</label><input type="number" step="1" min="0" value="${t.ivRestSec}" oninput="updateIntervalInput('ivRestSec',this.value)"></div>
+    </div>
+    <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${t.ivRounds}" oninput="updateIntervalInput('ivRounds',this.value)"></div>
+    ` : `<div class="stat-label" style="text-align:center;">Runde ${t.ivRound}/${t.ivRounds} · <span id="timerSubLabel">${phaseLabel}</span></div>`}
+    <div style="text-align:center;padding:20px 0;">
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;">${t.ivPhase==='done'?'FERTIG':fmtClock(displayMs,false)}</div>
+    </div>
+    <div class="row">
+      ${running
+        ? `<button class="btn btn-ghost" onclick="pauseInterval()">Pause</button>`
+        : `<button class="btn btn-primary" onclick="startInterval()">${t.ivRemaining>0 && t.ivPhase!=='done' ? 'Weiter' : 'Start'}</button>`
+      }
+      <button class="btn btn-ghost" onclick="resetInterval()">Reset</button>
+    </div>
+  `;
+}
+
+/* ---------- ERFOLGE TAB (manuelle & errechnete 1RM-Werte) ---------- */
+function renderErfolge(){
+  const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
+  const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
+  const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
+
+  const listHtml = exercisesWithData.length ? exercisesWithData.map(e=>{
+    const computed = computedBest(e.id);
+    const entries = prEntriesFor(e.id);
+    const official = bestE1RM(e.id);
+    return `
+    <div class="wod-move-row">
+      <div class="wname" style="font-size:16px;margin-bottom:4px;">${e.name}</div>
+      <div class="stat-num accent" style="margin-bottom:8px;">${Math.round(official)}kg</div>
+      ${computed!=null ? `<div class="note" style="margin-bottom:8px;">aus Training errechnet: ${Math.round(computed)}kg</div>` : ''}
+      ${entries.length ? entries.map(p=>`
+        <div class="history-item">
+          <span class="date">${fmtDate(p.date)}</span>
+          <span class="val">${p.value}kg manuell</span>
+          <button class="remove-row" onclick="editPrEntry('${p.id}')">✎</button>
+          <button class="remove-row" onclick="deletePrEntry('${p.id}')">✕</button>
+        </div>`).join('') : ''}
+    </div>`;
+  }).join('') : `<div class="note">Noch keine 1RM-Werte vorhanden.</div>`;
+
+  const editingTime = state.tmp.editingTimeId ? state.timeRecords.find(t=>t.id===state.tmp.editingTimeId) : null;
+  const uniqueTimeNames = [...new Set([
+    ...state.workouts.map(w=>w.name),
+    ...state.timeRecords.map(t=>t.name)
+  ].filter(Boolean))];
+  const timesByName = {};
+  state.timeRecords.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(t=>{
+    (timesByName[t.name] = timesByName[t.name]||[]).push(t);
+  });
+  const timesHtml = Object.keys(timesByName).length ? Object.keys(timesByName).map(name=>`
+    <div class="wod-move-row">
+      <div class="wname" style="font-size:16px;margin-bottom:4px;">${escapeHtml(name)}</div>
+      ${timesByName[name].map(t=>`
+        <div class="history-item">
+          <span class="date">${fmtDate(t.date)}</span>
+          <span class="val">${escapeHtml(t.time)}</span>
+          <button class="remove-row" onclick="editTimeRecord('${t.id}')">✎</button>
+          <button class="remove-row" onclick="deleteTimeRecord('${t.id}')">✕</button>
+        </div>
+        ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
+      `).join('')}
+    </div>
+  `).join('') : `<div class="note">Noch keine Zeiten vorhanden.</div>`;
+
+  return `
+    <div class="card">
+      <h2>${editingPr ? '1RM bearbeiten' : 'Neuer 1RM-Rekord'}</h2>
+      <div class="field">
+        <label>Übung</label>
+        <div style="display:flex;gap:8px;">
+          <select id="prExercise" style="flex:1;" onchange="state.tmp.prExerciseSelection=this.value">
+            ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===selectedPrExerciseId?'selected':''}>${e.name}</option>`).join('')}
+          </select>
+          <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>{state.tmp.prExerciseSelection=exId;})">➕</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>1RM (kg)</label><input type="number" step="0.5" id="prValue" value="${editingPr?editingPr.value:''}" placeholder="z.B. 100"></div>
+        <div class="field"><label>Datum</label><input type="date" id="prDate" value="${editingPr?editingPr.date:todayStr()}"></div>
+      </div>
+      <button class="btn btn-primary" onclick="savePrEntry()">${editingPr ? 'Aktualisieren' : 'Eintragen'}</button>
+      ${editingPr ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditPr()">Abbrechen</button>` : ''}
+      <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Deine 1RM-Werte</h2>
+      ${listHtml}
+    </div>
+    <div class="card">
+      <h2>${editingTime ? 'Bestzeit bearbeiten' : 'Neue Bestzeit'}</h2>
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="timeName" list="timeNameList" value="${editingTime?escapeHtml(editingTime.name):''}" placeholder="z.B. Fran">
+        <datalist id="timeNameList">${uniqueTimeNames.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+      </div>
+      <div class="row">
+        <div class="field"><label>Zeit</label><input type="text" id="timeValue" value="${editingTime?escapeHtml(editingTime.time):''}" placeholder="z.B. 3:45"></div>
+        <div class="field"><label>Datum</label><input type="date" id="timeDate" value="${editingTime?editingTime.date:todayStr()}"></div>
+      </div>
+      <div class="field"><label>Notiz (optional)</label><input type="text" id="timeNote" value="${editingTime?escapeHtml(editingTime.note||''):''}"></div>
+      <button class="btn btn-primary" onclick="saveTimeRecord()">${editingTime ? 'Aktualisieren' : 'Eintragen'}</button>
+      ${editingTime ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditTime()">Abbrechen</button>` : ''}
+    </div>
+    <div class="card">
+      <h2 class="small">Deine Bestzeiten</h2>
+      ${timesHtml}
+    </div>
+  `;
+}
+async function savePrEntry(){
+  const exId = document.getElementById('prExercise').value;
+  const value = parseFloat(document.getElementById('prValue').value);
+  const date = document.getElementById('prDate').value || todayStr();
+  if(!value){ showToast('Bitte ein Gewicht eingeben'); return; }
+  if(state.tmp.editingPrId){
+    const entry = state.prEntries.find(p=>p.id===state.tmp.editingPrId);
+    if(entry){ entry.exerciseId=exId; entry.value=value; entry.date=date; }
+    state.tmp.editingPrId = null;
+  } else {
+    state.prEntries.push({id:uid(), exerciseId:exId, value, date});
+  }
+  state.tmp.prExerciseSelection = null;
+  await saveKey('prEntries', state.prEntries);
+  showToast('1RM gespeichert 🏆');
+  render();
+}
+function editPrEntry(id){
+  state.tmp.editingPrId = id;
+  render();
+}
+function cancelEditPr(){
+  state.tmp.editingPrId = null;
+  render();
+}
+async function deletePrEntry(id){
+  state.prEntries = state.prEntries.filter(p=>p.id!==id);
+  if(state.tmp.editingPrId===id) state.tmp.editingPrId = null;
+  await saveKey('prEntries', state.prEntries);
+  showToast('Eintrag gelöscht');
+  render();
+}
+async function saveTimeRecord(){
+  const name = document.getElementById('timeName').value.trim();
+  const time = document.getElementById('timeValue').value.trim();
+  const date = document.getElementById('timeDate').value || todayStr();
+  const note = document.getElementById('timeNote').value;
+  if(!name || !time){ showToast('Bitte Name und Zeit eingeben'); return; }
+  if(state.tmp.editingTimeId){
+    const rec = state.timeRecords.find(t=>t.id===state.tmp.editingTimeId);
+    if(rec){ rec.name=name; rec.time=time; rec.date=date; rec.note=note; }
+    state.tmp.editingTimeId = null;
+  } else {
+    state.timeRecords.push({id:uid(), name, time, date, note});
+  }
+  await saveKey('timeRecords', state.timeRecords);
+  showToast('Zeit gespeichert 🏆');
+  render();
+}
+function editTimeRecord(id){
+  state.tmp.editingTimeId = id;
+  render();
+}
+function cancelEditTime(){
+  state.tmp.editingTimeId = null;
+  render();
+}
+async function deleteTimeRecord(id){
+  state.timeRecords = state.timeRecords.filter(t=>t.id!==id);
+  if(state.tmp.editingTimeId===id) state.tmp.editingTimeId = null;
+  await saveKey('timeRecords', state.timeRecords);
+  showToast('Eintrag gelöscht');
+  render();
+}
+
+/* ---------- NUTRITION TAB ---------- */
+function todaysNutrition(){
+  const t = todayStr();
+  return state.nutritionLogs.filter(n=>n.date===t);
+}
+function renderNutrition(){
+  const today = todaysNutrition();
+  const totals = today.reduce((acc,n)=>({
+    kcal: acc.kcal+(n.kcal||0), protein: acc.protein+(n.protein||0),
+    carbs: acc.carbs+(n.carbs||0), fat: acc.fat+(n.fat||0)
+  }), {kcal:0,protein:0,carbs:0,fat:0});
+
+  const entriesHtml = today.length ? today.map(n=>`
+    <div class="history-item">
+      <span>${escapeHtml(n.note||'Eintrag')}</span>
+      <span class="val">${n.kcal||0}kcal</span>
+      <button class="remove-row" onclick="deleteNutrition('${n.id}')">✕</button>
+    </div>`).join('') : `<div class="note">Noch nichts für heute erfasst.</div>`;
+
+  return `
+    <div class="card">
+      <h2>Heute</h2>
+      <div class="row">
+        <div><div class="stat-num">${Math.round(totals.kcal)}</div><div class="stat-label">kcal</div></div>
+        <div><div class="stat-num">${Math.round(totals.protein)}</div><div class="stat-label">Protein g</div></div>
+        <div><div class="stat-num">${Math.round(totals.carbs)}</div><div class="stat-label">Carbs g</div></div>
+        <div><div class="stat-num">${Math.round(totals.fat)}</div><div class="stat-label">Fett g</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Eintrag hinzufügen</h2>
+      <div class="field"><label>Datum</label><input type="date" id="nutDate" value="${todayStr()}"></div>
+      <div class="row">
+        <div class="field"><label>Kalorien</label><input type="number" id="nutKcal" placeholder="kcal"></div>
+        <div class="field"><label>Protein (g)</label><input type="number" id="nutProtein" placeholder="g"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Kohlenhydrate (g)</label><input type="number" id="nutCarbs" placeholder="g"></div>
+        <div class="field"><label>Fett (g)</label><input type="number" id="nutFat" placeholder="g"></div>
+      </div>
+      <div class="field"><label>Notiz (optional)</label><input type="text" id="nutNote" placeholder="z.B. Frühstück"></div>
+      <button class="btn btn-primary" onclick="saveNutrition()">Eintrag hinzufügen</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Heutige Einträge</h2>
+      ${entriesHtml}
+    </div>
+    <div class="card">
+      <h2 class="small">Kalorien — letzte 14 Tage</h2>
+      <div class="chart-wrap"><canvas id="kcalChart"></canvas></div>
+    </div>
+  `;
+}
+async function saveNutrition(){
+  const date = document.getElementById('nutDate').value || todayStr();
+  const entry = {
+    id:uid(), date,
+    kcal: parseFloat(document.getElementById('nutKcal').value)||0,
+    protein: parseFloat(document.getElementById('nutProtein').value)||0,
+    carbs: parseFloat(document.getElementById('nutCarbs').value)||0,
+    fat: parseFloat(document.getElementById('nutFat').value)||0,
+    note: document.getElementById('nutNote').value
+  };
+  state.nutritionLogs.push(entry);
+  await saveKey('nutritionLogs', state.nutritionLogs);
+  showToast('Eintrag hinzugefügt');
+  render();
+}
+async function deleteNutrition(id){
+  state.nutritionLogs = state.nutritionLogs.filter(n=>n.id!==id);
+  await saveKey('nutritionLogs', state.nutritionLogs);
+  render();
+}
+function mountNutritionChart(){
+  const canvas = document.getElementById('kcalChart');
+  if(!canvas || typeof Chart==='undefined') return;
+  const days = [];
+  for(let i=13;i>=0;i--){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    days.push(d.toISOString().slice(0,10));
+  }
+  const totals = days.map(d=> state.nutritionLogs.filter(n=>n.date===d).reduce((s,n)=>s+(n.kcal||0),0));
+  if(charts.kcal) charts.kcal.destroy();
+  charts.kcal = new Chart(canvas, {
+    type:'bar',
+    data:{ labels: days.map(d=>fmtDate(d)), datasets:[{ data: totals, backgroundColor:'#C8443C', borderRadius:4 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+  });
+}
+
+/* ---------- PROGRESS TAB ---------- */
+function renderProgress(){
+  const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0);
+  const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
+  const exOptions = exWithLogs.map(e=>`<option value="${e.id}" ${e.id===selectedEx?'selected':''}>${e.name}</option>`).join('');
+
+  const measurementsHtml = state.measurements.slice().reverse().slice(0,6).map(m=>`
+    <div class="history-item">
+      <span class="date">${fmtDate(m.date)}</span>
+      <span class="val">${m.weight?m.weight+'kg':''}</span>
+      <button class="remove-row" onclick="deleteMeasurement('${m.id}')">✕</button>
+    </div>`).join('') || `<div class="note">Noch keine Einträge.</div>`;
+
+  return `
+    <div class="card">
+      <h2>Körpergewicht über Zeit</h2>
+      <div class="chart-wrap"><canvas id="weightChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>1RM-Fortschritt</h2>
+      ${exWithLogs.length ? `
+      <div class="field"><select onchange="setProgressExercise(this.value)">${exOptions}</select></div>
+      <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
+      ` : `<div class="empty-state">Noch keine Trainingsdaten vorhanden.</div>`}
+    </div>
+    <div class="card">
+      <h2>Neue Messung</h2>
+      <div class="field"><label>Datum</label><input type="date" id="measDate" value="${todayStr()}"></div>
+      <div class="row">
+        <div class="field"><label>Gewicht (kg)</label><input type="number" step="0.1" id="measWeight"></div>
+        <div class="field"><label>Taille (cm)</label><input type="number" step="0.5" id="measWaist"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Brust (cm)</label><input type="number" step="0.5" id="measChest"></div>
+        <div class="field"><label>Arme (cm)</label><input type="number" step="0.5" id="measArms"></div>
+      </div>
+      <button class="btn btn-primary" onclick="saveMeasurement()">Speichern</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Letzte Messungen</h2>
+      ${measurementsHtml}
+    </div>
+  `;
+}
+function setProgressExercise(v){ state.tmp.progressExercise = v; render(); }
+async function saveMeasurement(){
+  const date = document.getElementById('measDate').value || todayStr();
+  const entry = {
+    id:uid(), date,
+    weight: parseFloat(document.getElementById('measWeight').value)||null,
+    waist: parseFloat(document.getElementById('measWaist').value)||null,
+    chest: parseFloat(document.getElementById('measChest').value)||null,
+    arms: parseFloat(document.getElementById('measArms').value)||null
+  };
+  state.measurements.push(entry);
+  await saveKey('measurements', state.measurements);
+  showToast('Messung gespeichert');
+  render();
+}
+async function deleteMeasurement(id){
+  state.measurements = state.measurements.filter(m=>m.id!==id);
+  await saveKey('measurements', state.measurements);
+  render();
+}
+function mountProgressCharts(){
+  if(typeof Chart==='undefined') return;
+  const wCanvas = document.getElementById('weightChart');
+  if(wCanvas){
+    const pts = state.measurements.filter(m=>m.weight).sort((a,b)=>a.date.localeCompare(b.date));
+    if(charts.weight) charts.weight.destroy();
+    charts.weight = new Chart(wCanvas, {
+      type:'line',
+      data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>p.weight), borderColor:'#E8B93F', backgroundColor:'rgba(232,185,63,0.15)', fill:true, tension:0.3 }]},
+      options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+    });
+  }
+  const eCanvas = document.getElementById('e1rmChart');
+  if(eCanvas){
+    const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0);
+    const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
+    const pts = exerciseLogs(selectedEx);
+    if(charts.e1rm) charts.e1rm.destroy();
+    charts.e1rm = new Chart(eCanvas, {
+      type:'line',
+      data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>Math.round(sessionE1RM(p))), borderColor:'#C8443C', backgroundColor:'rgba(200,68,60,0.15)', fill:true, tension:0.3 }]},
+      options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+    });
+  }
+}
+
+/* ---------- PROFILE TAB ---------- */
+function renderTrainingPlanCard(){
+  const plan = state.trainingPlan;
+  const form = state.tmp.planForm || (plan ? {status:plan.status, location:plan.location, frequency:plan.frequency} : {status:'anfaenger', location:'box', frequency:3});
+
+  const summary = plan ? `
+    <div class="note" style="margin-bottom:10px;">Aktueller Plan: ${plan.frequency}× / Woche</div>
+    ${PLAN_DAY_KEYS.filter(k=>plan.days[k]).map(k=>`
+      <div class="history-item"><span class="date">${WEEKDAY_LABELS[PLAN_DAY_KEYS.indexOf(k)]}</span><span class="val">${escapeHtml(planEntryLabel(plan.days[k])||'—')}</span></div>
+    `).join('')}
+    <hr class="hairline">
+  ` : `<div class="note" style="margin-bottom:10px;">Noch kein Plan erstellt.</div>`;
+
+  return `
+    <div class="card">
+      <h2>Trainingsplan (CrossFit)</h2>
+      ${summary}
+      <div class="field"><label>Trainingsstatus</label>
+        <select id="planStatus" onchange="updatePlanForm('status',this.value)">
+          <option value="anfaenger" ${form.status==='anfaenger'?'selected':''}>Anfänger</option>
+          <option value="fortgeschritten" ${form.status==='fortgeschritten'?'selected':''}>Fortgeschritten</option>
+          <option value="profi" ${form.status==='profi'?'selected':''}>Profi</option>
+        </select>
+      </div>
+      <div class="field"><label>Trainingsort</label>
+        <select id="planLocation" onchange="updatePlanForm('location',this.value)">
+          <option value="box" ${form.location==='box'?'selected':''}>Box / Fitnessstudio</option>
+          <option value="zuhause-geraete" ${form.location==='zuhause-geraete'?'selected':''}>Zuhause mit Geräten</option>
+          <option value="zuhause-ohne" ${form.location==='zuhause-ohne'?'selected':''}>Zuhause ohne Geräte</option>
+        </select>
+      </div>
+      <div class="field"><label>Häufigkeit (pro Woche)</label>
+        <select id="planFrequency" onchange="updatePlanForm('frequency',this.value)">
+          ${[1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${parseInt(form.frequency)===n?'selected':''}>${n}×</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="createTrainingPlan()">${plan?'Plan neu erstellen':'Plan erstellen'}</button>
+    </div>
+  `;
+}
+function updatePlanForm(field, val){
+  if(!state.tmp.planForm){
+    const plan = state.trainingPlan;
+    state.tmp.planForm = plan ? {status:plan.status, location:plan.location, frequency:plan.frequency} : {status:'anfaenger', location:'box', frequency:3};
+  }
+  state.tmp.planForm[field] = val;
+}
+async function createTrainingPlan(){
+  const form = state.tmp.planForm || {status:'anfaenger', location:'box', frequency:3};
+  state.trainingPlan = generateTrainingPlan(form.status, form.location, form.frequency);
+  state.tmp.planForm = null;
+  await saveKey('trainingPlan', state.trainingPlan);
+  showToast('Trainingsplan erstellt 📋');
+  render();
+}
+function renderProfile(){
+  const p = state.profile || {};
+  return `
+    <div class="card">
+      <h2>Grunddaten</h2>
+      <div class="row">
+        <div class="field"><label>Größe (cm)</label><input type="number" id="pHeight" value="${p.height||''}"></div>
+        <div class="field"><label>Gewicht (kg)</label><input type="number" step="0.1" id="pWeight" value="${p.weight||''}"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Alter</label><input type="number" id="pAge" value="${p.age||''}"></div>
+        <div class="field"><label>Geschlecht</label>
+          <select id="pGender">
+            <option value="">Keine Angabe</option>
+            <option value="m" ${p.gender==='m'?'selected':''}>Männlich</option>
+            <option value="w" ${p.gender==='w'?'selected':''}>Weiblich</option>
+            <option value="d" ${p.gender==='d'?'selected':''}>Divers</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Einheiten</h2>
+      <div class="row">
+        <div class="field"><label>Gewicht</label>
+          <select id="pWeightUnit">
+            <option value="kg" ${(!p.weightUnit||p.weightUnit==='kg')?'selected':''}>kg</option>
+            <option value="lbs" ${p.weightUnit==='lbs'?'selected':''}>lbs</option>
+          </select>
+        </div>
+        <div class="field"><label>Distanz</label>
+          <select id="pDistanceUnit">
+            <option value="m" ${(!p.distanceUnit||p.distanceUnit==='m')?'selected':''}>Meter</option>
+            <option value="mi" ${p.distanceUnit==='mi'?'selected':''}>Meilen</option>
+          </select>
+        </div>
+      </div>
+      <div class="note" style="margin-bottom:10px;">Gilt für Gewichts- und Distanz-Angaben bei For Time / AMRAP / For Load. Bereits gespeicherte Werte werden intern weiterhin in kg/Meter geführt und nur zur Anzeige umgerechnet.</div>
+      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
+    </div>
+    ${renderTrainingPlanCard()}
+    <div class="card">
+      <h2 class="small">Daten-Verwaltung</h2>
+      <div class="note" style="margin-bottom:10px;">Deine Daten werden ausschließlich für dich gespeichert.</div>
+      <button class="btn btn-danger" onclick="handleResetClick()">${state.tmp.confirmReset ? 'Wirklich? Ja, alles löschen' : 'Alle Daten löschen'}</button>
+      ${state.tmp.confirmReset ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelResetClick()">Abbrechen</button>` : ''}
+    </div>
+  `;
+}
+function handleResetClick(){
+  if(state.tmp.confirmReset){ resetAll(); }
+  else { state.tmp.confirmReset = true; render(); }
+}
+function cancelResetClick(){
+  state.tmp.confirmReset = false;
+  render();
+}
+async function saveProfile(){
+  state.profile = {
+    height: parseFloat(document.getElementById('pHeight').value)||null,
+    weight: parseFloat(document.getElementById('pWeight').value)||null,
+    age: parseInt(document.getElementById('pAge').value)||null,
+    gender: document.getElementById('pGender').value,
+    weightUnit: document.getElementById('pWeightUnit').value,
+    distanceUnit: document.getElementById('pDistanceUnit').value
+  };
+  await saveKey('profile', state.profile);
+  showToast('Profil gespeichert');
+  render();
+}
+async function resetAll(){
+  stopTicking();
+  await Promise.all(['profile','exercises','workouts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', tmp: defaultTmp()};
+  await saveKey('exercises', state.exercises);
+  showToast('Daten gelöscht');
+  render();
+}
+
+/* ---------- Utils ---------- */
+function escapeHtml(s){
+  const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML;
+}
+function showToast(msg){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 2200);
+}
+
+init();
+</script>
+</body>
+</html>

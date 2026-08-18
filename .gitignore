@@ -1,0 +1,8 @@
+# Private Konzept-Notizen, nicht Teil der öffentlichen App
+*.docx
+*.doc
+*.pdf
+
+# Ältere, überholte Entwicklungsstände
+iron-log.html
+iron-log_1.html
