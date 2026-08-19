@@ -1,6 +1,6 @@
 {
-  "name": "Iron Log",
-  "short_name": "Iron Log",
+  "name": "WOD Ledger",
+  "short_name": "WOD Ledger",
   "description": "CrossFit-Trainingstracker",
   "start_url": "./index.html",
   "scope": "./",

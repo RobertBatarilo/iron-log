@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>IRON LOG — Trainingstracker</title>
+<title>WOD Ledger — Trainingstracker</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#1B1D21">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Iron Log">
+<meta name="apple-mobile-web-app-title" content="WOD Ledger">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
@@ -84,6 +84,8 @@
     background:var(--graphite-900);
     z-index:5;
   }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand-logo{width:40px;height:40px;border-radius:10px;flex-shrink:0;}
   header.top h1{
     font-family:var(--font-display);
     font-weight:700;
@@ -542,20 +544,36 @@ function composeVariantName(base, variant, detailVal){
 
 /* ---------- CrossFit-Bibliothek (für automatische Trainingsplan-Erstellung) ---------- */
 const CROSSFIT_WODS = [
-  { id:'fran', name:'Fran', level:'intermediate', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
+  { id:'fran', name:'Fran', category:'girl', level:'intermediate', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
     movements:[{name:'Thruster'},{name:'Pull-up'}] },
-  { id:'cindy', name:'Cindy', level:'beginner', equipment:['pullup-bar'], format:'amrap', durationSec:1200,
+  { id:'cindy', name:'Cindy', category:'girl', level:'beginner', equipment:['pullup-bar'], format:'amrap', durationSec:1200,
     movements:[{name:'Pull-up', reps:5},{name:'Push-up', reps:10},{name:'Air Squat', reps:15}] },
-  { id:'annie', name:'Annie', level:'beginner', equipment:[], format:'for-time', repScheme:'50-40-30-20-10',
+  { id:'annie', name:'Annie', category:'girl', level:'beginner', equipment:[], format:'for-time', repScheme:'50-40-30-20-10',
     movements:[{name:'Double-under'},{name:'Sit-up'}] },
-  { id:'grace', name:'Grace', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'30',
+  { id:'grace', name:'Grace', category:'girl', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'30',
     movements:[{name:'Clean & Jerk'}] },
-  { id:'helen', name:'Helen', level:'intermediate', equipment:['kettlebell','pullup-bar'], format:'for-time', rounds:3,
+  { id:'helen', name:'Helen', category:'girl', level:'intermediate', equipment:['kettlebell','pullup-bar'], format:'for-time', rounds:3,
     movements:[{name:'Run 400m', reps:400},{name:'Kettlebell Swing', reps:21},{name:'Pull-up', reps:12}] },
-  { id:'diane', name:'Diane', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
+  { id:'diane', name:'Diane', category:'girl', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
     movements:[{name:'Deadlift'},{name:'Handstand Push-up'}] },
-  { id:'murph', name:'Murph', level:'advanced', equipment:['pullup-bar'], format:'for-time', rounds:1,
-    movements:[{name:'Run 1600m', reps:1600},{name:'Pull-up', reps:100},{name:'Push-up', reps:200},{name:'Air Squat', reps:300},{name:'Run 1600m', reps:1600}] }
+  { id:'angie', name:'Angie', category:'girl', level:'advanced', equipment:['pullup-bar'], format:'for-time', rounds:1,
+    movements:[{name:'Pull-up', reps:100},{name:'Push-up', reps:100},{name:'Sit-up', reps:100},{name:'Air Squat', reps:100}] },
+  { id:'jackie', name:'Jackie', category:'girl', level:'intermediate', equipment:['barbell','pullup-bar'], format:'for-time', rounds:1,
+    movements:[{name:'Row', reps:1000},{name:'Thruster', reps:50},{name:'Pull-up', reps:30}] },
+  { id:'karen', name:'Karen', category:'girl', level:'intermediate', equipment:[], format:'for-time', rounds:1,
+    movements:[{name:'Wall Ball', reps:150}] },
+  { id:'isabel', name:'Isabel', category:'girl', level:'advanced', equipment:['barbell'], format:'for-time', rounds:1,
+    movements:[{name:'Snatch', reps:30}] },
+  { id:'nancy', name:'Nancy', category:'girl', level:'intermediate', equipment:['barbell'], format:'for-time', rounds:5,
+    movements:[{name:'Run 400m', reps:400},{name:'Overhead Squat', reps:15}] },
+  { id:'elizabeth', name:'Elizabeth', category:'girl', level:'advanced', equipment:['barbell'], format:'for-time', repScheme:'21-15-9',
+    movements:[{name:'Clean'},{name:'Ring Dip'}] },
+  { id:'murph', name:'Murph', category:'hero', level:'advanced', equipment:['pullup-bar'], format:'for-time', rounds:1,
+    movements:[{name:'Run 1600m', reps:1600},{name:'Pull-up', reps:100},{name:'Push-up', reps:200},{name:'Air Squat', reps:300},{name:'Run 1600m', reps:1600}] },
+  { id:'dt', name:'DT', category:'hero', level:'advanced', equipment:['barbell'], format:'for-time', rounds:5,
+    movements:[{name:'Deadlift', reps:12},{name:'Hang Power Clean', reps:9},{name:'Push Jerk', reps:6}] },
+  { id:'randy', name:'Randy', category:'hero', level:'advanced', equipment:['barbell'], format:'for-time', rounds:1,
+    movements:[{name:'Power Snatch', reps:75}] }
 ];
 const STRENGTH_PROGRESSIONS = [
   { id:'squat-linear', name:'Back Squat – Lineare Progression', exerciseName:'Back Squat', level:'beginner', equipment:['barbell'], setsCount:5, pctList:'70,75,80,80,80' },
@@ -855,7 +873,6 @@ function bottomNavHtml(){
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
     navBtn('timer','Timer', iconStopwatch()),
-    navBtn('erfolge','Erfolge', iconTrophy()),
     navBtn('progress','Fortschritt', iconChart()),
     navBtn('profile','Profil', iconUser())
   ].join('');
@@ -863,8 +880,13 @@ function bottomNavHtml(){
 function appShell(){
   return `
     <header class="top">
-      <h1>IRON<span>LOG</span></h1>
-      <p>Dein CrossFit-Trainingstracker</p>
+      <div class="brand">
+        <img src="icon-192.png" alt="WOD Ledger" class="brand-logo">
+        <div>
+          <h1>WOD <span>LEDGER</span></h1>
+          <p>Dein CrossFit-Trainingstracker</p>
+        </div>
+      </div>
     </header>
     <main id="content"></main>
     <nav class="bottom" id="bottomNav">${bottomNavHtml()}</nav>
@@ -888,7 +910,6 @@ function render(){
   if(state.activeTab==='today') content.innerHTML = renderToday();
   if(state.activeTab==='workout') content.innerHTML = renderWorkout();
   if(state.activeTab==='timer') content.innerHTML = renderTimer();
-  if(state.activeTab==='erfolge') content.innerHTML = renderErfolge();
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
@@ -903,7 +924,6 @@ function iconClipboard(){return `<svg viewBox="0 0 24 24" fill="none" stroke="cu
 function iconApple(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 7c-3-3-8-1-8 4 0 5 4 9 7 9 1 0 1.5-.5 2-.5s1 .5 2 .5c2 0 6-3 6-7 0-3-2-5-4.5-5-1.2 0-2 .5-2.5.5"/><path d="M12 7c0-2 1-3 2.5-3.5"/></svg>`;}
 function iconChart(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="4" y1="20" x2="20" y2="20"/></svg>`;}
 function iconUser(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.5-4 4-6 7.5-6s6 2 7.5 6"/></svg>`;}
-function iconTrophy(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H4a3 3 0 0 0 3 5"/><path d="M17 5h3a3 3 0 0 1-3 5"/><line x1="12" y1="13" x2="12" y2="17"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="17" x2="12" y2="20"/></svg>`;}
 function iconHome(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></svg>`;}
 function iconStopwatch(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><line x1="12" y1="13" x2="12" y2="9"/><line x1="9" y1="3" x2="15" y2="3"/><line x1="12" y1="3" x2="12" y2="5"/></svg>`;}
 
@@ -1087,15 +1107,45 @@ function renderFormatSelector(){
     {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'}
   ];
   const current = formats.find(f=>f.id===state.tmp.wodFormat) || formats[0];
+  const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl');
+  const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero');
   return `
     <div class="card">
       <h2>Workout-Format</h2>
       <div class="row" style="flex-wrap:wrap;gap:8px;">
         ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
       </div>
-      <div class="note" style="margin-top:8px;">${current.hint}</div>
+      <div class="note" style="margin-top:8px;margin-bottom:14px;">${current.hint}</div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Bekanntes WOD laden (optional)</label>
+        <select onchange="loadBenchmarkWod(this.value)">
+          <option value="">– auswählen –</option>
+          <optgroup label="Girls">
+            ${girlWods.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Hero WODs">
+            ${heroWods.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}
+          </optgroup>
+        </select>
+        <div class="note">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>
+      </div>
     </div>
   `;
+}
+function loadBenchmarkWod(wodId){
+  if(!wodId) return;
+  const wod = CROSSFIT_WODS.find(w=>w.id===wodId);
+  if(!wod) return;
+  state.tmp.wodName = wod.name;
+  state.tmp.wodDate = todayStr();
+  if(wod.format==='amrap'){
+    state.tmp.wodFormat = 'amrap';
+    state.tmp.amrapBuilder = buildAmrapBuilderFromWod(wod);
+  } else {
+    state.tmp.wodFormat = 'for-time';
+    state.tmp.forTimeBuilder = buildForTimeBuilderFromWod(wod);
+  }
+  render();
 }
 function setWodFormat(fmt){
   if(state.tmp.wodFormat === fmt) return;
@@ -1221,8 +1271,8 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     <div class="row">
       <div class="field"><label>Intervall Min.</label><input type="number" step="1" min="0" value="${state.tmp.emomMin}" onchange="state.tmp.emomMin=this.value"></div>
       <div class="field"><label>Intervall Sek.</label><input type="number" step="1" min="0" max="59" value="${state.tmp.emomSec}" onchange="state.tmp.emomSec=this.value"></div>
-      <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value"></div>
     </div>
+    <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value"></div>
   ` : '';
 
   const moveBlocks = state.tmp.wodTemplate.map((t,mi)=>`
@@ -2465,8 +2515,8 @@ function renderIntervalUI(t){
   `;
 }
 
-/* ---------- ERFOLGE TAB (manuelle & errechnete 1RM-Werte) ---------- */
-function renderErfolge(){
+/* ---------- ERFOLGE (1RM-Rekorde & Bestzeiten, jetzt Teil des Fortschritt-Tabs) ---------- */
+function renderAchievements(){
   const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
   const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
   const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
@@ -2716,12 +2766,12 @@ function mountNutritionChart(){
 
 /* ---------- PROGRESS TAB ---------- */
 const BODY_METRICS = [
-  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F', axis:'yKg'},
-  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C', axis:'yCm'},
-  {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C', axis:'yCm'},
-  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63', axis:'yCm'},
-  {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF', axis:'yCm'},
-  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC', axis:'yCm'}
+  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F'},
+  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C'},
+  {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C'},
+  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63'},
+  {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF'},
+  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC'}
 ];
 function formatMeasurementLine(m){
   return BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`${bm.label} ${m[bm.key]}${bm.unit}`).join(' · ') || '—';
@@ -2738,17 +2788,24 @@ function renderProgress(){
       <button class="remove-row" onclick="deleteMeasurement('${m.id}')">✕</button>
     </div>`).join('') || `<div class="note">Noch keine Einträge.</div>`;
 
+  const selectedMetric = state.tmp.progressMetric || 'weight';
+  const selectedBm = BODY_METRICS.find(bm=>bm.key===selectedMetric);
+  const hasDataForSelected = state.measurements.some(m=>m[selectedMetric]!=null);
+  const metricButtons = BODY_METRICS.map(bm=>`<button class="btn ${bm.key===selectedMetric?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setProgressMetric('${bm.key}')">${bm.label}</button>`).join('');
+
   return `
-    <div class="card">
-      <h2>Körpermaße über Zeit</h2>
-      ${state.measurements.length ? `<div class="chart-wrap"><canvas id="bodyChart"></canvas></div>` : `<div class="empty-state">Noch keine Messungen vorhanden.</div>`}
-    </div>
     <div class="card">
       <h2>1RM-Fortschritt</h2>
       ${exWithLogs.length ? `
       <div class="field"><select onchange="setProgressExercise(this.value)">${exOptions}</select></div>
       <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
       ` : `<div class="empty-state">Noch keine Trainingsdaten vorhanden.</div>`}
+    </div>
+    ${renderAchievements()}
+    <div class="card">
+      <h2>Körpermaße über Zeit</h2>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:14px;">${metricButtons}</div>
+      ${hasDataForSelected ? `<div class="chart-wrap"><canvas id="bodyChart"></canvas></div>` : `<div class="empty-state">Noch keine ${escapeHtml(selectedBm.label)}-Messungen vorhanden.</div>`}
     </div>
     <div class="card">
       <h2>Neue Messung</h2>
@@ -2774,6 +2831,7 @@ function renderProgress(){
   `;
 }
 function setProgressExercise(v){ state.tmp.progressExercise = v; render(); }
+function setProgressMetric(v){ state.tmp.progressMetric = v; render(); }
 async function saveMeasurement(){
   const date = document.getElementById('measDate').value || todayStr();
   const entry = {
@@ -2799,35 +2857,15 @@ function mountProgressCharts(){
   if(typeof Chart==='undefined') return;
   const bCanvas = document.getElementById('bodyChart');
   if(bCanvas){
-    const allDates = [...new Set(state.measurements.map(m=>m.date))].sort();
-    const byDate = {};
-    state.measurements.forEach(m=>{ byDate[m.date] = m; });
-    const datasets = BODY_METRICS
-      .filter(bm=>state.measurements.some(m=>m[bm.key]!=null))
-      .map(bm=>({
-        label: `${bm.label} (${bm.unit})`,
-        data: allDates.map(d=> (byDate[d] && byDate[d][bm.key]!=null) ? byDate[d][bm.key] : null),
-        borderColor: bm.color,
-        backgroundColor: bm.color,
-        yAxisID: bm.axis,
-        spanGaps: true,
-        tension: 0.3,
-        pointRadius: 2,
-        fill: false
-      }));
+    const selectedMetric = state.tmp.progressMetric || 'weight';
+    const bm = BODY_METRICS.find(x=>x.key===selectedMetric);
+    const pts = state.measurements.filter(m=>m[selectedMetric]!=null).sort((a,b)=>a.date.localeCompare(b.date));
     if(charts.body) charts.body.destroy();
-    if(datasets.length){
+    if(bm && pts.length){
       charts.body = new Chart(bCanvas, {
         type:'line',
-        data:{ labels: allDates.map(d=>fmtDate(d)), datasets },
-        options:{
-          plugins:{ legend:{ display:true, position:'bottom', labels:{ color:'#D8D2C2', boxWidth:12, font:{size:10} } } },
-          scales:{
-            x:{ ticks:{color:'#565C68',font:{size:9}}, grid:{display:false} },
-            yKg:{ position:'left', ticks:{color:'#565C68'}, grid:{color:'#333740'} },
-            yCm:{ position:'right', ticks:{color:'#565C68'}, grid:{display:false} }
-          }
-        }
+        data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>p[selectedMetric]), borderColor: bm.color, backgroundColor: bm.color+'26', fill:true, tension:0.3 }]},
+        options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
       });
     }
   }
