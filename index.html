@@ -2715,6 +2715,17 @@ function mountNutritionChart(){
 }
 
 /* ---------- PROGRESS TAB ---------- */
+const BODY_METRICS = [
+  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F', axis:'yKg'},
+  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C', axis:'yCm'},
+  {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C', axis:'yCm'},
+  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63', axis:'yCm'},
+  {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF', axis:'yCm'},
+  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC', axis:'yCm'}
+];
+function formatMeasurementLine(m){
+  return BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`${bm.label} ${m[bm.key]}${bm.unit}`).join(' · ') || '—';
+}
 function renderProgress(){
   const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0);
   const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
@@ -2723,14 +2734,14 @@ function renderProgress(){
   const measurementsHtml = state.measurements.slice().reverse().slice(0,6).map(m=>`
     <div class="history-item">
       <span class="date">${fmtDate(m.date)}</span>
-      <span class="val">${m.weight?m.weight+'kg':''}</span>
+      <span class="val">${escapeHtml(formatMeasurementLine(m))}</span>
       <button class="remove-row" onclick="deleteMeasurement('${m.id}')">✕</button>
     </div>`).join('') || `<div class="note">Noch keine Einträge.</div>`;
 
   return `
     <div class="card">
-      <h2>Körpergewicht über Zeit</h2>
-      <div class="chart-wrap"><canvas id="weightChart"></canvas></div>
+      <h2>Körpermaße über Zeit</h2>
+      ${state.measurements.length ? `<div class="chart-wrap"><canvas id="bodyChart"></canvas></div>` : `<div class="empty-state">Noch keine Messungen vorhanden.</div>`}
     </div>
     <div class="card">
       <h2>1RM-Fortschritt</h2>
@@ -2745,6 +2756,10 @@ function renderProgress(){
       <div class="row">
         <div class="field"><label>Gewicht (kg)</label><input type="number" step="0.1" id="measWeight"></div>
         <div class="field"><label>Taille (cm)</label><input type="number" step="0.5" id="measWaist"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Bauch (cm)</label><input type="number" step="0.5" id="measBelly"></div>
+        <div class="field"><label>Hüfte (cm)</label><input type="number" step="0.5" id="measHip"></div>
       </div>
       <div class="row">
         <div class="field"><label>Brust (cm)</label><input type="number" step="0.5" id="measChest"></div>
@@ -2765,6 +2780,8 @@ async function saveMeasurement(){
     id:uid(), date,
     weight: parseFloat(document.getElementById('measWeight').value)||null,
     waist: parseFloat(document.getElementById('measWaist').value)||null,
+    belly: parseFloat(document.getElementById('measBelly').value)||null,
+    hip: parseFloat(document.getElementById('measHip').value)||null,
     chest: parseFloat(document.getElementById('measChest').value)||null,
     arms: parseFloat(document.getElementById('measArms').value)||null
   };
@@ -2780,15 +2797,39 @@ async function deleteMeasurement(id){
 }
 function mountProgressCharts(){
   if(typeof Chart==='undefined') return;
-  const wCanvas = document.getElementById('weightChart');
-  if(wCanvas){
-    const pts = state.measurements.filter(m=>m.weight).sort((a,b)=>a.date.localeCompare(b.date));
-    if(charts.weight) charts.weight.destroy();
-    charts.weight = new Chart(wCanvas, {
-      type:'line',
-      data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>p.weight), borderColor:'#E8B93F', backgroundColor:'rgba(232,185,63,0.15)', fill:true, tension:0.3 }]},
-      options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
-    });
+  const bCanvas = document.getElementById('bodyChart');
+  if(bCanvas){
+    const allDates = [...new Set(state.measurements.map(m=>m.date))].sort();
+    const byDate = {};
+    state.measurements.forEach(m=>{ byDate[m.date] = m; });
+    const datasets = BODY_METRICS
+      .filter(bm=>state.measurements.some(m=>m[bm.key]!=null))
+      .map(bm=>({
+        label: `${bm.label} (${bm.unit})`,
+        data: allDates.map(d=> (byDate[d] && byDate[d][bm.key]!=null) ? byDate[d][bm.key] : null),
+        borderColor: bm.color,
+        backgroundColor: bm.color,
+        yAxisID: bm.axis,
+        spanGaps: true,
+        tension: 0.3,
+        pointRadius: 2,
+        fill: false
+      }));
+    if(charts.body) charts.body.destroy();
+    if(datasets.length){
+      charts.body = new Chart(bCanvas, {
+        type:'line',
+        data:{ labels: allDates.map(d=>fmtDate(d)), datasets },
+        options:{
+          plugins:{ legend:{ display:true, position:'bottom', labels:{ color:'#D8D2C2', boxWidth:12, font:{size:10} } } },
+          scales:{
+            x:{ ticks:{color:'#565C68',font:{size:9}}, grid:{display:false} },
+            yKg:{ position:'left', ticks:{color:'#565C68'}, grid:{color:'#333740'} },
+            yCm:{ position:'right', ticks:{color:'#565C68'}, grid:{display:false} }
+          }
+        }
+      });
+    }
   }
   const eCanvas = document.getElementById('e1rmChart');
   if(eCanvas){
