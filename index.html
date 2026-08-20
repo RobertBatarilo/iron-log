@@ -31,6 +31,17 @@
     --font-body:'Inter',sans-serif;
     --font-mono:'IBM Plex Mono',monospace;
   }
+  :root[data-theme="light"]{
+    --graphite-900:#F1EDE4;
+    --graphite-800:#FFFFFF;
+    --iron-700:#D8D2C2;
+    --iron-600:#C7C0AE;
+    --iron-500:#8A8578;
+    --chalk-50:#1B1D21;
+    --chalk-200:#40454F;
+    --chalk-yellow:#A9790A;
+    --success-green:#4F7A48;
+  }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   body{
@@ -377,6 +388,7 @@ const DEFAULT_EXERCISES_RAW = [
 const DEFAULT_EXERCISES = DEFAULT_EXERCISES_RAW.map(e => ({id: slug(e.name), name: e.name, custom:false, type: e.type}));
 function cloneDefaultExercises(){ return DEFAULT_EXERCISES.map(e=>({...e})); }
 function getExerciseType(ex){ return (ex && ex.type) || 'weighted'; }
+function sortedExercises(){ return state.exercises.slice().sort((a,b)=>a.name.localeCompare(b.name,'de')); }
 
 function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')+ '-' + Math.random().toString(36).slice(2,6);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
@@ -420,6 +432,9 @@ let state = {
 };
 
 let charts = {}; // chart.js instances keyed by canvas id
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function chartTickColor(){ return cssVar('--iron-500'); }
+function chartGridColor(){ return cssVar('--iron-700'); }
 
 /* ---------- Math ---------- */
 function estimate1RM(weight, reps){
@@ -832,6 +847,18 @@ function migrateToWorkouts(oldTrainingLogs, oldWods){
 }
 
 /* ---------- Init ---------- */
+function applyTheme(theme){
+  document.documentElement.dataset.theme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', theme==='light' ? '#F1EDE4' : '#1B1D21');
+}
+async function setTheme(theme){
+  state.profile = state.profile || {};
+  state.profile.theme = theme;
+  applyTheme(theme);
+  await saveKey('profile', state.profile);
+  render();
+}
 async function init(){
   const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan] = await Promise.all([
     loadKey('profile', null),
@@ -846,6 +873,7 @@ async function init(){
     loadKey('trainingPlan', null)
   ]);
   state.profile = profile;
+  applyTheme((profile && profile.theme) || 'dark');
   state.trainingPlan = trainingPlan;
   if(exercises && exercises.length){
     state.exercises = exercises;
@@ -1100,15 +1128,15 @@ function isWodInProgress(){
 }
 function renderFormatSelector(){
   const formats = [
-    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'},
-    {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
     {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.'},
+    {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
+    {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'},
     {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
-    {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'}
+    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'}
   ];
   const current = formats.find(f=>f.id===state.tmp.wodFormat) || formats[0];
-  const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl');
-  const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero');
+  const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl').sort((a,b)=>a.name.localeCompare(b.name,'de'));
+  const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero').sort((a,b)=>a.name.localeCompare(b.name,'de'));
   return `
     <div class="card">
       <h2>Workout-Format</h2>
@@ -1228,14 +1256,14 @@ function renderWorkoutHistoryEntry(w){
 function renderWorkout(){
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = renderWorkoutHistory();
-  const formatSelector = isWodInProgress() ? '' : renderFormatSelector();
+  const formatSelector = isWodInProgress() ? '' : (renderFormatSelector() + renderTrainingPlanCard());
 
   if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
   if(state.tmp.wodFormat==='for-load') return formatSelector + renderForLoadFlow(historyHtml);
 
   ensureWodTemplate();
-  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
 
   if(state.tmp.wodPhase==='live') return renderWodLivePhase();
@@ -1279,7 +1307,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
         <select onchange="updateTemplateField(${mi},'exerciseId',this.value)">
-          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===t.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+          ${sortedExercises().map(e=>`<option value="${e.id}" ${e.id===t.exerciseId?'selected':''}>${e.name}</option>`).join('')}
         </select>
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateTemplateField(${mi},'exerciseId',exId))">➕</button>
         ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
@@ -1552,7 +1580,7 @@ function renderForTimeFlow(historyHtml){
   if(b.phase==='summary') return renderForTimeSummary(b);
   if(b.phase==='running') return renderForTimeRunning(b);
 
-  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
   const moveBlocks = b.movements.map((m,mi)=>{
     const ex = state.exercises.find(e=>e.id===m.exerciseId);
@@ -1572,7 +1600,7 @@ function renderForTimeFlow(historyHtml){
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
         <select onchange="updateForTimeMove(${mi},'exerciseId',this.value)">
-          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+          ${sortedExercises().map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
         </select>
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForTimeMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeForTimeMove(${mi})">✕</button>` : ''}
@@ -1763,7 +1791,7 @@ function renderAmrapFlow(historyHtml){
   if(b.phase==='summary') return renderAmrapSummary(b);
   if(b.phase==='running') return renderAmrapRunning(b);
 
-  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
   const moveBlocks = b.movements.map((m,mi)=>{
     const ex = state.exercises.find(e=>e.id===m.exerciseId);
@@ -1783,7 +1811,7 @@ function renderAmrapFlow(historyHtml){
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
         <select onchange="updateAmrapMove(${mi},'exerciseId',this.value)">
-          ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+          ${sortedExercises().map(e=>`<option value="${e.id}" ${e.id===m.exerciseId?'selected':''}>${e.name}</option>`).join('')}
         </select>
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateAmrapMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeAmrapMove(${mi})">✕</button>` : ''}
@@ -1984,7 +2012,7 @@ function renderForLoadFlow(historyHtml){
   if(b.phase==='summary') return renderForLoadSummary(b);
   if(b.phase==='running') return renderForLoadRunning(b);
 
-  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))];
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
   return `
     <div class="card">
@@ -1993,7 +2021,7 @@ function renderForLoadFlow(historyHtml){
       <div class="wod-move-row">
         <div class="top">
           <select onchange="updateForLoadField('exerciseId',this.value)">
-            ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===b.exerciseId?'selected':''}>${e.name}</option>`).join('')}
+            ${sortedExercises().map(e=>`<option value="${e.id}" ${e.id===b.exerciseId?'selected':''}>${e.name}</option>`).join('')}
           </select>
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
@@ -2432,7 +2460,7 @@ function resetInterval(){
 }
 function renderTimer(){
   const t = state.tmp.timer;
-  const modeBtn = (m,label)=>`<button class="btn ${t.mode===m?'btn-primary':'btn-ghost'}" style="flex:1;" onclick="switchTimerMode('${m}')">${label}</button>`;
+  const modeBtn = (m,label)=>`<button class="btn btn-sm ${t.mode===m?'btn-primary':'btn-ghost'}" style="flex:1;" onclick="switchTimerMode('${m}')">${label}</button>`;
   let body = '';
   if(t.mode==='stopwatch') body = renderStopwatchUI(t);
   if(t.mode==='countdown') body = renderCountdownUI(t);
@@ -2441,9 +2469,9 @@ function renderTimer(){
     <div class="card">
       <h2>Timer</h2>
       <div class="row" style="margin-bottom:16px;">
-        ${modeBtn('stopwatch','Stoppuhr')}
         ${modeBtn('countdown','Countdown')}
         ${modeBtn('interval','Intervall')}
+        ${modeBtn('stopwatch','Stoppuhr')}
       </div>
       ${body}
     </div>
@@ -2515,8 +2543,8 @@ function renderIntervalUI(t){
   `;
 }
 
-/* ---------- ERFOLGE (1RM-Rekorde & Bestzeiten, jetzt Teil des Fortschritt-Tabs) ---------- */
-function renderAchievements(){
+/* ---------- ERFOLGE (1RM-Rekorde & Bestzeiten, jetzt Unterseiten des Fortschritt-Tabs) ---------- */
+function renderPrCards(){
   const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
   const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
   const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
@@ -2540,11 +2568,38 @@ function renderAchievements(){
     </div>`;
   }).join('') : `<div class="note">Noch keine 1RM-Werte vorhanden.</div>`;
 
+  return `
+    <div class="card">
+      <h2>${editingPr ? '1RM bearbeiten' : 'Neuer 1RM-Rekord'}</h2>
+      <div class="field">
+        <label>Übung</label>
+        <div style="display:flex;gap:8px;">
+          <select id="prExercise" style="flex:1;" onchange="state.tmp.prExerciseSelection=this.value">
+            ${sortedExercises().map(e=>`<option value="${e.id}" ${e.id===selectedPrExerciseId?'selected':''}>${e.name}</option>`).join('')}
+          </select>
+          <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>{state.tmp.prExerciseSelection=exId;})">➕</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>1RM (kg)</label><input type="number" step="0.5" id="prValue" value="${editingPr?editingPr.value:''}" placeholder="z.B. 100"></div>
+        <div class="field"><label>Datum</label><input type="date" id="prDate" value="${editingPr?editingPr.date:todayStr()}"></div>
+      </div>
+      <button class="btn btn-primary" onclick="savePrEntry()">${editingPr ? 'Aktualisieren' : 'Eintragen'}</button>
+      ${editingPr ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditPr()">Abbrechen</button>` : ''}
+      <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Deine 1RM-Werte</h2>
+      ${listHtml}
+    </div>
+  `;
+}
+function renderTimeCards(){
   const editingTime = state.tmp.editingTimeId ? state.timeRecords.find(t=>t.id===state.tmp.editingTimeId) : null;
   const uniqueTimeNames = [...new Set([
     ...state.workouts.map(w=>w.name),
     ...state.timeRecords.map(t=>t.name)
-  ].filter(Boolean))];
+  ].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const timesByName = {};
   state.timeRecords.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(t=>{
     (timesByName[t.name] = timesByName[t.name]||[]).push(t);
@@ -2565,29 +2620,6 @@ function renderAchievements(){
   `).join('') : `<div class="note">Noch keine Zeiten vorhanden.</div>`;
 
   return `
-    <div class="card">
-      <h2>${editingPr ? '1RM bearbeiten' : 'Neuer 1RM-Rekord'}</h2>
-      <div class="field">
-        <label>Übung</label>
-        <div style="display:flex;gap:8px;">
-          <select id="prExercise" style="flex:1;" onchange="state.tmp.prExerciseSelection=this.value">
-            ${state.exercises.map(e=>`<option value="${e.id}" ${e.id===selectedPrExerciseId?'selected':''}>${e.name}</option>`).join('')}
-          </select>
-          <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>{state.tmp.prExerciseSelection=exId;})">➕</button>
-        </div>
-      </div>
-      <div class="row">
-        <div class="field"><label>1RM (kg)</label><input type="number" step="0.5" id="prValue" value="${editingPr?editingPr.value:''}" placeholder="z.B. 100"></div>
-        <div class="field"><label>Datum</label><input type="date" id="prDate" value="${editingPr?editingPr.date:todayStr()}"></div>
-      </div>
-      <button class="btn btn-primary" onclick="savePrEntry()">${editingPr ? 'Aktualisieren' : 'Eintragen'}</button>
-      ${editingPr ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditPr()">Abbrechen</button>` : ''}
-      <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
-    </div>
-    <div class="card">
-      <h2 class="small">Deine 1RM-Werte</h2>
-      ${listHtml}
-    </div>
     <div class="card">
       <h2>${editingTime ? 'Bestzeit bearbeiten' : 'Neue Bestzeit'}</h2>
       <div class="field">
@@ -2760,27 +2792,64 @@ function mountNutritionChart(){
   charts.kcal = new Chart(canvas, {
     type:'bar',
     data:{ labels: days.map(d=>fmtDate(d)), datasets:[{ data: totals, backgroundColor:'#C8443C', borderRadius:4 }]},
-    options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+    options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:chartTickColor(),font:{size:9}},grid:{display:false}}, y:{ticks:{color:chartTickColor()},grid:{color:chartGridColor()}}}}
   });
 }
 
 /* ---------- PROGRESS TAB ---------- */
 const BODY_METRICS = [
-  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F'},
-  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C'},
+  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC'},
   {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C'},
-  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63'},
   {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF'},
-  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC'}
+  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F'},
+  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63'},
+  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C'}
 ];
 function formatMeasurementLine(m){
   return BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`${bm.label} ${m[bm.key]}${bm.unit}`).join(' · ') || '—';
 }
 function renderProgress(){
-  const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0);
+  const section = state.tmp.progressSection;
+  if(section==='1rm') return renderProgress1RM();
+  if(section==='times') return renderProgressTimes();
+  if(section==='body') return renderProgressBody();
+  return renderProgressMenu();
+}
+function renderProgressMenu(){
+  return `
+    <div class="card">
+      <h2>Fortschritt</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏋️ 1RM</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('body')">📏 Körpermaße</button>
+    </div>
+  `;
+}
+function setProgressSection(s){ state.tmp.progressSection = s; render(); }
+function renderProgress1RM(){
+  const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0).sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
   const exOptions = exWithLogs.map(e=>`<option value="${e.id}" ${e.id===selectedEx?'selected':''}>${e.name}</option>`).join('');
 
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="card">
+      <h2>1RM-Fortschritt</h2>
+      ${exWithLogs.length ? `
+      <div class="field"><select onchange="setProgressExercise(this.value)">${exOptions}</select></div>
+      <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
+      ` : `<div class="empty-state">Noch keine Trainingsdaten vorhanden.</div>`}
+    </div>
+    ${renderPrCards()}
+  `;
+}
+function renderProgressTimes(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    ${renderTimeCards()}
+  `;
+}
+function renderProgressBody(){
   const measurementsHtml = state.measurements.slice().reverse().slice(0,6).map(m=>`
     <div class="history-item">
       <span class="date">${fmtDate(m.date)}</span>
@@ -2794,14 +2863,7 @@ function renderProgress(){
   const metricButtons = BODY_METRICS.map(bm=>`<button class="btn ${bm.key===selectedMetric?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setProgressMetric('${bm.key}')">${bm.label}</button>`).join('');
 
   return `
-    <div class="card">
-      <h2>1RM-Fortschritt</h2>
-      ${exWithLogs.length ? `
-      <div class="field"><select onchange="setProgressExercise(this.value)">${exOptions}</select></div>
-      <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
-      ` : `<div class="empty-state">Noch keine Trainingsdaten vorhanden.</div>`}
-    </div>
-    ${renderAchievements()}
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
     <div class="card">
       <h2>Körpermaße über Zeit</h2>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:14px;">${metricButtons}</div>
@@ -2865,20 +2927,20 @@ function mountProgressCharts(){
       charts.body = new Chart(bCanvas, {
         type:'line',
         data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>p[selectedMetric]), borderColor: bm.color, backgroundColor: bm.color+'26', fill:true, tension:0.3 }]},
-        options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+        options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:chartTickColor(),font:{size:9}},grid:{display:false}}, y:{ticks:{color:chartTickColor()},grid:{color:chartGridColor()}}}}
       });
     }
   }
   const eCanvas = document.getElementById('e1rmChart');
   if(eCanvas){
-    const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0);
+    const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0).sort((a,b)=>a.name.localeCompare(b.name,'de'));
     const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
     const pts = exerciseLogs(selectedEx);
     if(charts.e1rm) charts.e1rm.destroy();
     charts.e1rm = new Chart(eCanvas, {
       type:'line',
       data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>Math.round(sessionE1RM(p))), borderColor:'#C8443C', backgroundColor:'rgba(200,68,60,0.15)', fill:true, tension:0.3 }]},
-      options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#565C68',font:{size:9}},grid:{display:false}}, y:{ticks:{color:'#565C68'},grid:{color:'#333740'}}}}
+      options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:chartTickColor(),font:{size:9}},grid:{display:false}}, y:{ticks:{color:chartTickColor()},grid:{color:chartGridColor()}}}}
     });
   }
 }
@@ -2939,8 +3001,33 @@ async function createTrainingPlan(){
   render();
 }
 function renderProfile(){
-  const p = state.profile || {};
+  const section = state.tmp.profileSection;
+  if(section==='settings') return renderProfileSettings();
+  if(section==='data') return renderProfileData();
+  return renderProfileMenu();
+}
+function renderProfileMenu(){
   return `
+    <div class="card">
+      <h2>Profil</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('settings')">⚙️ Einstellungen</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
+    </div>
+  `;
+}
+function setProfileSection(s){ state.tmp.profileSection = s; render(); }
+function renderProfileSettings(){
+  const p = state.profile || {};
+  const theme = p.theme || 'dark';
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <div class="card">
+      <h2>Darstellung</h2>
+      <div class="row">
+        <button class="btn ${theme==='dark'?'btn-primary':'btn-ghost'}" onclick="setTheme('dark')">Dunkel</button>
+        <button class="btn ${theme==='light'?'btn-primary':'btn-ghost'}" onclick="setTheme('light')">Hell</button>
+      </div>
+    </div>
     <div class="card">
       <h2>Grunddaten</h2>
       <div class="row">
@@ -2952,9 +3039,9 @@ function renderProfile(){
         <div class="field"><label>Geschlecht</label>
           <select id="pGender">
             <option value="">Keine Angabe</option>
+            <option value="d" ${p.gender==='d'?'selected':''}>Divers</option>
             <option value="m" ${p.gender==='m'?'selected':''}>Männlich</option>
             <option value="w" ${p.gender==='w'?'selected':''}>Weiblich</option>
-            <option value="d" ${p.gender==='d'?'selected':''}>Divers</option>
           </select>
         </div>
       </div>
@@ -2979,9 +3066,17 @@ function renderProfile(){
       <div class="note" style="margin-bottom:10px;">Gilt für Gewichts- und Distanz-Angaben bei For Time / AMRAP / For Load. Bereits gespeicherte Werte werden intern weiterhin in kg/Meter geführt und nur zur Anzeige umgerechnet.</div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
     </div>
-    ${renderTrainingPlanCard()}
     <div class="card">
-      <h2 class="small">Daten-Verwaltung</h2>
+      <h2 class="small">Konto</h2>
+      <div class="note">Deine Daten liegen aktuell ausschließlich lokal auf diesem Gerät — es gibt noch kein Konto und keine Cloud-Synchronisierung. Anmeldedaten- und Passwortverwaltung kommen, sobald die Backend-Anbindung steht.</div>
+    </div>
+  `;
+}
+function renderProfileData(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <div class="card">
+      <h2>Daten-Verwaltung</h2>
       <div class="note" style="margin-bottom:10px;">Deine Daten werden ausschließlich für dich gespeichert.</div>
       <button class="btn btn-danger" onclick="handleResetClick()">${state.tmp.confirmReset ? 'Wirklich? Ja, alles löschen' : 'Alle Daten löschen'}</button>
       ${state.tmp.confirmReset ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelResetClick()">Abbrechen</button>` : ''}
@@ -2998,6 +3093,7 @@ function cancelResetClick(){
 }
 async function saveProfile(){
   state.profile = {
+    ...state.profile,
     height: parseFloat(document.getElementById('pHeight').value)||null,
     weight: parseFloat(document.getElementById('pWeight').value)||null,
     age: parseInt(document.getElementById('pAge').value)||null,
