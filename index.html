@@ -383,7 +383,7 @@ const DEFAULT_EXERCISES_RAW = [
   {name:'Strict Press', type:'weighted'}, {name:'Clean', type:'weighted'}, {name:'Power Clean', type:'weighted'},
   {name:'Snatch', type:'weighted'}, {name:'Power Snatch', type:'weighted'}, {name:'Clean & Jerk', type:'weighted'},
   {name:'Thruster', type:'weighted'}, {name:'Pull-up', type:'bodyweight'}, {name:'Bent-over Row', type:'weighted'},
-  {name:'Row', type:'cardio'}, {name:'Air Bike', type:'cardio'}, {name:'Bike', type:'cardio'}, {name:'Ski Erg', type:'cardio'}
+  {name:'Row', type:'cardio'}, {name:'Air Bike', type:'cardio'}, {name:'Bike', type:'cardio'}, {name:'Ski Erg', type:'cardio'}, {name:'Run', type:'cardio'}
 ];
 const DEFAULT_EXERCISES = DEFAULT_EXERCISES_RAW.map(e => ({id: slug(e.name), name: e.name, custom:false, type: e.type}));
 function cloneDefaultExercises(){ return DEFAULT_EXERCISES.map(e=>({...e})); }
@@ -403,8 +403,9 @@ function defaultTmp(){
     wodFormat:'strength',
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null,
     live:null,
-    forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null,
+    forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10,
+    gps:null,
     timer:{
       mode:'stopwatch',
       swRunning:false, swElapsed:0, swStartedAt:null, swLaps:[],
@@ -646,7 +647,11 @@ function generateTrainingPlan(status, location, frequency){
 function todaysPlanKey(){
   return PLAN_DAY_KEYS[(new Date().getDay()+6)%7];
 }
-const CARDIO_MACHINE_NAMES = ['Row','Air Bike','Bike','Ski Erg'];
+const CARDIO_MACHINE_NAMES = ['Row','Air Bike','Bike','Ski Erg','Run'];
+const GPS_RUN_NAMES = ['run','lauf'];
+function isRunExercise(ex){
+  return !!ex && getExerciseType(ex)==='cardio' && GPS_RUN_NAMES.some(n=>ex.name.toLowerCase().includes(n));
+}
 function guessExerciseType(name){
   const n = name.toLowerCase();
   if(CARDIO_MACHINE_NAMES.some(c=>n.includes(c.toLowerCase()))) return 'cardio';
@@ -1124,6 +1129,7 @@ function isWodInProgress(){
   if(a && a.phase!=='build') return true;
   const f = state.tmp.forLoadBuilder;
   if(f && f.phase!=='build') return true;
+  if(state.tmp.gps) return true;
   return false;
 }
 function renderFormatSelector(){
@@ -1132,6 +1138,7 @@ function renderFormatSelector(){
     {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
     {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'},
     {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
+    {id:'run', label:'Run', hint:'GPS-getrackter Lauf — Distanz, Zeit, Pace.'},
     {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'}
   ];
   const current = formats.find(f=>f.id===state.tmp.wodFormat) || formats[0];
@@ -1184,6 +1191,7 @@ function setWodFormat(fmt){
   state.tmp.forTimeBuilder = null;
   state.tmp.amrapBuilder = null;
   state.tmp.forLoadBuilder = null;
+  state.tmp.gps = null;
   render();
 }
 function renderWorkoutHistory(){
@@ -1235,6 +1243,13 @@ function renderWorkoutHistoryEntry(w){
       <div><span>${ex?ex.name:'—'}</span><span>${fmtWeight(fl.achievedWeight)}</span></div>
       <div><span>Ziel-Wdh.</span><span>${fl.targetReps||'—'}</span></div>
     </div>`;
+  } else if(format==='run'){
+    const r = w.run || {};
+    body = `<div class="moves">
+      <div><span>Distanz</span><span>${toDisplayDistance(r.distanceM)}${distanceUnitLabel()}</span></div>
+      <div><span>Zeit</span><span>${r.elapsedSec!=null?fmtClock(r.elapsedSec*1000,false):'—'}</span></div>
+      <div><span>Ø Pace</span><span>${formatPace(r.distanceM||0, (r.elapsedSec||0)*1000)}</span></div>
+    </div>`;
   } else {
     body = `<div class="moves">
       ${w.movements.map(m=>{
@@ -1254,6 +1269,7 @@ function renderWorkoutHistoryEntry(w){
 }
 
 function renderWorkout(){
+  if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = renderWorkoutHistory();
   const formatSelector = isWodInProgress() ? '' : (renderFormatSelector() + renderTrainingPlanCard());
@@ -1261,6 +1277,7 @@ function renderWorkout(){
   if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
   if(state.tmp.wodFormat==='for-load') return formatSelector + renderForLoadFlow(historyHtml);
+  if(state.tmp.wodFormat==='run') return formatSelector + renderRunFlow(historyHtml);
 
   ensureWodTemplate();
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
@@ -1508,6 +1525,8 @@ function pauseLiveRest(){
   if(am && am.phase==='running' && am.running){ pauseAmrapClock(); return; }
   const fl = state.tmp.forLoadBuilder;
   if(fl && fl.phase==='running' && fl.running){ pauseForLoadClock(); return; }
+  const g = state.tmp.gps;
+  if(g && g.active && g.running){ pauseGpsRun(); return; }
 }
 function skipRest(){
   stopTicking();
@@ -1596,6 +1615,7 @@ function renderForTimeFlow(historyHtml){
       </div>` : '';
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
@@ -1610,6 +1630,7 @@ function renderForTimeFlow(historyHtml){
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 30"></div>
         ${weightField}
       </div>
+      ${gpsButton}
     </div>`;
   }).join('');
 
@@ -1775,6 +1796,60 @@ async function saveForTimeWorkout(){
   render();
 }
 
+/* ---------- RUN (eigenständiges, GPS-getracktes Format) ---------- */
+function renderRunFlow(historyHtml){
+  const g = state.tmp.gps;
+  if(g && g.mode==='standalone' && !g.active) return renderRunSummary(g);
+
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+  const headerFields = buildHeaderFields(uniqueNames);
+  return `
+    <div class="card">
+      <h2>Neuer Lauf</h2>
+      ${headerFields}
+      <div class="note" style="margin-bottom:14px;">Startet die GPS-Standortfreigabe deines Browsers und misst Distanz, Zeit und Pace live — Bildschirm währenddessen bitte an lassen.</div>
+      <button class="btn btn-primary" onclick="startGpsRunFromBuild()">📍 GPS-Tracking starten</button>
+    </div>
+    ${historyHtml}
+  `;
+}
+function startGpsRunFromBuild(){
+  state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
+  state.tmp.wodName = document.getElementById('wodName').value.trim();
+  startGpsRun('standalone', null);
+}
+function renderRunSummary(g){
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>Lauf abgeschlossen 🏁</h2>
+      <div class="stat-num" style="font-size:40px;margin:14px 0;">${toDisplayDistance(g.distanceM)}${distanceUnitLabel()}</div>
+      ${g.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(g.error)}</div>` : ''}
+      <div class="row" style="margin-bottom:14px;">
+        <div><div class="stat-num" style="font-size:20px;">${fmtClock(g.elapsedMs,false)}</div><div class="stat-label">Zeit</div></div>
+        <div><div class="stat-num" style="font-size:20px;">${formatPace(g.distanceM, g.elapsedMs)}</div><div class="stat-label">Ø Pace</div></div>
+      </div>
+      <div class="field" style="text-align:left;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Strecke, Wetter, Gefühl …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="saveGpsRun()">Workout speichern</button>
+    </div>
+  `;
+}
+async function saveGpsRun(){
+  const g = state.tmp.gps;
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const note = state.tmp.wodNote || '';
+  const workout = {
+    id: uid(), date, name, note, format:'run', movements: [],
+    run: { distanceM: Math.round(g.distanceM), elapsedSec: Math.round(g.elapsedMs/1000) }
+  };
+  state.workouts.push(workout);
+  await saveKey('workouts', state.workouts);
+  state.tmp.gps = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  showToast('Lauf gespeichert 🏃');
+  render();
+}
+
 /* ---------- AMRAP ---------- */
 function blankAmrapMove(){
   const ex = state.exercises[0];
@@ -1807,6 +1882,7 @@ function renderAmrapFlow(historyHtml){
       </div>` : '';
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
@@ -1821,6 +1897,7 @@ function renderAmrapFlow(historyHtml){
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 10"></div>
         ${weightField}
       </div>
+      ${gpsButton}
     </div>`;
   }).join('');
 
@@ -2306,6 +2383,126 @@ function fmtClock(ms, withTenths){
     return `${base}.${t}`;
   }
   return base;
+}
+
+/* ---------- GPS-Lauferfassung (Standalone-Format "Run" + Inline-Button bei Run/Lauf-Bewegungen) ---------- */
+function haversineMeters(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const toRad = d => d*Math.PI/180;
+  const dLat = toRad(lat2-lat1);
+  const dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function formatPace(distanceM, elapsedMs){
+  if(distanceM<50 || elapsedMs<=0) return '–:--';
+  const paceUnitM = distanceUnitLabel()==='mi' ? M_PER_MILE : 1000;
+  const units = distanceM / paceUnitM;
+  const secPerUnit = (elapsedMs/1000) / units;
+  const m = Math.floor(secPerUnit/60);
+  const s = Math.round(secPerUnit%60);
+  return `${m}:${String(s).padStart(2,'0')}/${distanceUnitLabel()==='mi'?'mi':'km'}`;
+}
+function startGpsRun(mode, inlineTarget){
+  if(!navigator.geolocation){ showToast('GPS wird von diesem Browser nicht unterstützt'); return; }
+  state.tmp.gps = {
+    mode, inlineTarget: inlineTarget||null,
+    watchId: null, active: true, distanceM: 0, lastFix: null,
+    startedAt: Date.now(), elapsedMs: 0, running: true, error: null
+  };
+  state.tmp.gps.watchId = navigator.geolocation.watchPosition(onGpsFix, onGpsError, {enableHighAccuracy:true, maximumAge:0, timeout:15000});
+  startTicking('live', tickGpsRun);
+  render();
+}
+function onGpsFix(pos){
+  const g = state.tmp.gps;
+  if(!g || !g.active) return;
+  const {latitude, longitude, accuracy} = pos.coords;
+  if(accuracy!=null && accuracy>30) return; // zu ungenauer Fix, verwerfen
+  if(g.lastFix){
+    const dt = (pos.timestamp - g.lastFix.t)/1000;
+    const segment = haversineMeters(g.lastFix.lat, g.lastFix.lon, latitude, longitude);
+    const speed = dt>0 ? segment/dt : 0;
+    if(segment>=2 && speed<12){ // Rauschen (zu klein) und GPS-Sprünge (>43km/h) filtern
+      g.distanceM += segment;
+    }
+  }
+  g.lastFix = {lat:latitude, lon:longitude, t:pos.timestamp};
+  const distEl = document.getElementById('gpsDistanceDisplay');
+  if(distEl) distEl.textContent = `${toDisplayDistance(g.distanceM)}${distanceUnitLabel()}`;
+  const paceEl = document.getElementById('gpsPaceDisplay');
+  if(paceEl) paceEl.textContent = formatPace(g.distanceM, Date.now()-g.startedAt+g.elapsedMs);
+}
+function onGpsError(err){
+  const g = state.tmp.gps;
+  if(!g) return;
+  const messages = {1:'Standortzugriff verweigert.', 2:'Kein GPS-Signal gefunden.', 3:'Zeitüberschreitung beim Standortabruf.'};
+  g.error = messages[err.code] || 'GPS-Fehler.';
+  g.active = false;
+  g.running = false;
+  stopTicking();
+  render();
+}
+function tickGpsRun(){
+  const g = state.tmp.gps;
+  if(!g || !g.running){ stopTicking(); return; }
+  const elapsed = g.elapsedMs + (Date.now()-g.startedAt);
+  const el = document.getElementById('gpsTimeDisplay');
+  if(el) el.textContent = fmtClock(elapsed,false);
+}
+function pauseGpsRun(){
+  const g = state.tmp.gps;
+  if(g && g.running){
+    g.elapsedMs += Date.now()-g.startedAt;
+    g.running = false;
+    stopTicking();
+  }
+  render();
+}
+function resumeGpsRun(){
+  const g = state.tmp.gps;
+  if(!g) return;
+  g.startedAt = Date.now();
+  g.running = true;
+  startTicking('live', tickGpsRun);
+  render();
+}
+function stopGpsRun(){
+  const g = state.tmp.gps;
+  if(!g) return;
+  if(g.watchId!=null) navigator.geolocation.clearWatch(g.watchId);
+  stopTicking();
+  if(g.running){ g.elapsedMs += Date.now()-g.startedAt; g.running = false; }
+  g.active = false;
+  if(g.mode==='inline' && g.inlineTarget){
+    const builder = g.inlineTarget.flow==='amrap' ? state.tmp.amrapBuilder : state.tmp.forTimeBuilder;
+    if(builder && builder.movements[g.inlineTarget.mi]){
+      builder.movements[g.inlineTarget.mi].reps = String(Math.round(g.distanceM));
+      builder.movements[g.inlineTarget.mi].unit = 'm';
+    }
+    state.tmp.gps = null;
+  }
+  render();
+}
+function renderGpsLiveView(){
+  const g = state.tmp.gps;
+  const minimal = g.mode==='inline';
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">${minimal ? 'Lauf wird getrackt' : 'GPS-Tracking läuft'}</div>
+      <div id="gpsDistanceDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${toDisplayDistance(g.distanceM)}${distanceUnitLabel()}</div>
+      ${minimal ? '' : `
+      <div class="row" style="margin-bottom:14px;">
+        <div><div id="gpsTimeDisplay" class="stat-num" style="font-size:22px;">${fmtClock(g.elapsedMs,false)}</div><div class="stat-label">Zeit</div></div>
+        <div><div id="gpsPaceDisplay" class="stat-num" style="font-size:22px;">${formatPace(g.distanceM, g.elapsedMs)}</div><div class="stat-label">Pace</div></div>
+      </div>`}
+      ${g.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(g.error)}</div>` : ''}
+      <div class="row">
+        <button class="btn ${g.running?'btn-ghost':'btn-primary'}" onclick="${g.running?'pauseGpsRun()':'resumeGpsRun()'}">${g.running?'Pause':'Weiter'}</button>
+        <button class="btn btn-primary" onclick="stopGpsRun()">Stopp</button>
+      </div>
+    </div>
+  `;
 }
 
 /* ---------- TIMER TAB (Stoppuhr / Countdown / Intervall) ---------- */
