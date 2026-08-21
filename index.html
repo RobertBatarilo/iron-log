@@ -1272,7 +1272,7 @@ function renderWorkout(){
   if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = renderWorkoutHistory();
-  const formatSelector = isWodInProgress() ? '' : (renderFormatSelector() + renderTrainingPlanCard());
+  const formatSelector = isWodInProgress() ? '' : renderFormatSelector();
 
   if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
