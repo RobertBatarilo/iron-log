@@ -721,9 +721,10 @@ function findOrCreateExerciseId(name, type){
   return ex.id;
 }
 function buildLibraryMovement(m){
-  const exId = findOrCreateExerciseId(m.name);
+  const cleanName = m.name.replace(/\s+\d+m$/i, '');
+  const exId = findOrCreateExerciseId(cleanName);
   const type = getExerciseType(state.exercises.find(e=>e.id===exId));
-  return {exerciseId: exId, reps: m.reps ? String(m.reps) : '', weight:'', unit: type==='cardio' ? 'kcal' : 'reps'};
+  return {exerciseId: exId, reps: m.reps ? String(m.reps) : '', weight:'', unit: type==='cardio' ? 'm' : 'reps'};
 }
 function buildForTimeBuilderFromWod(wod){
   return {
@@ -1194,10 +1195,12 @@ function ensureWodTemplate(){
 function isTemplateEmpty(){
   return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.timing && !t.setsCount && !t.pctList && !t.weight && !t.qty && !t.repsTarget);
 }
-function findWorkoutByName(name){
+function findWorkoutByName(name, format){
   const n = (name||'').trim().toLowerCase();
   if(!n) return null;
-  const matches = state.workouts.filter(w=>(w.name||'').trim().toLowerCase()===n).sort((a,b)=>a.date.localeCompare(b.date));
+  let matches = state.workouts.filter(w=>(w.name||'').trim().toLowerCase()===n);
+  if(format) matches = matches.filter(w=>(w.format||'strength')===format);
+  matches.sort((a,b)=>a.date.localeCompare(b.date));
   return matches.length ? matches[matches.length-1] : null;
 }
 
@@ -1361,10 +1364,17 @@ function renderWorkoutHistoryEntry(w){
   } else if(format==='for-load'){
     const fl = w.forLoad || {};
     const ex = state.exercises.find(e=>e.id===fl.exerciseId);
-    body = `<div class="moves">
-      <div><span>${ex?ex.name:'—'}</span><span>${fmtWeight(fl.achievedWeight)}</span></div>
-      <div><span>Ziel-Wdh.</span><span>${fl.targetReps||'—'}</span></div>
-    </div>`;
+    if(fl.unit){
+      const qty = fl.unit==='m' ? `${toDisplayDistance(fl.achievedWeight)}${distanceUnitLabel()}` : `${fl.achievedWeight||0} kcal`;
+      body = `<div class="moves">
+        <div><span>${ex?ex.name:'—'}</span><span>${qty}</span></div>
+      </div>`;
+    } else {
+      body = `<div class="moves">
+        <div><span>${ex?ex.name:'—'}</span><span>${fmtWeight(fl.achievedWeight)}</span></div>
+        <div><span>Ziel-Wdh.</span><span>${fl.targetReps||'—'}</span></div>
+      </div>`;
+    }
   } else if(format==='run'){
     const r = w.run || {};
     body = `<div class="moves">
@@ -1471,7 +1481,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       </div>` : '';
     const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
     const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
-    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
+    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alt. zu %"></div>${repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
@@ -1870,14 +1880,18 @@ function renderForTimeFlow(historyHtml){
     </div>`;
   }).join('');
 
+  const refNote = state.tmp.wodNameMatch
+    ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
+    : '';
   return `
     <div class="card">
       <h2>Neues For Time</h2>
       ${headerFields}
+      ${refNote}
       ${moveBlocks}
       <button class="add-move-btn" onclick="addForTimeMove()">+ Bewegung hinzufügen</button>
       <div class="row">
-        <div class="field"><label>Runden (falls kein Rep-Schema)</label><input type="number" step="1" min="1" value="${b.rounds}" oninput="updateForTimeField('rounds',this.value)"></div>
+        <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${b.rounds}" oninput="updateForTimeField('rounds',this.value)"></div>
         <div class="field"><label>Rep-Schema</label><input type="text" value="${escapeHtml(b.repScheme)}" oninput="updateForTimeField('repScheme',this.value)" placeholder="z.B. 21-15-9"></div>
       </div>
       <div class="note" style="margin-bottom:14px;">Rep-Schema überschreibt bei Angabe die Wiederholungen oben — z.B. "21-15-9" erzeugt 3 Runden mit diesen Werten für jede Übung.</div>
@@ -1896,7 +1910,7 @@ function updateForTimeMove(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    b.movements[mi].unit = type==='cardio' ? 'kcal' : 'reps';
+    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : 'reps');
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
@@ -2167,10 +2181,14 @@ function renderAmrapFlow(historyHtml){
     </div>`;
   }).join('');
 
+  const refNote = state.tmp.wodNameMatch
+    ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
+    : '';
   return `
     <div class="card">
       <h2>Neues AMRAP</h2>
       ${headerFields}
+      ${refNote}
       ${moveBlocks}
       <button class="add-move-btn" onclick="addAmrapMove()">+ Bewegung hinzufügen</button>
       <div class="row">
@@ -2188,7 +2206,7 @@ function updateAmrapMove(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    b.movements[mi].unit = type==='cardio' ? 'kcal' : 'reps';
+    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : 'reps');
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
@@ -2356,7 +2374,7 @@ async function saveAmrapWorkout(){
 /* ---------- FOR LOAD ---------- */
 function ensureForLoadBuilder(){
   if(!state.tmp.forLoadBuilder){
-    state.tmp.forLoadBuilder = { phase:'build', exerciseId: state.exercises[0]?.id, targetReps:'3', timeCapMin:'10', timeCapSec:'0', startedAt:null, running:false, elapsedMs:0, timeCapMs:0, achievedWeight:'' };
+    state.tmp.forLoadBuilder = { phase:'build', exerciseId: state.exercises[0]?.id, targetReps:'3', timeCapMin:'10', timeCapSec:'0', startedAt:null, running:false, elapsedMs:0, timeCapMs:0, achievedWeight:'', unit:'kcal' };
   }
 }
 function renderForLoadFlow(historyHtml){
@@ -2376,10 +2394,21 @@ function renderForLoadFlow(historyHtml){
           .map(v=>`<option value="${v.id}" ${v.id===forLoadVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
       </select>
     </div>` : '';
+  const forLoadIsCardio = getExerciseType(forLoadEx)==='cardio';
+  const forLoadUnitToggle = forLoadIsCardio ? `
+    <div class="row" style="margin-bottom:8px;">
+      <button type="button" class="btn ${b.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('kcal')">Kalorien</button>
+      <button type="button" class="btn ${b.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+    </div>` : '';
+  const forLoadTargetField = forLoadIsCardio ? '' : `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>`;
+  const refNote = state.tmp.wodNameMatch
+    ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
+    : '';
   return `
     <div class="card">
       <h2>Neues For Load</h2>
       ${headerFields}
+      ${refNote}
       <div class="wod-move-row">
         <div class="top">
           <select onchange="updateForLoadField('exerciseId',this.value)">
@@ -2388,7 +2417,8 @@ function renderForLoadFlow(historyHtml){
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
         ${forLoadVariantSelector}
-        <div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>
+        ${forLoadUnitToggle}
+        ${forLoadTargetField}
       </div>
       <div class="row" style="margin-top:14px;">
         <div class="field"><label>Time Cap Min.</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForLoadField('timeCapMin',this.value)"></div>
@@ -2402,7 +2432,21 @@ function renderForLoadFlow(historyHtml){
 function updateForLoadField(field, val){
   const b = state.tmp.forLoadBuilder;
   b[field] = val;
-  if(field==='exerciseId') render();
+  if(field==='exerciseId'){
+    const ex = state.exercises.find(e=>e.id===val);
+    const type = getExerciseType(ex);
+    b.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (b.unit||'kcal') : 'kcal');
+    b.achievedWeight = '';
+    render();
+  }
+}
+function setForLoadUnit(unit){
+  state.tmp.forLoadBuilder.unit = unit;
+  render();
+}
+function updateForLoadQty(val){
+  const b = state.tmp.forLoadBuilder;
+  b.achievedWeight = (b.unit==='m' && val!=='') ? String(fromDisplayDistance(val)) : val;
 }
 function updateForLoadFieldVariant(variantId){
   const b = state.tmp.forLoadBuilder;
@@ -2469,12 +2513,18 @@ function finishForLoad(){
 }
 function renderForLoadRunning(b){
   const ex = state.exercises.find(e=>e.id===b.exerciseId);
+  const isCardio = getExerciseType(ex)==='cardio';
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
+  const gpsButton = isCardio && isRunExercise(ex) && b.unit==='m'
+    ? `<div style="text-align:center;margin-top:8px;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-load'})">📍 Lauf starten</button></div>` : '';
+  const achievedField = isCardio
+    ? `<div class="field" style="text-align:left;"><label>${b.unit==='m'?`Distanz (${distanceUnitLabel()})`:'Kalorien'}</label><input type="number" step="1" value="${b.unit==='m'?toDisplayDistance(b.achievedWeight):b.achievedWeight}" oninput="updateForLoadQty(this.value)" placeholder="z.B. 500"></div>${gpsButton}`
+    : `<div class="field" style="text-align:left;"><label>Erreichtes Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(b.achievedWeight)}" oninput="updateForLoadWeight(this.value)" placeholder="z.B. 82.5"></div>`;
   return `
     <div class="card" style="text-align:center;">
-      <div class="stat-label">${ex?ex.name:'—'} · Ziel: ${b.targetReps} Wdh.</div>
+      <div class="stat-label">${ex?ex.name:'—'}${isCardio ? '' : ` · Ziel: ${b.targetReps} Wdh.`}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
-      <div class="field" style="text-align:left;"><label>Erreichtes Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(b.achievedWeight)}" oninput="updateForLoadWeight(this.value)" placeholder="z.B. 82.5"></div>
+      ${achievedField}
       <div class="row" style="margin-top:10px;">
         <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForLoadClock()':'resumeForLoadClock()'}">${b.running?'Pause':'Weiter'}</button>
         <button class="btn btn-primary" onclick="finishForLoad()">Fertig</button>
@@ -2483,6 +2533,19 @@ function renderForLoadRunning(b){
   `;
 }
 function renderForLoadSummary(b){
+  const ex = state.exercises.find(e=>e.id===b.exerciseId);
+  const isCardio = getExerciseType(ex)==='cardio';
+  if(isCardio){
+    const qty = b.unit==='m' ? `${toDisplayDistance(b.achievedWeight)}${distanceUnitLabel()}` : `${b.achievedWeight||0} kcal`;
+    return `
+      <div class="card" style="text-align:center;">
+        <h2>Workout abgeschlossen 🏁</h2>
+        <div class="stat-num" style="font-size:34px;margin:14px 0;">${qty}</div>
+        <div class="field" style="text-align:left;margin-top:14px;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveForLoadWorkout()">Workout speichern</button>
+      </div>
+    `;
+  }
   const weight = parseFloat(b.achievedWeight)||0;
   const reps = parseInt(b.targetReps)||1;
   const est = weight ? estimate1RM(weight, reps) : 0;
@@ -2499,6 +2562,8 @@ function renderForLoadSummary(b){
 }
 async function saveForLoadWorkout(){
   const b = state.tmp.forLoadBuilder;
+  const ex = state.exercises.find(e=>e.id===b.exerciseId);
+  const isCardio = getExerciseType(ex)==='cardio';
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
@@ -2506,11 +2571,11 @@ async function saveForLoadWorkout(){
   const reps = parseInt(b.targetReps)||1;
   const workout = {
     id: uid(), date, name, note, format:'for-load', movements: [],
-    forLoad: { exerciseId: b.exerciseId, targetReps: reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight }
+    forLoad: { exerciseId: b.exerciseId, targetReps: isCardio ? null : reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight, unit: isCardio ? b.unit : null }
   };
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
-  if(weight && document.getElementById('forLoadSaveAsPr')?.checked){
+  if(!isCardio && weight && document.getElementById('forLoadSaveAsPr')?.checked){
     state.prEntries.push({id:uid(), exerciseId: b.exerciseId, value: weight, date});
     await saveKey('prEntries', state.prEntries);
   }
@@ -2526,7 +2591,7 @@ function updateTemplateField(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    t.unit = type==='cardio' ? (t.unit||'kcal') : 'kcal';
+    t.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (t.unit||'kcal') : 'kcal');
     if(type!=='weighted'){ t.weight=''; }
     if(type!=='cardio'){ t.qty=''; }
     if(type!=='weighted'){ t.pctList=''; }
@@ -2564,25 +2629,63 @@ function removeTemplateMove(mi){
   if(!state.tmp.wodTemplate.length) state.tmp.wodTemplate.push(blankTemplateMove());
   render();
 }
+function isForTimeBuilderEmpty(){
+  const b = state.tmp.forTimeBuilder;
+  return !!b && b.movements.length<=1 && !b.movements[0].reps && !b.movements[0].weight;
+}
+function isAmrapBuilderEmpty(){
+  const b = state.tmp.amrapBuilder;
+  return !!b && b.movements.length<=1 && !b.movements[0].reps && !b.movements[0].weight;
+}
+function isForLoadBuilderEmpty(){
+  const b = state.tmp.forLoadBuilder;
+  return !!b && b.exerciseId===state.exercises[0]?.id && !b.achievedWeight;
+}
 function onWodNameChange(val){
   state.tmp.wodName = val;
-  const match = findWorkoutByName(val);
+  const fmt = state.tmp.wodFormat;
+  const match = findWorkoutByName(val, fmt);
   state.tmp.wodNameMatch = match || null;
   state.tmp.wodFeeling = null;
-  if(match && isTemplateEmpty()){
-    state.tmp.wodTemplate = match.movements.map((m,mi)=>{
-      const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
-      const next = match.movements[mi+1];
-      return {
-        exerciseId: m.exerciseId,
-        timing: m.timing || '',
-        setsCount: String(m.sets.length || ''),
-        pctList: pcts.length ? pcts.join(',') : '',
-        weight: '', unit: m.unit || 'kcal', qty: '',
-        repsTarget: m.repsTarget || '',
-        groupWithNext: !!(m.groupId!=null && next && next.groupId===m.groupId)
-      };
-    });
+  if(match){
+    if((fmt==='strength'||fmt==='emom') && isTemplateEmpty()){
+      state.tmp.wodTemplate = match.movements.map((m,mi)=>{
+        const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
+        const next = match.movements[mi+1];
+        return {
+          exerciseId: m.exerciseId,
+          timing: m.timing || '',
+          setsCount: String(m.sets.length || ''),
+          pctList: pcts.length ? pcts.join(',') : '',
+          weight: '', unit: m.unit || 'kcal', qty: '',
+          repsTarget: m.repsTarget || '',
+          groupWithNext: !!(m.groupId!=null && next && next.groupId===m.groupId)
+        };
+      });
+    } else if(fmt==='for-time' && isForTimeBuilderEmpty() && match.forTime){
+      const ft = match.forTime;
+      state.tmp.forTimeBuilder.movements = ft.movements.map(m=>({exerciseId:m.exerciseId, reps:'', weight:'', unit:m.unit||'reps'}));
+      state.tmp.forTimeBuilder.rounds = String(ft.rounds||1);
+      state.tmp.forTimeBuilder.repScheme = ft.repScheme||'';
+      if(ft.timeCapSec){
+        state.tmp.forTimeBuilder.timeCapMin = String(Math.floor(ft.timeCapSec/60));
+        state.tmp.forTimeBuilder.timeCapSec = String(ft.timeCapSec%60);
+      }
+    } else if(fmt==='amrap' && isAmrapBuilderEmpty() && match.amrap){
+      const am = match.amrap;
+      state.tmp.amrapBuilder.movements = am.movements.map(m=>({exerciseId:m.exerciseId, reps:'', weight:'', unit:m.unit||'reps'}));
+      state.tmp.amrapBuilder.durationMin = String(Math.floor((am.durationSec||1200)/60));
+      state.tmp.amrapBuilder.durationSec = String((am.durationSec||1200)%60);
+    } else if(fmt==='for-load' && isForLoadBuilderEmpty() && match.forLoad){
+      const fl = match.forLoad;
+      state.tmp.forLoadBuilder.exerciseId = fl.exerciseId;
+      state.tmp.forLoadBuilder.targetReps = String(fl.targetReps||3);
+      state.tmp.forLoadBuilder.unit = fl.unit || 'reps';
+      if(fl.timeCapSec){
+        state.tmp.forLoadBuilder.timeCapMin = String(Math.floor(fl.timeCapSec/60));
+        state.tmp.forLoadBuilder.timeCapSec = String(fl.timeCapSec%60);
+      }
+    }
   }
   render();
 }
@@ -2724,7 +2827,7 @@ async function saveWod(){
     return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isCardio ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
-  state.workouts.push({id:uid(), date, name, note, movements});
+  state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements});
   await saveKey('workouts', state.workouts);
   state.tmp.wodTemplate = null;
   state.tmp.wodMoves = null;
@@ -2872,6 +2975,9 @@ function stopGpsRun(){
       const s = mv && mv.sets[g.inlineTarget.si];
       if(s){ s.reps = String(Math.round(g.distanceM)); s.autoFilled = false; }
       if(mv) mv.unit = 'm';
+    } else if(g.inlineTarget.flow==='for-load'){
+      const b = state.tmp.forLoadBuilder;
+      if(b){ b.achievedWeight = String(Math.round(g.distanceM)); b.unit = 'm'; }
     } else {
       const builder = g.inlineTarget.flow==='amrap' ? state.tmp.amrapBuilder : state.tmp.forTimeBuilder;
       if(builder && builder.movements[g.inlineTarget.mi]){
