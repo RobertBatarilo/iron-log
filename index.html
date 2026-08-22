@@ -1469,18 +1469,18 @@ function renderWodTemplatePhase(headerFields, historyHtml){
             .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>` : '';
-    const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen (optional)</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
-    const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM (optional)</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75 oder 75,80,85"></div>` : '';
+    const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
+    const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
     const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
         <button type="button" class="btn ${t.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
-    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'}, optional)</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>` : '';
+    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>` : '';
     const setsField = isFollower
       ? `<div class="field" style="margin-bottom:0;align-self:center;"><div class="note" style="margin:0;">Teil des Komplexes — Sets siehe oben</div></div>`
-      : `<div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':'(optional)'}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>`;
+      : `<div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':''}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>`;
     const groupToggle = (isEmom && mi < state.tmp.wodTemplate.length-1) ? `
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;color:var(--chalk-60);">
         <input type="checkbox" ${t.groupWithNext?'checked':''} onchange="updateTemplateField(${mi},'groupWithNext',this.checked)">
@@ -1496,7 +1496,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
       </div>
       ${variantSelector}
-      ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe (optional)</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
+      ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
       <div class="row">
         ${setsField}
         ${pctField}
@@ -1841,7 +1841,7 @@ function renderForTimeFlow(historyHtml){
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
-        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="z.B. 48"></div>` : '';
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
@@ -1878,12 +1878,12 @@ function renderForTimeFlow(historyHtml){
       <button class="add-move-btn" onclick="addForTimeMove()">+ Bewegung hinzufügen</button>
       <div class="row">
         <div class="field"><label>Runden (falls kein Rep-Schema)</label><input type="number" step="1" min="1" value="${b.rounds}" oninput="updateForTimeField('rounds',this.value)"></div>
-        <div class="field"><label>Rep-Schema (optional)</label><input type="text" value="${escapeHtml(b.repScheme)}" oninput="updateForTimeField('repScheme',this.value)" placeholder="z.B. 21-15-9"></div>
+        <div class="field"><label>Rep-Schema</label><input type="text" value="${escapeHtml(b.repScheme)}" oninput="updateForTimeField('repScheme',this.value)" placeholder="z.B. 21-15-9"></div>
       </div>
       <div class="note" style="margin-bottom:14px;">Rep-Schema überschreibt bei Angabe die Wiederholungen oben — z.B. "21-15-9" erzeugt 3 Runden mit diesen Werten für jede Übung.</div>
       <div class="row">
-        <div class="field"><label>Time Cap Min. (optional)</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForTimeField('timeCapMin',this.value)"></div>
-        <div class="field"><label>Time Cap Sek. (optional)</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForTimeField('timeCapSec',this.value)"></div>
+        <div class="field"><label>Time Cap Min.</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForTimeField('timeCapMin',this.value)"></div>
+        <div class="field"><label>Time Cap Sek.</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForTimeField('timeCapSec',this.value)"></div>
       </div>
       <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
     </div>
@@ -2138,7 +2138,7 @@ function renderAmrapFlow(historyHtml){
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
-        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="z.B. 48"></div>` : '';
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
@@ -2388,11 +2388,11 @@ function renderForLoadFlow(historyHtml){
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
         ${forLoadVariantSelector}
-        <div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>
+        <div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>
       </div>
       <div class="row" style="margin-top:14px;">
-        <div class="field"><label>Time Cap Min. (optional)</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForLoadField('timeCapMin',this.value)"></div>
-        <div class="field"><label>Time Cap Sek. (optional)</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForLoadField('timeCapSec',this.value)"></div>
+        <div class="field"><label>Time Cap Min.</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForLoadField('timeCapMin',this.value)"></div>
+        <div class="field"><label>Time Cap Sek.</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForLoadField('timeCapSec',this.value)"></div>
       </div>
       <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
     </div>
@@ -3236,7 +3236,7 @@ function renderTimeCards(){
         <div class="field"><label>Zeit</label><input type="text" id="timeValue" value="${editingTime?escapeHtml(editingTime.time):''}" placeholder="z.B. 3:45"></div>
         <div class="field"><label>Datum</label><input type="date" id="timeDate" value="${editingTime?editingTime.date:todayStr()}"></div>
       </div>
-      <div class="field"><label>Notiz (optional)</label><input type="text" id="timeNote" value="${editingTime?escapeHtml(editingTime.note||''):''}"></div>
+      <div class="field"><label>Notiz</label><input type="text" id="timeNote" value="${editingTime?escapeHtml(editingTime.note||''):''}"></div>
       <button class="btn btn-primary" onclick="saveTimeRecord()">${editingTime ? 'Aktualisieren' : 'Eintragen'}</button>
       ${editingTime ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditTime()">Abbrechen</button>` : ''}
     </div>
@@ -3364,7 +3364,7 @@ function renderNutrition(){
         <div class="field"><label>Kohlenhydrate (g)</label><input type="number" id="nutCarbs" placeholder="g"></div>
         <div class="field"><label>Fett (g)</label><input type="number" id="nutFat" placeholder="g"></div>
       </div>
-      <div class="field"><label>Notiz (optional)</label><input type="text" id="nutNote" placeholder="z.B. Frühstück"></div>
+      <div class="field"><label>Notiz</label><input type="text" id="nutNote" placeholder="z.B. Frühstück"></div>
       <button class="btn btn-primary" onclick="saveNutrition()">Eintrag hinzufügen</button>
     </div>
     <div class="card">
