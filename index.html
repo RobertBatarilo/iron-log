@@ -415,7 +415,10 @@ function defaultTmp(){
     planForm:null,
     exerciseModal:null,
     prExerciseSelection:null,
-    confirmReset:false
+    confirmReset:false,
+    historyCollapsed:false,
+    dayDetailDate:null,
+    workoutMenu:'formats'
   };
 }
 
@@ -997,7 +1000,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
 }
@@ -1023,6 +1026,34 @@ function weekDates(){
   }
   return days;
 }
+function workoutsOnDate(d){
+  return state.workouts.filter(w=>w.date===d);
+}
+function openDayDetailModal(d){
+  state.tmp.dayDetailDate = d;
+  render();
+}
+function closeDayDetailModal(){
+  state.tmp.dayDetailDate = null;
+  render();
+}
+function renderDayDetailModalRoot(){
+  const d = state.tmp.dayDetailDate;
+  if(!d) return '';
+  const dayWorkouts = workoutsOnDate(d);
+  const body = dayWorkouts.length
+    ? dayWorkouts.map(renderWorkoutHistoryEntry).join('')
+    : `<div class="note">Kein Training an diesem Tag.</div>`;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closeDayDetailModal()">
+      <div class="modal-box">
+        <h2>${fmtDate(d)}</h2>
+        ${body}
+        <button class="btn btn-ghost" style="margin-top:14px;" onclick="closeDayDetailModal()">Schließen</button>
+      </div>
+    </div>
+  `;
+}
 function renderToday(){
   const dates = weekDates();
   const trainedDates = new Set(state.workouts.map(w=>w.date));
@@ -1037,7 +1068,7 @@ function renderToday(){
         ? 'background:var(--success-green);color:var(--chalk-50);'
         : 'border:1px solid var(--iron-700);color:var(--iron-500);';
     return `
-      <div style="text-align:center;flex:1;">
+      <div style="text-align:center;flex:1;cursor:pointer;" onclick="openDayDetailModal('${d}')">
         <div class="stat-label">${WEEKDAY_LABELS[i]}</div>
         <div style="width:34px;height:34px;margin:4px auto 0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:600;${circleStyle}">${d.slice(8,10)}</div>
       </div>`;
@@ -1183,38 +1214,53 @@ function isWodInProgress(){
   if(state.tmp.gps) return true;
   return false;
 }
+function setWorkoutMenu(menu){
+  state.tmp.workoutMenu = state.tmp.workoutMenu===menu ? null : menu;
+  render();
+}
 function renderFormatSelector(){
   const formats = [
     {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.'},
     {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
     {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'},
     {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
-    {id:'run', label:'Run', hint:'GPS-getrackter Lauf — Distanz, Zeit, Pace.'},
     {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'}
   ];
-  const current = formats.find(f=>f.id===state.tmp.wodFormat) || formats[0];
   const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl').sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero').sort((a,b)=>a.name.localeCompare(b.name,'de'));
+  const menu = state.tmp.workoutMenu;
+
+  const topRow = `
+    <div class="row" style="flex-wrap:wrap;gap:8px;">
+      <button class="btn ${menu==='formats'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('formats')">Formate</button>
+      <button class="btn ${menu==='girls'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('girls')">Girls</button>
+      <button class="btn ${menu==='heroes'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('heroes')">Heros</button>
+      <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWodFormat('run')">Run</button>
+      <button class="btn btn-ghost" style="flex:1 1 30%;" onclick="setTab('timer')">Timer</button>
+    </div>`;
+
+  let subContent = '';
+  if(menu==='formats'){
+    const current = formats.find(f=>f.id===state.tmp.wodFormat);
+    subContent = `
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px;">
+        ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
+      </div>
+      ${current ? `<div class="note" style="margin-top:8px;">${current.hint}</div>` : ''}`;
+  } else if(menu==='girls' || menu==='heroes'){
+    const list = menu==='girls' ? girlWods : heroWods;
+    subContent = `
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px;">
+        ${list.map(w=>`<button class="btn btn-ghost" style="flex:1 1 30%;" onclick="loadBenchmarkWod('${w.id}')">${w.name}</button>`).join('')}
+      </div>
+      <div class="note" style="margin-top:8px;">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>`;
+  }
+
   return `
     <div class="card">
       <h2>Workout-Format</h2>
-      <div class="row" style="flex-wrap:wrap;gap:8px;">
-        ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
-      </div>
-      <div class="note" style="margin-top:8px;margin-bottom:14px;">${current.hint}</div>
-      <div class="field" style="margin-bottom:0;">
-        <label>Bekanntes WOD laden (optional)</label>
-        <select onchange="loadBenchmarkWod(this.value)">
-          <option value="">– auswählen –</option>
-          <optgroup label="Girls">
-            ${girlWods.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}
-          </optgroup>
-          <optgroup label="Hero WODs">
-            ${heroWods.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}
-          </optgroup>
-        </select>
-        <div class="note">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>
-      </div>
+      ${topRow}
+      ${subContent}
     </div>
   `;
 }
@@ -1224,6 +1270,7 @@ function loadBenchmarkWod(wodId){
   if(!wod) return;
   state.tmp.wodName = wod.name;
   state.tmp.wodDate = todayStr();
+  state.tmp.workoutMenu = 'formats';
   if(wod.format==='amrap'){
     state.tmp.wodFormat = 'amrap';
     state.tmp.amrapBuilder = buildAmrapBuilderFromWod(wod);
@@ -1245,13 +1292,18 @@ function setWodFormat(fmt){
   state.tmp.gps = null;
   render();
 }
+function toggleHistoryCollapsed(){
+  state.tmp.historyCollapsed = !state.tmp.historyCollapsed;
+  render();
+}
 function renderWorkoutHistory(){
+  const collapsed = state.tmp.historyCollapsed;
   const history = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date));
   const html = history.length ? history.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Noch keine Workouts gespeichert.</div>`;
   return `
     <div class="card">
-      <h2 class="small">Verlauf</h2>
-      ${html}
+      <h2 class="small" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleHistoryCollapsed()">Verlauf <span>${collapsed?'▸':'▾'}</span></h2>
+      ${collapsed ? '' : html}
     </div>
   `;
 }
@@ -1514,11 +1566,11 @@ function renderWodRowsPhase(headerFields, historyHtml){
     <div class="card">
       <h2>Neues Workout</h2>
       ${headerFields}
-      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="backToTemplate()">← Vorlage bearbeiten</button>
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="backToTemplate()">← Vorlage bearbeiten</button>
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="startLiveWorkout()">▶ Workout starten</button>
       ${refBlock}
       ${moveBlocks}
       <div class="field"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
-      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="startLiveWorkout()">▶ Geführt starten</button>
       <button class="btn btn-primary" onclick="saveWod()">Workout speichern</button>
     </div>
     ${historyHtml}
@@ -3581,8 +3633,6 @@ function renderProfileSettings(){
         <div class="field"><label>Alter</label><input type="number" id="pAge" value="${p.age||''}"></div>
         <div class="field"><label>Geschlecht</label>
           <select id="pGender">
-            <option value="">Keine Angabe</option>
-            <option value="d" ${p.gender==='d'?'selected':''}>Divers</option>
             <option value="m" ${p.gender==='m'?'selected':''}>Männlich</option>
             <option value="w" ${p.gender==='w'?'selected':''}>Weiblich</option>
           </select>
