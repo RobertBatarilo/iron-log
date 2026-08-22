@@ -488,7 +488,7 @@ const FEELING_ADJUST = {
 
 /* ---------- Grundübungen + Skalierungen (Bodyweight/Gymnastics) ---------- */
 const EXERCISE_LIBRARY = [
-  { id:'pull-up', name:'Pull-up', variants:[
+  { id:'pull-up', name:'Pull-up', type:'bodyweight', variants:[
     {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
     {id:'banded', label:'Banded', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
     {id:'jumping', label:'Jumping', detail:null},
@@ -496,16 +496,16 @@ const EXERCISE_LIBRARY = [
     {id:'butterfly', label:'Butterfly', detail:null},
     {id:'strict', label:'Strict', detail:null},
     {id:'chest-to-bar', label:'Chest-to-Bar', detail:null},
-    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}}
+    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}, type:'weighted'}
   ]},
-  { id:'push-up', name:'Push-up', variants:[
+  { id:'push-up', name:'Push-up', type:'bodyweight', variants:[
     {id:'knee', label:'Knee', detail:null},
     {id:'incline', label:'Incline', detail:null},
     {id:'deficit', label:'Deficit', detail:null},
     {id:'ring', label:'Ring', detail:null},
     {id:'clapping', label:'Clapping/Plyo', detail:null}
   ]},
-  { id:'hspu', name:'Handstand Push-up', variants:[
+  { id:'hspu', name:'Handstand Push-up', type:'bodyweight', variants:[
     {id:'pike', label:'Pike Push-up', detail:null},
     {id:'box-pike', label:'Box/Elevated Pike', detail:null},
     {id:'wall-assisted', label:'Wall-assisted', detail:null},
@@ -513,38 +513,77 @@ const EXERCISE_LIBRARY = [
     {id:'strict', label:'Strict', detail:null},
     {id:'deficit', label:'Deficit', detail:null}
   ]},
-  { id:'dip', name:'Dip', variants:[
+  { id:'dip', name:'Dip', type:'bodyweight', variants:[
     {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
     {id:'bar', label:'Bar/Parallette', detail:null},
     {id:'ring', label:'Ring', detail:null},
-    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}}
+    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}, type:'weighted'}
   ]},
-  { id:'muscle-up', name:'Muscle-up', variants:[
+  { id:'muscle-up', name:'Muscle-up', type:'bodyweight', variants:[
     {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
     {id:'jumping', label:'Jumping', detail:null},
     {id:'bar', label:'Bar', detail:null},
     {id:'ring', label:'Ring', detail:null}
   ]},
-  { id:'toes-to-bar', name:'Toes-to-Bar', variants:[
+  { id:'toes-to-bar', name:'Toes-to-Bar', type:'bodyweight', variants:[
     {id:'hanging-knee-raise', label:'Hanging Knee Raise', detail:null},
     {id:'knees-to-chest', label:'Knees-to-Chest', detail:null},
     {id:'kipping', label:'Kipping', detail:null},
     {id:'strict', label:'Strict', detail:null}
   ]},
-  { id:'pistol-squat', name:'Pistol Squat', variants:[
+  { id:'pistol-squat', name:'Pistol Squat', type:'bodyweight', variants:[
     {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe / Box-Höhe', placeholder:'z.B. Grün oder 30cm'}}
   ]},
-  { id:'rope-climb', name:'Rope Climb', variants:[
+  { id:'rope-climb', name:'Rope Climb', type:'bodyweight', variants:[
     {id:'foot-assisted', label:'Foot-assisted', detail:null},
     {id:'legless', label:'Legless', detail:null}
   ]},
-  { id:'box-jump', name:'Box Jump', variants:[
+  { id:'box-jump', name:'Box Jump', type:'bodyweight', variants:[
     {id:'step-up', label:'Box Step-up', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}},
     {id:'jump', label:'Jump', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}}
   ]},
-  { id:'hs-walk', name:'Handstand Walk', variants:[
+  { id:'hs-walk', name:'Handstand Walk', type:'bodyweight', variants:[
     {id:'wall-assisted', label:'Wall-assisted', detail:null},
     {id:'freestanding', label:'Freestanding', detail:null}
+  ]},
+  { id:'snatch', name:'Snatch', type:'weighted', variants:[
+    {id:'power', label:'Power', detail:null},
+    {id:'hang', label:'Hang', detail:null},
+    {id:'squat', label:'Squat', detail:null},
+    {id:'muscle', label:'Muscle', detail:null},
+    {id:'hang-power', label:'Hang Power', detail:null},
+    {id:'block', label:'Block', detail:null}
+  ]},
+  { id:'clean', name:'Clean', type:'weighted', variants:[
+    {id:'power', label:'Power', detail:null},
+    {id:'hang', label:'Hang', detail:null},
+    {id:'squat', label:'Squat', detail:null},
+    {id:'muscle', label:'Muscle', detail:null},
+    {id:'hang-power', label:'Hang Power', detail:null},
+    {id:'block', label:'Block', detail:null}
+  ]},
+  { id:'clean-and-jerk', name:'Clean & Jerk', type:'weighted', variants:[
+    {id:'power', label:'Power', detail:null}
+  ]},
+  { id:'back-squat', name:'Back Squat', type:'weighted', variants:[
+    {id:'pause', label:'Pause', detail:null},
+    {id:'tempo', label:'Tempo', detail:null},
+    {id:'box', label:'Box', detail:null}
+  ]},
+  { id:'front-squat', name:'Front Squat', type:'weighted', variants:[
+    {id:'pause', label:'Pause', detail:null},
+    {id:'tempo', label:'Tempo', detail:null},
+    {id:'box', label:'Box', detail:null}
+  ]},
+  { id:'deadlift', name:'Deadlift', type:'weighted', variants:[
+    {id:'sumo', label:'Sumo', detail:null},
+    {id:'romanian', label:'Romanian', detail:null},
+    {id:'pause', label:'Pause', detail:null},
+    {id:'deficit', label:'Deficit', detail:{label:'Deficit (cm)', placeholder:'z.B. 5', numeric:true, unit:'cm', signed:false}}
+  ]},
+  { id:'bench-press', name:'Bench Press', type:'weighted', variants:[
+    {id:'pause', label:'Pause', detail:null},
+    {id:'tempo', label:'Tempo', detail:null}
   ]}
 ];
 EXERCISE_LIBRARY.forEach(b=>{ b.variants.unshift({id:'standard', label:'Standard', detail:null}); });
@@ -552,10 +591,22 @@ function composeVariantName(base, variant, detailVal){
   if(!variant || variant.id==='standard') return base.name;
   let name = `${variant.label} ${base.name}`;
   if(variant.detail && detailVal){
-    const val = variant.detail.numeric ? `+${detailVal}kg` : detailVal;
+    const d = variant.detail;
+    const val = d.numeric ? `${d.signed===false?'':'+'}${detailVal}${d.unit||'kg'}` : detailVal;
     name += ` (${val})`;
   }
   return name;
+}
+function matchLibraryVariant(ex){
+  if(!ex) return null;
+  const n = ex.name.toLowerCase();
+  for(const base of EXERCISE_LIBRARY){
+    for(const variant of base.variants){
+      const composed = composeVariantName(base, variant, '').toLowerCase();
+      if(n === composed || (variant.detail && n.startsWith(composed))) return {base, variant};
+    }
+  }
+  return null;
 }
 
 /* ---------- CrossFit-Bibliothek (für automatische Trainingsplan-Erstellung) ---------- */
@@ -755,7 +806,7 @@ function confirmExerciseModal(){
       return;
     }
     name = composeVariantName(base, variant, m.variantDetail);
-    type = variant.id==='weighted' ? 'weighted' : 'bodyweight';
+    type = variant.type || base.type || 'weighted';
   }
   const exId = findOrCreateExerciseId(name, type);
   const cb = m.onSelect;
@@ -1335,6 +1386,14 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const isBodyweight = type==='bodyweight';
     const isCardio = type==='cardio';
     const isFollower = isEmom && mi>0 && state.tmp.wodTemplate[mi-1].groupWithNext;
+    const variantMatch = matchLibraryVariant(ex);
+    const variantSelector = variantMatch ? `
+      <div class="field"><label>Variante</label>
+        <select onchange="updateTemplateFieldVariant(${mi},this.value)">
+          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>` : '';
     const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen (optional)</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
     const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM (optional)</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75 oder 75,80,85"></div>` : '';
     const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
@@ -1361,6 +1420,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateTemplateField(${mi},'exerciseId',exId))">➕</button>
         ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
       </div>
+      ${variantSelector}
       ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe (optional)</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
       <div class="row">
         ${setsField}
@@ -1708,6 +1768,14 @@ function renderForTimeFlow(historyHtml){
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button>` : '';
+    const variantMatch = matchLibraryVariant(ex);
+    const variantSelector = variantMatch ? `
+      <div class="field"><label>Variante</label>
+        <select onchange="updateForTimeMoveVariant(${mi},this.value)">
+          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
@@ -1717,6 +1785,7 @@ function renderForTimeFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForTimeMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeForTimeMove(${mi})">✕</button>` : ''}
       </div>
+      ${variantSelector}
       ${unitToggle}
       <div class="row">
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 30"></div>
@@ -1756,6 +1825,16 @@ function updateForTimeMove(mi, field, val){
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
+}
+function updateForTimeMoveVariant(mi, variantId){
+  const b = state.tmp.forTimeBuilder;
+  const ex = state.exercises.find(e=>e.id===b.movements[mi].exerciseId);
+  const match = matchLibraryVariant(ex);
+  if(!match) return;
+  const variant = match.base.variants.find(v=>v.id===variantId);
+  if(!variant) return;
+  const newId = findOrCreateExerciseId(composeVariantName(match.base, variant, ''), variant.type || match.base.type || 'weighted');
+  updateForTimeMove(mi, 'exerciseId', newId);
 }
 function updateForTimeMoveQty(mi, displayVal){
   const b = state.tmp.forTimeBuilder;
@@ -1986,6 +2065,14 @@ function renderAmrapFlow(historyHtml){
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button>` : '';
+    const variantMatch = matchLibraryVariant(ex);
+    const variantSelector = variantMatch ? `
+      <div class="field"><label>Variante</label>
+        <select onchange="updateAmrapMoveVariant(${mi},this.value)">
+          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
@@ -1995,6 +2082,7 @@ function renderAmrapFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateAmrapMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeAmrapMove(${mi})">✕</button>` : ''}
       </div>
+      ${variantSelector}
       ${unitToggle}
       <div class="row">
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 10"></div>
@@ -2029,6 +2117,16 @@ function updateAmrapMove(mi, field, val){
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
+}
+function updateAmrapMoveVariant(mi, variantId){
+  const b = state.tmp.amrapBuilder;
+  const ex = state.exercises.find(e=>e.id===b.movements[mi].exerciseId);
+  const match = matchLibraryVariant(ex);
+  if(!match) return;
+  const variant = match.base.variants.find(v=>v.id===variantId);
+  if(!variant) return;
+  const newId = findOrCreateExerciseId(composeVariantName(match.base, variant, ''), variant.type || match.base.type || 'weighted');
+  updateAmrapMove(mi, 'exerciseId', newId);
 }
 function updateAmrapMoveQty(mi, displayVal){
   const b = state.tmp.amrapBuilder;
@@ -2194,6 +2292,15 @@ function renderForLoadFlow(historyHtml){
 
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
+  const forLoadEx = state.exercises.find(e=>e.id===b.exerciseId);
+  const forLoadVariantMatch = matchLibraryVariant(forLoadEx);
+  const forLoadVariantSelector = forLoadVariantMatch ? `
+    <div class="field"><label>Variante</label>
+      <select onchange="updateForLoadFieldVariant(this.value)">
+        ${forLoadVariantMatch.base.variants.filter(v=>!v.detail || v.id===forLoadVariantMatch.variant.id)
+          .map(v=>`<option value="${v.id}" ${v.id===forLoadVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>` : '';
   return `
     <div class="card">
       <h2>Neues For Load</h2>
@@ -2205,6 +2312,7 @@ function renderForLoadFlow(historyHtml){
           </select>
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
+        ${forLoadVariantSelector}
         <div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>
       </div>
       <div class="row" style="margin-top:14px;">
@@ -2220,6 +2328,16 @@ function updateForLoadField(field, val){
   const b = state.tmp.forLoadBuilder;
   b[field] = val;
   if(field==='exerciseId') render();
+}
+function updateForLoadFieldVariant(variantId){
+  const b = state.tmp.forLoadBuilder;
+  const ex = state.exercises.find(e=>e.id===b.exerciseId);
+  const match = matchLibraryVariant(ex);
+  if(!match) return;
+  const variant = match.base.variants.find(v=>v.id===variantId);
+  if(!variant) return;
+  const newId = findOrCreateExerciseId(composeVariantName(match.base, variant, ''), variant.type || match.base.type || 'weighted');
+  updateForLoadField('exerciseId', newId);
 }
 function startForLoadWod(){
   const b = state.tmp.forLoadBuilder;
@@ -2340,6 +2458,16 @@ function updateTemplateField(mi, field, val){
     if(type==='cardio'){ t.repsTarget=''; }
   }
   render();
+}
+function updateTemplateFieldVariant(mi, variantId){
+  const t = state.tmp.wodTemplate[mi];
+  const ex = state.exercises.find(e=>e.id===t.exerciseId);
+  const match = matchLibraryVariant(ex);
+  if(!match) return;
+  const variant = match.base.variants.find(v=>v.id===variantId);
+  if(!variant) return;
+  const newId = findOrCreateExerciseId(composeVariantName(match.base, variant, ''), variant.type || match.base.type || 'weighted');
+  updateTemplateField(mi, 'exerciseId', newId);
 }
 function updateTemplateFieldWeight(mi, displayVal){
   state.tmp.wodTemplate[mi].weight = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
@@ -2941,6 +3069,14 @@ function renderPrCards(){
   const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
   const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
   const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
+  const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
+  const prVariantSelector = prVariantMatch ? `
+    <div class="field"><label>Variante</label>
+      <select onchange="updatePrExerciseVariant(this.value)">
+        ${prVariantMatch.base.variants.filter(v=>!v.detail || v.id===prVariantMatch.variant.id)
+          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>` : '';
 
   const listHtml = exercisesWithData.length ? exercisesWithData.map(e=>{
     const computed = computedBest(e.id);
@@ -2973,6 +3109,7 @@ function renderPrCards(){
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>{state.tmp.prExerciseSelection=exId;})">➕</button>
         </div>
       </div>
+      ${prVariantSelector}
       <div class="row">
         <div class="field"><label>1RM (kg)</label><input type="number" step="0.5" id="prValue" value="${editingPr?editingPr.value:''}" placeholder="z.B. 100"></div>
         <div class="field"><label>Datum</label><input type="date" id="prDate" value="${editingPr?editingPr.date:todayStr()}"></div>
@@ -3053,6 +3190,19 @@ async function savePrEntry(){
 }
 function editPrEntry(id){
   state.tmp.editingPrId = id;
+  render();
+}
+function updatePrExerciseVariant(variantId){
+  const currentId = state.tmp.editingPrId
+    ? state.prEntries.find(p=>p.id===state.tmp.editingPrId)?.exerciseId
+    : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
+  const ex = state.exercises.find(e=>e.id===currentId);
+  const match = matchLibraryVariant(ex);
+  if(!match) return;
+  const variant = match.base.variants.find(v=>v.id===variantId);
+  if(!variant) return;
+  const newId = findOrCreateExerciseId(composeVariantName(match.base, variant, ''), variant.type || match.base.type || 'weighted');
+  state.tmp.prExerciseSelection = newId;
   render();
 }
 function cancelEditPr(){
