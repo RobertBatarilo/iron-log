@@ -1222,6 +1222,15 @@ function setWorkoutMenu(menu){
     render();
   }
 }
+function selectRunFormat(){
+  if(state.tmp.workoutMenu==='timer') pauseActiveTimer();
+  state.tmp.workoutMenu = null;
+  if(state.tmp.wodFormat==='run'){
+    render();
+  } else {
+    setWodFormat('run');
+  }
+}
 function renderFormatSelector(){
   const formats = [
     {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.'},
@@ -1239,7 +1248,7 @@ function renderFormatSelector(){
       <button class="btn ${menu==='formats'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('formats')">Formate</button>
       <button class="btn ${menu==='girls'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('girls')">Girls</button>
       <button class="btn ${menu==='heroes'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('heroes')">Heros</button>
-      <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWodFormat('run')">Run</button>
+      <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="selectRunFormat()">Run</button>
       <button class="btn ${menu==='timer'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('timer')">Timer</button>
     </div>`;
 
@@ -1256,7 +1265,7 @@ function renderFormatSelector(){
     const list = menu==='girls' ? girlWods : heroWods;
     subContent = `
       <div class="row" style="flex-wrap:wrap;gap:8px;">
-        ${list.map(w=>`<button class="btn btn-ghost" style="flex:1 1 30%;" onclick="loadBenchmarkWod('${w.id}')">${w.name}</button>`).join('')}
+        ${list.map(w=>`<button class="btn ${w.name===state.tmp.wodName?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="loadBenchmarkWod('${w.id}')">${w.name}</button>`).join('')}
       </div>
       <div class="note" style="margin-top:8px;">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>`;
   }
@@ -1280,7 +1289,6 @@ function loadBenchmarkWod(wodId){
   if(!wod) return;
   state.tmp.wodName = wod.name;
   state.tmp.wodDate = todayStr();
-  state.tmp.workoutMenu = 'formats';
   if(wod.format==='amrap'){
     state.tmp.wodFormat = 'amrap';
     state.tmp.amrapBuilder = buildAmrapBuilderFromWod(wod);
@@ -1392,7 +1400,7 @@ function renderWorkoutHistoryEntry(w){
 function renderWorkout(){
   if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
-  const historyHtml = renderWorkoutHistory();
+  const historyHtml = ''; // Verlauf ist jetzt unter Fortschritt zu finden
   const inProgress = isWodInProgress();
   const formatSelector = inProgress ? '' : renderFormatSelector();
 
@@ -1463,7 +1471,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       </div>` : '';
     const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen (optional)</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
     const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM (optional)</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75 oder 75,80,85"></div>` : '';
-    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
+    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
@@ -1542,7 +1550,7 @@ function renderWodRowsPhase(headerFields, historyHtml){
         const qtyLabel = mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien';
         const qtyValue = mv.unit==='m' ? toDisplayDistance(s.reps) : s.reps;
         const gpsButton = isRunExercise(ex) && mv.unit==='m'
-          ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button>` : '';
+          ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button></div>` : '';
         return `
       <div class="set-block">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1641,7 +1649,7 @@ function renderWodLivePhase(){
     const qtyLabel = isCardio ? (mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
     const qtyValue = isCardio ? (mv.unit==='m' ? toDisplayDistance(s.reps) : s.reps) : s.reps;
     const gpsButton = isCardio && isRunExercise(ex) && mv.unit==='m'
-      ? `<button type="button" class="btn-sm btn-ghost" style="margin-bottom:10px;" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button>` : '';
+      ? `<div style="text-align:center;margin-bottom:10px;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button></div>` : '';
     const prescriptionBits = [];
     if(mv.repsTarget) prescriptionBits.push(mv.repsTarget+' Wdh.');
     if(s.pct) prescriptionBits.push(s.pct+'% 1RM');
@@ -1833,8 +1841,8 @@ function renderForTimeFlow(historyHtml){
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
-        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
-    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button>` : '';
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
@@ -2121,7 +2129,7 @@ function renderAmrapFlow(historyHtml){
     const ex = state.exercises.find(e=>e.id===m.exerciseId);
     const type = getExerciseType(ex);
     const isCardio = type==='cardio';
-    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen pro Runde';
+    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'WH pro Runde';
     const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
     const qtyHandler = isCardio ? `updateAmrapMoveQty(${mi},this.value)` : `updateAmrapMove(${mi},'reps',this.value)`;
     const unitToggle = isCardio ? `
@@ -2130,8 +2138,8 @@ function renderAmrapFlow(historyHtml){
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
-        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
-    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button>` : '';
+        <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="optional"></div>` : '';
+    const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
@@ -3423,6 +3431,7 @@ function renderProgress(){
   if(section==='1rm') return renderProgress1RM();
   if(section==='times') return renderProgressTimes();
   if(section==='body') return renderProgressBody();
+  if(section==='history') return renderProgressHistory();
   return renderProgressMenu();
 }
 function renderProgressMenu(){
@@ -3431,8 +3440,15 @@ function renderProgressMenu(){
       <h2>Fortschritt</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏋️ 1RM</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('body')">📏 Körpermaße</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
     </div>
+  `;
+}
+function renderProgressHistory(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    ${renderWorkoutHistory()}
   `;
 }
 function setProgressSection(s){ state.tmp.progressSection = s; render(); }
