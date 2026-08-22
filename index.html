@@ -959,7 +959,6 @@ function bottomNavHtml(){
   return [
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
-    navBtn('timer','Timer', iconStopwatch()),
     navBtn('progress','Fortschritt', iconChart()),
     navBtn('profile','Profil', iconUser())
   ].join('');
@@ -996,7 +995,6 @@ function render(){
   const content = document.getElementById('content');
   if(state.activeTab==='today') content.innerHTML = renderToday();
   if(state.activeTab==='workout') content.innerHTML = renderWorkout();
-  if(state.activeTab==='timer') content.innerHTML = renderTimer();
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
@@ -1215,8 +1213,14 @@ function isWodInProgress(){
   return false;
 }
 function setWorkoutMenu(menu){
-  state.tmp.workoutMenu = state.tmp.workoutMenu===menu ? null : menu;
-  render();
+  const prevMenu = state.tmp.workoutMenu;
+  state.tmp.workoutMenu = prevMenu===menu ? null : menu;
+  if(prevMenu==='timer' && state.tmp.workoutMenu!=='timer') pauseActiveTimer();
+  if(state.tmp.wodFormat==='run'){
+    setWodFormat('strength');
+  } else {
+    render();
+  }
 }
 function renderFormatSelector(){
   const formats = [
@@ -1236,31 +1240,37 @@ function renderFormatSelector(){
       <button class="btn ${menu==='girls'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('girls')">Girls</button>
       <button class="btn ${menu==='heroes'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('heroes')">Heros</button>
       <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWodFormat('run')">Run</button>
-      <button class="btn btn-ghost" style="flex:1 1 30%;" onclick="setTab('timer')">Timer</button>
+      <button class="btn ${menu==='timer'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('timer')">Timer</button>
     </div>`;
 
+  const sectionLabels = {formats:'Formate', girls:'Girls', heroes:'Hero WODs'};
   let subContent = '';
   if(menu==='formats'){
     const current = formats.find(f=>f.id===state.tmp.wodFormat);
     subContent = `
-      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px;">
+      <div class="row" style="flex-wrap:wrap;gap:8px;">
         ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
       </div>
       ${current ? `<div class="note" style="margin-top:8px;">${current.hint}</div>` : ''}`;
   } else if(menu==='girls' || menu==='heroes'){
     const list = menu==='girls' ? girlWods : heroWods;
     subContent = `
-      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px;">
+      <div class="row" style="flex-wrap:wrap;gap:8px;">
         ${list.map(w=>`<button class="btn btn-ghost" style="flex:1 1 30%;" onclick="loadBenchmarkWod('${w.id}')">${w.name}</button>`).join('')}
       </div>
       <div class="note" style="margin-top:8px;">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>`;
   }
+  const subSection = subContent ? `
+    <hr class="hairline" style="margin:14px 0 10px;">
+    <div class="stat-label" style="margin-bottom:8px;">${sectionLabels[menu]}</div>
+    ${subContent}
+  ` : '';
 
   return `
     <div class="card">
       <h2>Workout-Format</h2>
       ${topRow}
-      ${subContent}
+      ${subSection}
     </div>
   `;
 }
@@ -1383,7 +1393,12 @@ function renderWorkout(){
   if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = renderWorkoutHistory();
-  const formatSelector = isWodInProgress() ? '' : renderFormatSelector();
+  const inProgress = isWodInProgress();
+  const formatSelector = inProgress ? '' : renderFormatSelector();
+
+  if(!inProgress && state.tmp.workoutMenu==='timer'){
+    return formatSelector + renderTimer() + historyHtml;
+  }
 
   if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
