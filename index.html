@@ -1104,7 +1104,7 @@ function pctForIndex(arr, i){
   return arr[i] !== undefined ? arr[i] : arr[arr.length-1];
 }
 function blankRowSet(){ return {reps:'', weight:'', pct:null, autoFilled:false}; }
-function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:''}; }
+function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
 function ensureWodTemplate(){
   if(!state.tmp.wodTemplate){
     state.tmp.wodTemplate = [blankTemplateMove()];
@@ -1112,7 +1112,7 @@ function ensureWodTemplate(){
   }
 }
 function isTemplateEmpty(){
-  return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.timing && !t.setsCount && !t.pctList && !t.weight && !t.qty);
+  return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.timing && !t.setsCount && !t.pctList && !t.weight && !t.qty && !t.repsTarget);
 }
 function findWorkoutByName(name){
   const n = (name||'').trim().toLowerCase();
@@ -1226,6 +1226,7 @@ function renderWorkoutHistoryEntry(w){
     const timeLabel = ft.elapsedSec!=null ? fmtClock(ft.elapsedSec*1000,false) : '—';
     body = `<div class="moves">
       <div><span>Zeit</span><span>${timeLabel}${ft.capped?' (Time Cap)':''}</span></div>
+      ${ft.roundsCompleted>0 ? `<div><span>Runden</span><span>${ft.roundsCompleted}</span></div>` : ''}
       ${(ft.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
       ${ft.repScheme ? `<div class="note">Schema: ${escapeHtml(ft.repScheme)}</div>` : (ft.rounds>1 ? `<div class="note">${ft.rounds} Runden</div>` : '')}
     </div>`;
@@ -1255,7 +1256,7 @@ function renderWorkoutHistoryEntry(w){
       ${w.movements.map(m=>{
         const ex = state.exercises.find(e=>e.id===m.exerciseId);
         const isCardio = getExerciseType(ex)==='cardio';
-        const prefix = m.timing ? `[${escapeHtml(m.timing)}] ` : '';
+        const prefix = (m.timing ? `[${escapeHtml(m.timing)}] ` : '') + (m.groupId!=null ? '🔗 ' : '');
         if(isCardio){
           return m.sets.map(s=>{
             const qty = m.unit==='m' ? `${toDisplayDistance(s.reps)}${distanceUnitLabel()}` : `${s.reps||0} kcal`;
@@ -1331,15 +1332,26 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const type = getExerciseType(ex);
     const isWeighted = type==='weighted';
+    const isBodyweight = type==='bodyweight';
     const isCardio = type==='cardio';
+    const isFollower = isEmom && mi>0 && state.tmp.wodTemplate[mi-1].groupWithNext;
+    const repsTargetField = (isWeighted || isBodyweight) ? `<div class="field" style="margin-bottom:0;"><label>Ziel-Wiederholungen (optional)</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
     const pctField = isWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM (optional)</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75 oder 75,80,85"></div>` : '';
-    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div></div>` : '';
+    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alternativ zu % 1RM"></div>${repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
         <button type="button" class="btn ${t.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
       </div>` : '';
     const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'}, optional)</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>` : '';
+    const setsField = isFollower
+      ? `<div class="field" style="margin-bottom:0;align-self:center;"><div class="note" style="margin:0;">Teil des Komplexes — Sets siehe oben</div></div>`
+      : `<div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':'(optional)'}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>`;
+    const groupToggle = (isEmom && mi < state.tmp.wodTemplate.length-1) ? `
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;color:var(--chalk-60);">
+        <input type="checkbox" ${t.groupWithNext?'checked':''} onchange="updateTemplateField(${mi},'groupWithNext',this.checked)">
+        Mit nächster Übung zu einem Komplex kombinieren
+      </label>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
       <div class="top">
@@ -1351,12 +1363,14 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       </div>
       ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe (optional)</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
       <div class="row">
-        <div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':'(optional)'}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>
+        ${setsField}
         ${pctField}
+        ${!isWeighted ? repsTargetField : ''}
       </div>
       ${weightField}
       ${unitToggle}
       ${qtyField}
+      ${groupToggle}
     </div>
   `;}).join('');
 
@@ -1391,6 +1405,7 @@ function renderWodRowsPhase(headerFields, historyHtml){
     const prescriptionBits = [];
     if(mv.timing) prescriptionBits.push(mv.timing);
     if(mv.setsCountRaw) prescriptionBits.push(mv.setsCountRaw+' Sätze');
+    if(mv.repsTarget) prescriptionBits.push(mv.repsTarget+' Wdh.');
     if(mv.pctList) prescriptionBits.push(mv.pctList+'% 1RM');
     const known1rm = bestE1RM(mv.exerciseId);
     const isCardio = getExerciseType(ex)==='cardio';
@@ -1426,7 +1441,8 @@ function renderWodRowsPhase(headerFields, historyHtml){
 
     return `
     <div class="wod-move-row" data-idx="${mi}">
-      <div class="wname" style="font-size:16px;margin-bottom:2px;">${ex?ex.name:'—'}</div>
+      <div class="wname" style="font-size:16px;margin-bottom:2px;">${ex?ex.name:'—'}${mv.groupId!=null?' 🔗':''}</div>
+      ${mv.groupId!=null ? `<div class="note" style="margin-bottom:4px;">Teil eines Komplexes</div>` : ''}
       ${prescriptionBits.length ? `<div class="note" style="margin-bottom:8px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
       ${known1rm ? `<div class="note" style="margin-bottom:10px;">bisher bestes 1RM: <strong style="color:var(--chalk-50)">${Math.round(known1rm)}kg</strong></div>` : ''}
       ${setsHtml}
@@ -1451,10 +1467,23 @@ function renderWodRowsPhase(headerFields, historyHtml){
 
 /* ---------- LIVE-MODUS (geführte Trainingsdurchführung) ---------- */
 function startLiveWorkout(){
+  const moves = state.tmp.wodMoves;
   const flat = [];
-  state.tmp.wodMoves.forEach((mv,mi)=>{
-    mv.sets.forEach((s,si)=>{ flat.push({mi,si}); });
-  });
+  let i = 0;
+  while(i < moves.length){
+    const gid = moves[i].groupId;
+    let j = i;
+    if(gid!=null){
+      while(j+1 < moves.length && moves[j+1].groupId===gid) j++;
+    }
+    const groupIdx = [];
+    for(let k=i;k<=j;k++) groupIdx.push(k);
+    const setsCount = moves[groupIdx[0]].sets.length;
+    for(let si=0; si<setsCount; si++){
+      flat.push(groupIdx.map(mi=>({mi,si})));
+    }
+    i = j+1;
+  }
   if(!flat.length){ showToast('Keine Sätze vorhanden'); return; }
   state.tmp.live = {
     startedAt: Date.now(),
@@ -1475,45 +1504,56 @@ function renderWodLivePhase(){
   if(live.finished) return renderWodSummaryPhase();
   if(live.resting) return renderRestScreen(live);
 
-  const {mi,si} = live.flat[live.pos];
-  const mv = state.tmp.wodMoves[mi];
-  const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-  const s = mv.sets[si];
-  const isCardio = getExerciseType(ex)==='cardio';
-  const qtyLabel = isCardio ? (mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
-  const qtyValue = isCardio ? (mv.unit==='m' ? toDisplayDistance(s.reps) : s.reps) : s.reps;
-  const gpsButton = isCardio && isRunExercise(ex) && mv.unit==='m'
-    ? `<button type="button" class="btn-sm btn-ghost" style="margin-bottom:10px;" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button>` : '';
-  const prescriptionBits = [];
-  if(mv.timing) prescriptionBits.push(mv.timing);
-  if(s.pct) prescriptionBits.push(s.pct+'% 1RM');
+  const group = live.flat[live.pos];
+  const isComplex = group.length>1;
+  const blocks = group.map(({mi,si})=>{
+    const mv = state.tmp.wodMoves[mi];
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    const s = mv.sets[si];
+    const isCardio = getExerciseType(ex)==='cardio';
+    const qtyLabel = isCardio ? (mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
+    const qtyValue = isCardio ? (mv.unit==='m' ? toDisplayDistance(s.reps) : s.reps) : s.reps;
+    const gpsButton = isCardio && isRunExercise(ex) && mv.unit==='m'
+      ? `<button type="button" class="btn-sm btn-ghost" style="margin-bottom:10px;" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button>` : '';
+    const prescriptionBits = [];
+    if(mv.repsTarget) prescriptionBits.push(mv.repsTarget+' Wdh.');
+    if(s.pct) prescriptionBits.push(s.pct+'% 1RM');
+    return `
+      <div style="margin-bottom:16px;">
+        <h3 style="margin:0 0 6px;">${ex?ex.name:'—'}</h3>
+        ${prescriptionBits.length ? `<div class="note" style="margin-bottom:8px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
+        <div class="row">
+          <div class="field"><label>${qtyLabel}</label><input type="number" step="1" id="liveReps_${mi}" value="${qtyValue}" placeholder="z.B. 5"></div>
+          ${isCardio ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
+        </div>
+        ${gpsButton}
+      </div>`;
+  }).join('');
+  const timing = state.tmp.wodMoves[group[0].mi].timing;
 
   return `
     <div class="card">
-      <div class="stat-label">Satz ${live.pos+1} / ${live.flat.length}</div>
-      <h2 style="margin-top:4px;">${ex?ex.name:'—'}</h2>
-      ${prescriptionBits.length ? `<div class="note" style="margin-bottom:14px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
-      <div class="row">
-        <div class="field"><label>${qtyLabel}</label><input type="number" step="1" id="liveReps" value="${qtyValue}" placeholder="z.B. 5"></div>
-        ${isCardio ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight" value="${s.weight}" placeholder="z.B. 48"></div>`}
-      </div>
-      ${gpsButton}
-      <button class="btn btn-primary" onclick="completeLiveSet()">✓ Satz erledigt</button>
+      <div class="stat-label">${isComplex?'Runde':'Satz'} ${live.pos+1} / ${live.flat.length}</div>
+      ${timing ? `<div class="note" style="margin-bottom:10px;">${escapeHtml(timing)}</div>` : ''}
+      ${blocks}
+      <button class="btn btn-primary" onclick="completeLiveSet()">✓ ${isComplex?'Runde':'Satz'} erledigt</button>
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
     </div>
   `;
 }
 function completeLiveSet(){
   const live = state.tmp.live;
-  const {mi,si} = live.flat[live.pos];
-  const mv = state.tmp.wodMoves[mi];
-  const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-  const isCardio = getExerciseType(ex)==='cardio';
-  const rawReps = document.getElementById('liveReps').value;
-  mv.sets[si].reps = (isCardio && mv.unit==='m') ? String(fromDisplayDistance(rawReps)) : rawReps;
-  const weightEl = document.getElementById('liveWeight');
-  if(weightEl) mv.sets[si].weight = weightEl.value;
-  mv.sets[si].autoFilled = false;
+  const group = live.flat[live.pos];
+  group.forEach(({mi,si})=>{
+    const mv = state.tmp.wodMoves[mi];
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    const isCardio = getExerciseType(ex)==='cardio';
+    const rawReps = document.getElementById(`liveReps_${mi}`).value;
+    mv.sets[si].reps = (isCardio && mv.unit==='m') ? String(fromDisplayDistance(rawReps)) : rawReps;
+    const weightEl = document.getElementById(`liveWeight_${mi}`);
+    if(weightEl) mv.sets[si].weight = weightEl.value;
+    mv.sets[si].autoFilled = false;
+  });
 
   if(live.pos >= live.flat.length-1){
     live.finished = true;
@@ -1642,7 +1682,7 @@ function blankForTimeMove(){
 }
 function ensureForTimeBuilder(){
   if(!state.tmp.forTimeBuilder){
-    state.tmp.forTimeBuilder = { phase:'build', movements:[blankForTimeMove()], rounds:'1', repScheme:'', timeCapMin:'', timeCapSec:'', startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null };
+    state.tmp.forTimeBuilder = { phase:'build', movements:[blankForTimeMove()], rounds:'1', repScheme:'', timeCapMin:'', timeCapSec:'', startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null, roundsCompleted:0 };
   }
 }
 function renderForTimeFlow(historyHtml){
@@ -1751,6 +1791,7 @@ function startForTimeWod(){
   b.timeCapMs = (parseInt(b.timeCapMin)||0)*60000 + (parseInt(b.timeCapSec)||0)*1000;
   b.capped = false;
   b.elapsedMs = 0;
+  b.roundsCompleted = 0;
   b.startedAt = Date.now();
   b.running = true;
   b.phase = 'running';
@@ -1797,6 +1838,11 @@ function resumeForTimeClock(){
   startTicking('live', tickForTime);
   render();
 }
+function incrementForTimeRound(delta){
+  const b = state.tmp.forTimeBuilder;
+  b.roundsCompleted = Math.max(0, b.roundsCompleted + delta);
+  render();
+}
 function renderForTimeRunning(b){
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
   return `
@@ -1806,6 +1852,11 @@ function renderForTimeRunning(b){
       <div class="moves" style="text-align:left;margin-bottom:14px;">
         ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
         ${b.repScheme ? `<div class="note">Schema: ${escapeHtml(b.repScheme)}</div>` : (parseInt(b.rounds)>1 ? `<div class="note">${b.rounds} Runden</div>` : '')}
+      </div>
+      <div class="stat-num" style="margin:10px 0;">${b.roundsCompleted}<span style="font-size:16px;"> Runden</span></div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn btn-ghost" onclick="incrementForTimeRound(-1)">-1 Runde</button>
+        <button class="btn btn-primary" onclick="incrementForTimeRound(1)">+1 Runde</button>
       </div>
       <div class="row">
         <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForTimeClock()':'resumeForTimeClock()'}">${b.running?'Pause':'Weiter'}</button>
@@ -1834,7 +1885,7 @@ async function saveForTimeWorkout(){
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
   const workout = {
     id: uid(), date, name, note, format:'for-time', movements: [],
-    forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped }
+    forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0 }
   };
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
@@ -2286,6 +2337,7 @@ function updateTemplateField(mi, field, val){
     if(type!=='weighted'){ t.weight=''; }
     if(type!=='cardio'){ t.qty=''; }
     if(type!=='weighted'){ t.pctList=''; }
+    if(type==='cardio'){ t.repsTarget=''; }
   }
   render();
 }
@@ -2315,14 +2367,17 @@ function onWodNameChange(val){
   state.tmp.wodNameMatch = match || null;
   state.tmp.wodFeeling = null;
   if(match && isTemplateEmpty()){
-    state.tmp.wodTemplate = match.movements.map(m=>{
+    state.tmp.wodTemplate = match.movements.map((m,mi)=>{
       const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
+      const next = match.movements[mi+1];
       return {
         exerciseId: m.exerciseId,
         timing: m.timing || '',
         setsCount: String(m.sets.length || ''),
         pctList: pcts.length ? pcts.join(',') : '',
-        weight: '', unit: m.unit || 'kcal', qty: ''
+        weight: '', unit: m.unit || 'kcal', qty: '',
+        repsTarget: m.repsTarget || '',
+        groupWithNext: !!(m.groupId!=null && next && next.groupId===m.groupId)
       };
     });
   }
@@ -2332,7 +2387,11 @@ function generateWodRows(){
   state.tmp.wodDate = document.getElementById('wodDate').value || todayStr();
   state.tmp.wodName = document.getElementById('wodName').value.trim();
   const isEmom = state.tmp.wodFormat==='emom';
-  state.tmp.wodMoves = state.tmp.wodTemplate.map(t=>{
+  const tmpl = state.tmp.wodTemplate;
+
+  const effectiveSetsCount = tmpl.map((t,ti)=>{
+    const isFollower = ti>0 && tmpl[ti-1].groupWithNext;
+    if(isFollower) return null;
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const isCardio = getExerciseType(ex)==='cardio';
     const pctArr = parsePctList(t.pctList);
@@ -2340,6 +2399,29 @@ function generateWodRows(){
     if(isEmom && !t.setsCount){
       setsCount = parseInt(state.tmp.emomRounds) || setsCount;
     }
+    return setsCount;
+  });
+  for(let ti=1; ti<tmpl.length; ti++){
+    if(effectiveSetsCount[ti]==null) effectiveSetsCount[ti] = effectiveSetsCount[ti-1];
+  }
+
+  const groupIdArr = new Array(tmpl.length).fill(null);
+  let gStart = 0;
+  for(let ti=0; ti<tmpl.length; ti++){
+    if(ti===tmpl.length-1 || !tmpl[ti].groupWithNext){
+      if(ti>gStart){
+        const gid = 'g'+gStart;
+        for(let k=gStart;k<=ti;k++) groupIdArr[k]=gid;
+      }
+      gStart = ti+1;
+    }
+  }
+
+  state.tmp.wodMoves = tmpl.map((t,ti)=>{
+    const ex = state.exercises.find(e=>e.id===t.exerciseId);
+    const isCardio = getExerciseType(ex)==='cardio';
+    const pctArr = parsePctList(t.pctList);
+    const setsCount = effectiveSetsCount[ti];
     const known1rm = bestE1RM(t.exerciseId);
     const sets = [];
     for(let si=0; si<setsCount; si++){
@@ -2355,11 +2437,11 @@ function generateWodRows(){
           weight = t.weight;
           autoFilled = true;
         }
-        sets.push({reps:'', weight, pct: pct||null, autoFilled});
+        sets.push({reps: t.repsTarget || '', weight, pct: pct||null, autoFilled});
       }
     }
     const timing = isEmom ? `Every ${state.tmp.emomMin}:${String(state.tmp.emomSec).padStart(2,'0')}` : t.timing;
-    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: isCardio ? t.unit : null, sets };
+    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: isCardio ? t.unit : null, repsTarget: t.repsTarget||'', groupId: groupIdArr[ti], sets };
   });
   state.tmp.wodPhase = 'rows';
   applyFeelingFillIfNeeded();
@@ -2403,12 +2485,27 @@ function updateWodSetQty(mi, si, displayVal){
   s.autoFilled = false;
 }
 function addWodSet(mi){
-  state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  const gid = state.tmp.wodMoves[mi].groupId;
+  if(gid!=null){
+    state.tmp.wodMoves.forEach(m=>{ if(m.groupId===gid) m.sets.push(blankRowSet()); });
+  } else {
+    state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  }
   render();
 }
 function removeWodSet(mi, si){
-  state.tmp.wodMoves[mi].sets.splice(si,1);
-  if(!state.tmp.wodMoves[mi].sets.length) state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  const gid = state.tmp.wodMoves[mi].groupId;
+  if(gid!=null){
+    state.tmp.wodMoves.forEach(m=>{
+      if(m.groupId===gid){
+        m.sets.splice(si,1);
+        if(!m.sets.length) m.sets.push(blankRowSet());
+      }
+    });
+  } else {
+    state.tmp.wodMoves[mi].sets.splice(si,1);
+    if(!state.tmp.wodMoves[mi].sets.length) state.tmp.wodMoves[mi].sets.push(blankRowSet());
+  }
   render();
 }
 async function saveWod(){
@@ -2421,7 +2518,7 @@ async function saveWod(){
     const sets = isCardio
       ? mv.sets.filter(s=>s.reps).map(s=>({ reps: parseFloat(s.reps), weight: null, pct: null }))
       : mv.sets.filter(s=>s.reps && s.weight).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }));
-    return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isCardio ? mv.unit : null, sets };
+    return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isCardio ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
   state.workouts.push({id:uid(), date, name, note, movements});
