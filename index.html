@@ -491,112 +491,1021 @@ const FEELING_ADJUST = {
 
 /* ---------- Grundübungen + Skalierungen (Bodyweight/Gymnastics) ---------- */
 const EXERCISE_LIBRARY = [
-  { id:'pull-up', name:'Pull-up', type:'bodyweight', variants:[
-    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
-    {id:'banded', label:'Banded', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
-    {id:'jumping', label:'Jumping', detail:null},
-    {id:'kipping', label:'Kipping', detail:null},
-    {id:'butterfly', label:'Butterfly', detail:null},
-    {id:'strict', label:'Strict', detail:null},
-    {id:'chest-to-bar', label:'Chest-to-Bar', detail:null},
-    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}, type:'weighted'}
+  { id:"pull-up", name:"Pull-up", type:"bodyweight", variants:[
+    {id:'assisted', label:'Assisted', details:[{key:'band', label:'Band-Farbe', placeholder:'z.B. Grün'}]},
+    {id:'banded', label:'Banded', details:[{key:'band', label:'Band-Farbe', placeholder:'z.B. Grün'}]},
+    {id:'jumping', label:'Jumping', details:null},
+    {id:'kipping', label:'Kipping', details:null},
+    {id:'butterfly', label:'Butterfly', details:null},
+    {id:'strict', label:'Strict', details:null},
+    {id:'chest-to-bar', label:'Chest-to-Bar', details:null},
+    {id:'weighted', label:'Weighted', details:[{key:'weight_add', label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}], type:'weighted'},
+    {id:"chest-to-bar-strict", label:"Chest-to-Bar Strict", details:null},
+    {id:"eccentric", label:"Eccentric", details:null},
+    {id:"isometric-hold", label:"Isometric Hold", details:null, type:"mobility"},
+    {id:"l-sit", label:"L-Sit", details:null, type:"mobility"},
+    {id:"mixed-grip", label:"Mixed Grip", details:null},
+    {id:"negative", label:"Negative", details:null},
+    {id:"towel", label:"Towel", details:null}
   ]},
-  { id:'push-up', name:'Push-up', type:'bodyweight', variants:[
-    {id:'knee', label:'Knee', detail:null},
-    {id:'incline', label:'Incline', detail:null},
-    {id:'deficit', label:'Deficit', detail:null},
-    {id:'ring', label:'Ring', detail:null},
-    {id:'clapping', label:'Clapping/Plyo', detail:null}
+  { id:"push-up", name:"Push-up", type:"bodyweight", variants:[
+    {id:'knee', label:'Knee', details:null},
+    {id:'incline', label:'Incline', details:null},
+    {id:'deficit', label:'Deficit', details:null},
+    {id:'ring', label:'Ring', details:null},
+    {id:'clapping', label:'Clapping/Plyo', details:null},
+    {id:"box", label:"Box", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"diamond", label:"Diamond", details:null},
+    {id:"hand-release", label:"Hand-Release", details:null},
+    {id:"parallette", label:"Parallette", details:null},
+    {id:"pause", label:"Pause", details:null, type:"mobility"},
+    {id:"pike", label:"Pike", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"},
+    {id:"wide", label:"Wide", details:null}
   ]},
-  { id:'hspu', name:'Handstand Push-up', type:'bodyweight', variants:[
-    {id:'pike', label:'Pike Push-up', detail:null},
-    {id:'box-pike', label:'Box/Elevated Pike', detail:null},
-    {id:'wall-assisted', label:'Wall-assisted', detail:null},
-    {id:'kipping', label:'Kipping', detail:null},
-    {id:'strict', label:'Strict', detail:null},
-    {id:'deficit', label:'Deficit', detail:null}
+  { id:"hspu", name:"Handstand Push-up", type:"bodyweight", variants:[
+    {id:'pike', label:'Pike Push-up', details:null},
+    {id:'box-pike', label:'Box/Elevated Pike', details:null},
+    {id:'wall-assisted', label:'Wall-assisted', details:null},
+    {id:'kipping', label:'Kipping', details:null},
+    {id:'strict', label:'Strict', details:null},
+    {id:'deficit', label:'Deficit', details:null},
+    {id:"abmat-reduced-rom", label:"AbMat Reduced ROM", details:null},
+    {id:"negative", label:"Negative", details:null},
+    {id:"seated-dumbbell-press", label:"Seated Dumbbell Press", details:null},
+    {id:"wall-facing", label:"Wall-Facing", details:null}
   ]},
-  { id:'dip', name:'Dip', type:'bodyweight', variants:[
-    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
-    {id:'bar', label:'Bar/Parallette', detail:null},
-    {id:'ring', label:'Ring', detail:null},
-    {id:'weighted', label:'Weighted', detail:{label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}, type:'weighted'}
+  { id:"dip", name:"Dip", type:"bodyweight", variants:[
+    {id:'assisted', label:'Assisted', details:[{key:'band', label:'Band-Farbe', placeholder:'z.B. Grün'}]},
+    {id:'bar', label:'Bar/Parallette', details:null},
+    {id:'ring', label:'Ring', details:null},
+    {id:'weighted', label:'Weighted', details:[{key:'weight_add', label:'Zusatzgewicht (kg)', placeholder:'z.B. 10', numeric:true}], type:'weighted'},
+    {id:"band-assisted", label:"Band-Assisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"bar-kipping", label:"Bar Kipping", details:null},
+    {id:"bench", label:"Bench", details:null},
+    {id:"box-assisted", label:"Box-Assisted", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"negative", label:"Negative", details:null},
+    {id:"ring-kipping", label:"Ring Kipping", details:null}
   ]},
-  { id:'muscle-up', name:'Muscle-up', type:'bodyweight', variants:[
-    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe', placeholder:'z.B. Grün'}},
-    {id:'jumping', label:'Jumping', detail:null},
-    {id:'bar', label:'Bar', detail:null},
-    {id:'ring', label:'Ring', detail:null}
+  { id:"muscle-up", name:"Muscle-up", type:"bodyweight", variants:[
+    {id:'assisted', label:'Assisted', details:[{key:'band', label:'Band-Farbe', placeholder:'z.B. Grün'}]},
+    {id:'jumping', label:'Jumping', details:null},
+    {id:'bar', label:'Bar', details:null},
+    {id:'ring', label:'Ring', details:null}
   ]},
-  { id:'toes-to-bar', name:'Toes-to-Bar', type:'bodyweight', variants:[
-    {id:'hanging-knee-raise', label:'Hanging Knee Raise', detail:null},
-    {id:'knees-to-chest', label:'Knees-to-Chest', detail:null},
-    {id:'kipping', label:'Kipping', detail:null},
-    {id:'strict', label:'Strict', detail:null}
+  { id:"toes-to-bar", name:"Toes-to-Bar", type:"bodyweight", variants:[
+    {id:'hanging-knee-raise', label:'Hanging Knee Raise', details:null},
+    {id:'knees-to-chest', label:'Knees-to-Chest', details:null},
+    {id:'kipping', label:'Kipping', details:null},
+    {id:'strict', label:'Strict', details:null},
+    {id:"alternating", label:"Alternating", details:null},
+    {id:"knees-to-elbows", label:"Knees-to-Elbows", details:null},
+    {id:"lying-leg-raise", label:"Lying Leg Raise", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"v-up", label:"V-Up", details:null}
   ]},
-  { id:'pistol-squat', name:'Pistol Squat', type:'bodyweight', variants:[
-    {id:'assisted', label:'Assisted', detail:{label:'Band-Farbe / Box-Höhe', placeholder:'z.B. Grün oder 30cm'}}
+  { id:"pistol-squat", name:"Pistol Squat", type:"bodyweight", variants:[
+    {id:'assisted', label:'Assisted', details:[{key:'band', label:'Band-Farbe / Box-Höhe', placeholder:'z.B. Grün oder 30cm'}]},
+    {id:"alternating", label:"Alternating", details:null},
+    {id:"counterbalance", label:"Counterbalance", details:null},
+    {id:"dumbbell-front-rack", label:"Dumbbell Front Rack", details:null},
+    {id:"heel-elevated", label:"Heel-Elevated", details:null},
+    {id:"kettlebell-front-rack", label:"Kettlebell Front Rack", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
   ]},
-  { id:'rope-climb', name:'Rope Climb', type:'bodyweight', variants:[
-    {id:'foot-assisted', label:'Foot-assisted', detail:null},
-    {id:'legless', label:'Legless', detail:null}
+  { id:"rope-climb", name:"Rope Climb", type:"bodyweight", variants:[
+    {id:'foot-assisted', label:'Foot-assisted', details:null},
+    {id:'legless', label:'Legless', details:null},
+    {id:"half-height", label:"Half Height", details:null},
+    {id:"l-sit-legless", label:"L-Sit Legless", details:null},
+    {id:"pull-to-stand", label:"Pull-to-Stand", details:null},
+    {id:"rope-pull", label:"Rope Pull", details:null},
+    {id:"seated-start", label:"Seated Start", details:null},
+    {id:"towel-pull-up", label:"Towel Pull-up", details:null}
   ]},
-  { id:'box-jump', name:'Box Jump', type:'bodyweight', variants:[
-    {id:'step-up', label:'Box Step-up', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}},
-    {id:'jump', label:'Jump', detail:{label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true}}
+  { id:"box-jump", name:"Box Jump", type:"bodyweight", variants:[
+    {id:'step-up', label:'Box Step-up', details:[{key:'height', label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true, unit:'cm', signed:false}]},
+    {id:'jump', label:'Jump', details:[{key:'height', label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true, unit:'cm', signed:false}]},
+    {id:"burpee-box-jump-over", label:"Burpee Box Jump-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"burpee-box-step-over", label:"Burpee Box Step-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"jump-over", label:"Jump-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"lateral", label:"Lateral", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"seated", label:"Seated", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"step-over", label:"Step-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"weighted-step-up", label:"Weighted Step-up", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
   ]},
-  { id:'hs-walk', name:'Handstand Walk', type:'bodyweight', variants:[
-    {id:'wall-assisted', label:'Wall-assisted', detail:null},
-    {id:'freestanding', label:'Freestanding', detail:null}
+  { id:"hs-walk", name:"Handstand Walk", type:"bodyweight", variants:[
+    {id:'wall-assisted', label:'Wall-assisted', details:null},
+    {id:'freestanding', label:'Freestanding', details:null},
+    {id:"bear-crawl", label:"Bear Crawl", details:null},
+    {id:"box-around-the-world", label:"Box Around-the-World", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"obstacle", label:"Obstacle", details:null},
+    {id:"pirouette", label:"Pirouette", details:null},
+    {id:"ramp", label:"Ramp", details:null},
+    {id:"wall-supported-shift", label:"Wall-Supported Shift", details:null},
+    {id:"wheelbarrow-walk", label:"Wheelbarrow Walk", details:null}
   ]},
-  { id:'snatch', name:'Snatch', type:'weighted', variants:[
-    {id:'power', label:'Power', detail:null},
-    {id:'hang', label:'Hang', detail:null},
-    {id:'squat', label:'Squat', detail:null},
-    {id:'muscle', label:'Muscle', detail:null},
-    {id:'hang-power', label:'Hang Power', detail:null},
-    {id:'block', label:'Block', detail:null}
+  { id:"snatch", name:"Snatch", type:"weighted", variants:[
+    {id:'power', label:'Power', details:null},
+    {id:'hang', label:'Hang', details:null},
+    {id:'squat', label:'Squat', details:null},
+    {id:'muscle', label:'Muscle', details:null},
+    {id:'hang-power', label:'Hang Power', details:null},
+    {id:'block', label:'Block', details:null},
+    {id:"deficit", label:"Deficit", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"dumbbell-alternating", label:"Dumbbell Alternating", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"hang-squat", label:"Hang Squat", details:null},
+    {id:"high-hang", label:"High Hang", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"low-hang", label:"Low Hang", details:null},
+    {id:"no-foot", label:"No-Foot", details:null},
+    {id:"power-from-blocks", label:"Power from Blocks", details:null},
+    {id:"tall", label:"Tall", details:null}
   ]},
-  { id:'clean', name:'Clean', type:'weighted', variants:[
-    {id:'power', label:'Power', detail:null},
-    {id:'hang', label:'Hang', detail:null},
-    {id:'squat', label:'Squat', detail:null},
-    {id:'muscle', label:'Muscle', detail:null},
-    {id:'hang-power', label:'Hang Power', detail:null},
-    {id:'block', label:'Block', detail:null}
+  { id:"clean", name:"Clean", type:"weighted", variants:[
+    {id:'power', label:'Power', details:null},
+    {id:'hang', label:'Hang', details:null},
+    {id:'squat', label:'Squat', details:null},
+    {id:'muscle', label:'Muscle', details:null},
+    {id:'hang-power', label:'Hang Power', details:null},
+    {id:'block', label:'Block', details:null},
+    {id:"deficit", label:"Deficit", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"hang-squat", label:"Hang Squat", details:null},
+    {id:"high-hang", label:"High Hang", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"low-hang", label:"Low Hang", details:null},
+    {id:"no-foot", label:"No-Foot", details:null},
+    {id:"power-from-blocks", label:"Power from Blocks", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"tall", label:"Tall", details:null}
   ]},
-  { id:'clean-and-jerk', name:'Clean & Jerk', type:'weighted', variants:[
-    {id:'power', label:'Power', detail:null}
+  { id:"clean-and-jerk", name:"Clean & Jerk", type:"weighted", variants:[
+    {id:'power', label:'Power', details:null},
+    {id:"cluster", label:"Cluster", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"hang-clean-jerk", label:"Hang Clean + Jerk", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"power-clean-push-jerk", label:"Power Clean + Push Jerk", details:null},
+    {id:"power-clean-split-jerk", label:"Power Clean + Split Jerk", details:null},
+    {id:"squat-clean-split-jerk", label:"Squat Clean + Split Jerk", details:null}
   ]},
-  { id:'back-squat', name:'Back Squat', type:'weighted', variants:[
-    {id:'pause', label:'Pause', detail:null},
-    {id:'tempo', label:'Tempo', detail:null},
-    {id:'box', label:'Box', detail:null}
+  { id:"back-squat", name:"Back Squat", type:"weighted", variants:[
+    {id:'pause', label:'Pause', details:null},
+    {id:'tempo', label:'Tempo', details:null},
+    {id:'box', label:'Box', details:null},
+    {id:"anderson", label:"Anderson", details:null},
+    {id:"band-resisted", label:"Band-Resisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"chain-loaded", label:"Chain-Loaded", details:null},
+    {id:"high-bar", label:"High Bar", details:null},
+    {id:"low-bar", label:"Low Bar", details:null},
+    {id:"pin", label:"Pin", details:null}
   ]},
-  { id:'front-squat', name:'Front Squat', type:'weighted', variants:[
-    {id:'pause', label:'Pause', detail:null},
-    {id:'tempo', label:'Tempo', detail:null},
-    {id:'box', label:'Box', detail:null}
+  { id:"front-squat", name:"Front Squat", type:"weighted", variants:[
+    {id:'pause', label:'Pause', details:null},
+    {id:'tempo', label:'Tempo', details:null},
+    {id:'box', label:'Box', details:null},
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"pin", label:"Pin", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"strap-assisted", label:"Strap-Assisted", details:null},
+    {id:"zombie", label:"Zombie", details:null}
   ]},
-  { id:'deadlift', name:'Deadlift', type:'weighted', variants:[
-    {id:'sumo', label:'Sumo', detail:null},
-    {id:'romanian', label:'Romanian', detail:null},
-    {id:'pause', label:'Pause', detail:null},
-    {id:'deficit', label:'Deficit', detail:{label:'Deficit (cm)', placeholder:'z.B. 5', numeric:true, unit:'cm', signed:false}}
+  { id:"deadlift", name:"Deadlift", type:"weighted", variants:[
+    {id:'sumo', label:'Sumo', details:null},
+    {id:'romanian', label:'Romanian', details:null},
+    {id:'pause', label:'Pause', details:null},
+    {id:'deficit', label:'Deficit', details:[{key:'deficit', label:'Deficit (cm)', placeholder:'z.B. 5', numeric:true, unit:'cm', signed:false}]},
+    {id:"axle-bar", label:"Axle Bar", details:null},
+    {id:"block", label:"Block", details:null},
+    {id:"clean-grip", label:"Clean Grip", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"rack-pull", label:"Rack Pull", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"snatch-grip", label:"Snatch Grip", details:null},
+    {id:"stiff-leg", label:"Stiff-Leg", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"trap-bar", label:"Trap Bar", details:null}
   ]},
-  { id:'bench-press', name:'Bench Press', type:'weighted', variants:[
-    {id:'pause', label:'Pause', detail:null},
-    {id:'tempo', label:'Tempo', detail:null}
+  { id:"bench-press", name:"Bench Press", type:"weighted", variants:[
+    {id:'pause', label:'Pause', details:null},
+    {id:'tempo', label:'Tempo', details:null},
+    {id:"band-resisted", label:"Band-Resisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"close-grip", label:"Close Grip", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"floor-press", label:"Floor Press", details:null},
+    {id:"incline", label:"Incline", details:null},
+    {id:"single-arm-dumbbell", label:"Single-Arm Dumbbell", details:null},
+    {id:"wide-grip", label:"Wide Grip", details:null}
+  ]},
+  { id:"air-bike", name:"Air Bike", type:"cardio", variants:[
+    {id:"arms-only", label:"Arms Only", details:null},
+    {id:"calories", label:"Calories", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"legs-only", label:"Legs Only", details:null},
+    {id:"max-watts", label:"Max Watts", details:null},
+    {id:"time", label:"Time", details:null}
+  ]},
+  { id:"air-squat", name:"Air Squat", type:"bodyweight", variants:[
+    {id:"assisted", label:"Assisted", details:null},
+    {id:"box", label:"Box", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"counterbalance", label:"Counterbalance", details:null},
+    {id:"jump-squat", label:"Jump Squat", details:null},
+    {id:"lateral", label:"Lateral", details:null},
+    {id:"pause", label:"Pause", details:null, type:"mobility"},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"to-target", label:"To Target", details:[{key:"height", label:"Zielhöhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
+  ]},
+  { id:"ankle-dorsiflexion-drill", name:"Ankle Dorsiflexion Drill", type:"mobility", variants:[
+    {id:"banded", label:"Banded", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"knee-to-wall", label:"Knee-to-Wall", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"arch-hold", name:"Arch Hold", type:"bodyweight", variants:[
+    {id:"arch-rock", label:"Arch Rock", details:null, type:"mobility"},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"atlas-stone", name:"Atlas Stone", type:"weighted", variants:[
+    {id:"carry", label:"Carry", details:null},
+    {id:"ground-to-shoulder", label:"Ground-to-Shoulder", details:null},
+    {id:"over-bar", label:"Over Bar", details:null},
+    {id:"to-platform", label:"To Platform", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
+  ]},
+  { id:"back-extension", name:"Back Extension", type:"bodyweight", variants:[
+    {id:"45-degree", label:"45-Degree", details:null},
+    {id:"ghd", label:"GHD", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"band-pull-apart", name:"Band Pull-Apart", type:"weighted", variants:[
+    {id:"diagonal", label:"Diagonal", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"overhead", label:"Overhead", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]}
+  ]},
+  { id:"bar-muscle-up", name:"Bar Muscle-up", type:"bodyweight", variants:[
+    {id:"low-bar-transition", label:"Low-Bar Transition", details:null, type:"mobility"},
+    {id:"negative", label:"Negative", details:null},
+    {id:"strict", label:"Strict", details:null}
+  ]},
+  { id:"bear-crawl", name:"Bear Crawl", type:"bodyweight", variants:[
+    {id:"backward", label:"Backward", details:null},
+    {id:"dumbbell-drag", label:"Dumbbell Drag", details:null},
+    {id:"forward", label:"Forward", details:null},
+    {id:"lateral", label:"Lateral", details:null},
+    {id:"weighted-sled-drag", label:"Weighted Sled Drag", details:null}
+  ]},
+  { id:"bear-hug-carry", name:"Bear Hug Carry", type:"weighted", variants:[
+    {id:"d-ball", label:"D-Ball", details:null},
+    {id:"plate-stack", label:"Plate Stack", details:null},
+    {id:"sandbag", label:"Sandbag", details:null}
+  ]},
+  { id:"bent-over-row", name:"Bent-over Row", type:"weighted", variants:[
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"pendlay", label:"Pendlay", details:null},
+    {id:"seal-row", label:"Seal Row", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"underhand", label:"Underhand", details:null}
+  ]},
+  { id:"biceps-curl", name:"Biceps Curl", type:"weighted", variants:[
+    {id:"band", label:"Band", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"hammer", label:"Hammer", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null}
+  ]},
+  { id:"bike", name:"Bike", type:"cardio", variants:[
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"mountain-bike", label:"Mountain Bike", details:null},
+    {id:"road-distance", label:"Road Distance", details:null},
+    {id:"stationary-time", label:"Stationary Time", details:null},
+    {id:"weighted-vest", label:"Weighted Vest", details:null}
+  ]},
+  { id:"bikeerg", name:"BikeErg", type:"cardio", variants:[
+    {id:"calories", label:"Calories", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"high-cadence", label:"High Cadence", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"low-cadence", label:"Low Cadence", details:null},
+    {id:"max-watts", label:"Max Watts", details:null},
+    {id:"time", label:"Time", details:null}
+  ]},
+  { id:"bird-dog", name:"Bird Dog", type:"bodyweight", variants:[
+    {id:"band-resisted", label:"Band-Resisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"row", label:"Row", details:null}
+  ]},
+  { id:"broad-jump", name:"Broad Jump", type:"bodyweight", variants:[
+    {id:"burpee-broad-jump", label:"Burpee Broad Jump", details:null},
+    {id:"repeated", label:"Repeated", details:null},
+    {id:"standing", label:"Standing", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"bulgarian-split-squat", name:"Bulgarian Split Squat", type:"weighted", variants:[
+    {id:"barbell-back-rack", label:"Barbell Back Rack", details:null},
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"dumbbell-suitcase", label:"Dumbbell Suitcase", details:null},
+    {id:"front-rack", label:"Front Rack", details:null},
+    {id:"goblet", label:"Goblet", details:null}
+  ]},
+  { id:"burpee", name:"Burpee", type:"bodyweight", variants:[
+    {id:"bar-facing", label:"Bar-Facing", details:null},
+    {id:"box-jump-burpee", label:"Box Jump Burpee", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"box-step-over-burpee", label:"Box Step-over Burpee", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"broad-jump-burpee", label:"Broad Jump Burpee", details:null},
+    {id:"chest-to-floor", label:"Chest-to-Floor", details:null},
+    {id:"lateral-over-bar", label:"Lateral Over Bar", details:null},
+    {id:"no-push-up", label:"No Push-up", details:null},
+    {id:"over-box", label:"Over Box", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"over-dumbbell", label:"Over Dumbbell", details:null},
+    {id:"over-rower", label:"Over Rower", details:null},
+    {id:"step-back", label:"Step-Back", details:null},
+    {id:"target", label:"Target", details:[{key:"height", label:"Zielhöhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
+  ]},
+  { id:"burpee-clean", name:"Burpee Clean", type:"weighted", variants:[
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single", label:"Dumbbell Single", details:null},
+    {id:"kettlebell-single", label:"Kettlebell Single", details:null},
+    {id:"sandbag", label:"Sandbag", details:null}
+  ]},
+  { id:"burpee-clean-jerk", name:"Burpee Clean & Jerk", type:"weighted", variants:[
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single", label:"Dumbbell Single", details:null},
+    {id:"kettlebell-single", label:"Kettlebell Single", details:null}
+  ]},
+  { id:"calf-raise", name:"Calf Raise", type:"weighted", variants:[
+    {id:"seated", label:"Seated", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"standing", label:"Standing", details:null},
+    {id:"weighted", label:"Weighted", details:null}
+  ]},
+  { id:"chin-up", name:"Chin-up", type:"bodyweight", variants:[
+    {id:"band-assisted", label:"Band-Assisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"close-grip", label:"Close Grip", details:null},
+    {id:"kipping", label:"Kipping", details:null},
+    {id:"negative", label:"Negative", details:null},
+    {id:"strict", label:"Strict", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"clean-pull", name:"Clean Pull", type:"weighted", variants:[
+    {id:"block", label:"Block", details:null},
+    {id:"deficit", label:"Deficit", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"hang", label:"Hang", details:null},
+    {id:"high-pull", label:"High Pull", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"cossack-squat", name:"Cossack Squat", type:"bodyweight", variants:[
+    {id:"assisted", label:"Assisted", details:null},
+    {id:"front-rack-kettlebell", label:"Front Rack Kettlebell", details:null},
+    {id:"goblet", label:"Goblet", details:null}
+  ]},
+  { id:"couch-stretch", name:"Couch Stretch", type:"mobility", variants:[
+    {id:"active-glute", label:"Active Glute", details:null},
+    {id:"with-side-bend", label:"With Side Bend", details:null}
+  ]},
+  { id:"crab-walk", name:"Crab Walk", type:"bodyweight", variants:[
+    {id:"backward", label:"Backward", details:null},
+    {id:"forward", label:"Forward", details:null},
+    {id:"lateral", label:"Lateral", details:null}
+  ]},
+  { id:"d-ball-clean", name:"D-Ball Clean", type:"weighted", variants:[
+    {id:"ground-to-overhead", label:"Ground-to-Overhead", details:null},
+    {id:"over-shoulder", label:"Over Shoulder", details:null},
+    {id:"to-bear-hug", label:"To Bear Hug", details:null},
+    {id:"to-shoulder", label:"To Shoulder", details:null}
+  ]},
+  { id:"dead-bug", name:"Dead Bug", type:"bodyweight", variants:[
+    {id:"band-resisted", label:"Band-Resisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"devils-press", name:"Devils Press", type:"weighted", variants:[
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"no-push-up", label:"No Push-up", details:null},
+    {id:"single-dumbbell", label:"Single Dumbbell", details:null},
+    {id:"single-kettlebell", label:"Single Kettlebell", details:null}
+  ]},
+  { id:"dumbbell-complex", name:"Dumbbell Complex", type:"weighted", variants:[
+    {id:"devils-press", label:"Devils Press", details:null},
+    {id:"hang-clean-thruster", label:"Hang Clean + Thruster", details:null},
+    {id:"man-maker", label:"Man Maker", details:null},
+    {id:"snatch-overhead-squat", label:"Snatch + Overhead Squat", details:null}
+  ]},
+  { id:"echo-bike", name:"Echo Bike", type:"cardio", variants:[
+    {id:"arms-only", label:"Arms Only", details:null},
+    {id:"calories", label:"Calories", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"legs-only", label:"Legs Only", details:null},
+    {id:"max-watts", label:"Max Watts", details:null},
+    {id:"time", label:"Time", details:null}
+  ]},
+  { id:"face-pull", name:"Face Pull", type:"weighted", variants:[
+    {id:"band", label:"Band", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"cable", label:"Cable", details:null},
+    {id:"ring", label:"Ring", details:null}
+  ]},
+  { id:"farmers-carry", name:"Farmers Carry", type:"weighted", variants:[
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"farmers-handles", label:"Farmers Handles", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"sandbag-suitcase", label:"Sandbag Suitcase", details:null},
+    {id:"single-arm-suitcase", label:"Single-Arm Suitcase", details:null},
+    {id:"trap-bar", label:"Trap Bar", details:null},
+    {id:"uneven", label:"Uneven", details:null}
+  ]},
+  { id:"floor-press", name:"Floor Press", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"single-arm-dumbbell", label:"Single-Arm Dumbbell", details:null}
+  ]},
+  { id:"foam-roll", name:"Foam Roll", type:"mobility", variants:[
+    {id:"calves", label:"Calves", details:null},
+    {id:"glutes", label:"Glutes", details:null},
+    {id:"hamstrings", label:"Hamstrings", details:null},
+    {id:"lats", label:"Lats", details:null},
+    {id:"quadriceps", label:"Quadriceps", details:null},
+    {id:"thoracic-spine", label:"Thoracic Spine", details:null}
+  ]},
+  { id:"front-rack-carry", name:"Front Rack Carry", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"sandbag", label:"Sandbag", details:null}
+  ]},
+  { id:"front-rack-stretch", name:"Front Rack Stretch", type:"mobility", variants:[
+    {id:"band-assisted", label:"Band-Assisted", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"rig-assisted", label:"Rig-Assisted", details:null}
+  ]},
+  { id:"ghd-hip-extension", name:"GHD Hip Extension", type:"bodyweight", variants:[
+    {id:"isometric-hold", label:"Isometric Hold", details:null, type:"mobility"},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"ghd-sit-up", name:"GHD Sit-up", type:"bodyweight", variants:[
+    {id:"parallel-range", label:"Parallel Range", details:null, type:"mobility"},
+    {id:"reduced-range", label:"Reduced Range", details:null, type:"mobility"},
+    {id:"to-parallel", label:"To Parallel", details:null, type:"mobility"},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"glute-bridge", name:"Glute Bridge", type:"bodyweight", variants:[
+    {id:"banded", label:"Banded", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"feet-elevated", label:"Feet Elevated", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"goblet-squat", name:"Goblet Squat", type:"weighted", variants:[
+    {id:"cycling", label:"Cycling", details:null},
+    {id:"heel-elevated", label:"Heel-Elevated", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"to-box", label:"To Box", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
+  ]},
+  { id:"good-morning", name:"Good Morning", type:"weighted", variants:[
+    {id:"banded", label:"Banded", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"safety-bar", label:"Safety Bar", details:null},
+    {id:"seated", label:"Seated", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"ground-to-overhead", name:"Ground-to-Overhead", type:"weighted", variants:[
+    {id:"barbell-any-style", label:"Barbell Any Style", details:null},
+    {id:"clean-jerk", label:"Clean & Jerk", details:null},
+    {id:"dumbbell-alternating", label:"Dumbbell Alternating", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"plate", label:"Plate", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"snatch", label:"Snatch", details:null}
+  ]},
+  { id:"hammer-strike", name:"Hammer Strike", type:"weighted", variants:[
+    {id:"left-side", label:"Left Side", details:null},
+    {id:"right-side", label:"Right Side", details:null},
+    {id:"tire-alternating", label:"Tire Alternating", details:null}
+  ]},
+  { id:"hamstring-curl", name:"Hamstring Curl", type:"weighted", variants:[
+    {id:"band", label:"Band", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"machine", label:"Machine", details:null},
+    {id:"slider", label:"Slider", details:null},
+    {id:"swiss-ball", label:"Swiss Ball", details:null}
+  ]},
+  { id:"handstand-hold", name:"Handstand Hold", type:"bodyweight", variants:[
+    {id:"back-to-wall", label:"Back-to-Wall", details:null, type:"mobility"},
+    {id:"box-pike", label:"Box Pike", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"freestanding", label:"Freestanding", details:null, type:"mobility"},
+    {id:"shoulder-tap", label:"Shoulder Tap", details:null, type:"mobility"},
+    {id:"wall-facing", label:"Wall-Facing", details:null, type:"mobility"}
+  ]},
+  { id:"hang", name:"Hang", type:"bodyweight", variants:[
+    {id:"active", label:"Active", details:null},
+    {id:"mixed-grip", label:"Mixed Grip", details:null},
+    {id:"passive", label:"Passive", details:null},
+    {id:"single-arm-assisted", label:"Single-Arm Assisted", details:null},
+    {id:"towel", label:"Towel", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"hang-clean-to-overhead", name:"Hang Clean-to-Overhead", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"dumbbell-alternating", label:"Dumbbell Alternating", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null}
+  ]},
+  { id:"hip-thrust", name:"Hip Thrust", type:"weighted", variants:[
+    {id:"banded", label:"Banded", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null}
+  ]},
+  { id:"hollow-hold", name:"Hollow Hold", type:"bodyweight", variants:[
+    {id:"hollow-rock", label:"Hollow Rock", details:null, type:"mobility"},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"tuck", label:"Tuck", details:null, type:"mobility"},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"inchworm", name:"Inchworm", type:"bodyweight", variants:[
+    {id:"elevated", label:"Elevated", details:null},
+    {id:"with-push-up", label:"With Push-up", details:null}
+  ]},
+  { id:"jump-rope", name:"Jump Rope", type:"cardio", variants:[
+    {id:"backward-single-under", label:"Backward Single-under", details:null},
+    {id:"crossovers", label:"Crossovers", details:null},
+    {id:"double-under", label:"Double-under", details:null},
+    {id:"double-under-crossovers", label:"Double-under Crossovers", details:null},
+    {id:"jumping-jacks", label:"Jumping Jacks", details:null},
+    {id:"penguin-tap", label:"Penguin Tap", details:null},
+    {id:"plate-hops", label:"Plate Hops", details:null},
+    {id:"single-under", label:"Single-under", details:null},
+    {id:"triple-under", label:"Triple-under", details:null}
+  ]},
+  { id:"kettlebell-clean", name:"Kettlebell Clean", type:"weighted", variants:[
+    {id:"dead-stop", label:"Dead-Stop", details:null},
+    {id:"double", label:"Double", details:null},
+    {id:"hang", label:"Hang", details:null},
+    {id:"single-arm", label:"Single-Arm", details:null}
+  ]},
+  { id:"kettlebell-clean-jerk", name:"Kettlebell Clean & Jerk", type:"weighted", variants:[
+    {id:"double", label:"Double", details:null},
+    {id:"long-cycle", label:"Long Cycle", details:null},
+    {id:"single-arm", label:"Single-Arm", details:null}
+  ]},
+  { id:"kettlebell-complex", name:"Kettlebell Complex", type:"weighted", variants:[
+    {id:"armor-building-complex", label:"Armor Building Complex", details:null},
+    {id:"clean-press", label:"Clean + Press", details:null},
+    {id:"clean-squat-press", label:"Clean + Squat + Press", details:null},
+    {id:"swing-clean-snatch", label:"Swing + Clean + Snatch", details:null}
+  ]},
+  { id:"kettlebell-snatch", name:"Kettlebell Snatch", type:"weighted", variants:[
+    {id:"alternating", label:"Alternating", details:null},
+    {id:"dead-stop", label:"Dead-Stop", details:null},
+    {id:"double", label:"Double", details:null},
+    {id:"hang", label:"Hang", details:null},
+    {id:"single-arm", label:"Single-Arm", details:null}
+  ]},
+  { id:"kettlebell-swing", name:"Kettlebell Swing", type:"weighted", variants:[
+    {id:"alternating", label:"Alternating", details:null},
+    {id:"american", label:"American", details:null},
+    {id:"dead-stop", label:"Dead-Stop", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"heavy", label:"Heavy", details:null},
+    {id:"russian", label:"Russian", details:null},
+    {id:"single-arm-american", label:"Single-Arm American", details:null},
+    {id:"single-arm-russian", label:"Single-Arm Russian", details:null}
+  ]},
+  { id:"knees-to-elbows", name:"Knees-to-Elbows", type:"bodyweight", variants:[
+    {id:"hanging-knee-tuck", label:"Hanging Knee Tuck", details:null},
+    {id:"kipping", label:"Kipping", details:null},
+    {id:"knee-raise", label:"Knee Raise", details:null},
+    {id:"strict", label:"Strict", details:null}
+  ]},
+  { id:"l-sit", name:"L-Sit", type:"bodyweight", variants:[
+    {id:"hanging", label:"Hanging", details:null, type:"mobility"},
+    {id:"parallettes", label:"Parallettes", details:null, type:"mobility"},
+    {id:"rings", label:"Rings", details:null, type:"mobility"},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"tuck", label:"Tuck", details:null, type:"mobility"}
+  ]},
+  { id:"lat-stretch", name:"Lat Stretch", type:"mobility", variants:[
+    {id:"band", label:"Band", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"bench", label:"Bench", details:null},
+    {id:"rig", label:"Rig", details:null}
+  ]},
+  { id:"lunge", name:"Lunge", type:"weighted", variants:[
+    {id:"back-rack-barbell", label:"Back Rack Barbell", details:null},
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"dumbbell-front-rack", label:"Dumbbell Front Rack", details:null},
+    {id:"dumbbell-overhead", label:"Dumbbell Overhead", details:null},
+    {id:"dumbbell-suitcase", label:"Dumbbell Suitcase", details:null},
+    {id:"forward", label:"Forward", details:null},
+    {id:"front-rack-barbell", label:"Front Rack Barbell", details:null},
+    {id:"goblet", label:"Goblet", details:null},
+    {id:"jumping", label:"Jumping", details:null},
+    {id:"kettlebell-front-rack", label:"Kettlebell Front Rack", details:null},
+    {id:"kettlebell-overhead", label:"Kettlebell Overhead", details:null},
+    {id:"overhead-barbell", label:"Overhead Barbell", details:null},
+    {id:"plate-overhead", label:"Plate Overhead", details:null},
+    {id:"reverse", label:"Reverse", details:null},
+    {id:"sandbag-bear-hug", label:"Sandbag Bear Hug", details:null},
+    {id:"walking", label:"Walking", details:null}
+  ]},
+  { id:"man-maker", name:"Man Maker", type:"weighted", variants:[
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"without-push-up", label:"Without Push-up", details:null}
+  ]},
+  { id:"medicine-ball-clean", name:"Medicine Ball Clean", type:"weighted", variants:[
+    {id:"power-clean", label:"Power Clean", details:null},
+    {id:"squat-clean", label:"Squat Clean", details:null},
+    {id:"to-shoulder", label:"To Shoulder", details:null}
+  ]},
+  { id:"medicine-ball-slam", name:"Medicine Ball Slam", type:"weighted", variants:[
+    {id:"over-shoulder", label:"Over Shoulder", details:null},
+    {id:"partner", label:"Partner", details:null},
+    {id:"rotational", label:"Rotational", details:null}
+  ]},
+  { id:"nordic-hamstring-curl", name:"Nordic Hamstring Curl", type:"bodyweight", variants:[
+    {id:"assisted", label:"Assisted", details:null},
+    {id:"eccentric", label:"Eccentric", details:null},
+    {id:"full", label:"Full", details:null}
+  ]},
+  { id:"overhead-carry", name:"Overhead Carry", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"plate", label:"Plate", details:null},
+    {id:"single-dumbbell", label:"Single Dumbbell", details:null},
+    {id:"single-kettlebell", label:"Single Kettlebell", details:null}
+  ]},
+  { id:"overhead-press", name:"Overhead Press", type:"weighted", variants:[
+    
+  ]},
+  { id:"overhead-squat", name:"Overhead Squat", type:"weighted", variants:[
+    {id:"box", label:"Box", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"plate", label:"Plate", details:null},
+    {id:"pvc", label:"PVC", details:null},
+    {id:"snatch-grip", label:"Snatch Grip", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"overhead-squat-drill", name:"Overhead Squat Drill", type:"mobility", variants:[
+    {id:"goblet-counterbalance", label:"Goblet Counterbalance", details:null},
+    {id:"pvc", label:"PVC", details:null},
+    {id:"squat-therapy", label:"Squat Therapy", details:null},
+    {id:"wall-facing", label:"Wall-Facing", details:null}
+  ]},
+  { id:"pegboard-climb", name:"Pegboard Climb", type:"bodyweight", variants:[
+    {id:"assisted", label:"Assisted", details:null},
+    {id:"partial-height", label:"Partial Height", details:null},
+    {id:"strict", label:"Strict", details:null}
+  ]},
+  { id:"pigeon-stretch", name:"Pigeon Stretch", type:"mobility", variants:[
+    {id:"dynamic", label:"Dynamic", details:null},
+    {id:"elevated", label:"Elevated", details:null},
+    {id:"floor", label:"Floor", details:null}
+  ]},
+  { id:"plank", name:"Plank", type:"bodyweight", variants:[
+    {id:"body-saw", label:"Body Saw", details:null},
+    {id:"front", label:"Front", details:null},
+    {id:"high", label:"High", details:null},
+    {id:"low", label:"Low", details:null},
+    {id:"shoulder-tap", label:"Shoulder Tap", details:null},
+    {id:"side", label:"Side", details:null},
+    {id:"star-side-plank", label:"Star Side Plank", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"push-jerk", name:"Push Jerk", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"behind-neck", label:"Behind Neck", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null}
+  ]},
+  { id:"push-press", name:"Push Press", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"behind-neck", label:"Behind Neck", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"tempo-dip", label:"Tempo Dip", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"pvc-pass-through", name:"PVC Pass-through", type:"mobility", variants:[
+    {id:"narrow-grip", label:"Narrow Grip", details:null},
+    {id:"wide-grip", label:"Wide Grip", details:null}
+  ]},
+  { id:"renegade-row", name:"Renegade Row", type:"weighted", variants:[
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"double-kettlebell", label:"Double Kettlebell", details:null},
+    {id:"with-push-up", label:"With Push-up", details:null},
+    {id:"without-push-up", label:"Without Push-up", details:null}
+  ]},
+  { id:"reverse-hyper", name:"Reverse Hyper", type:"weighted", variants:[
+    {id:"light-swing", label:"Light Swing", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"strict", label:"Strict", details:null}
+  ]},
+  { id:"ring-muscle-up", name:"Ring Muscle-up", type:"bodyweight", variants:[
+    {id:"low-ring-transition", label:"Low-Ring Transition", details:null, type:"mobility"},
+    {id:"negative", label:"Negative", details:null},
+    {id:"strict", label:"Strict", details:null}
+  ]},
+  { id:"ring-row", name:"Ring Row", type:"bodyweight", variants:[
+    {id:"feet-elevated", label:"Feet Elevated", details:null},
+    {id:"feet-forward", label:"Feet Forward", details:null},
+    {id:"single-arm-assisted", label:"Single-Arm Assisted", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"row", name:"Row", type:"cardio", variants:[
+    {id:"calories", label:"Calories", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"low-stroke-rate", label:"Low Stroke Rate", details:null},
+    {id:"max-watts", label:"Max Watts", details:null},
+    {id:"single-arm-drill", label:"Single-Arm Drill", details:null},
+    {id:"time", label:"Time", details:null}
+  ]},
+  { id:"run", name:"Run", type:"cardio", variants:[
+    {id:"backward", label:"Backward", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"incline", label:"Incline", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"sprint", label:"Sprint", details:null},
+    {id:"time", label:"Time", details:null},
+    {id:"trail", label:"Trail", details:null},
+    {id:"weighted-vest", label:"Weighted Vest", details:null}
+  ]},
+  { id:"russian-twist", name:"Russian Twist", type:"weighted", variants:[
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"medicine-ball", label:"Medicine Ball", details:null},
+    {id:"plate", label:"Plate", details:null}
+  ]},
+  { id:"sandbag-carry", name:"Sandbag Carry", type:"weighted", variants:[
+    {id:"bear-hug", label:"Bear Hug", details:null},
+    {id:"front-rack", label:"Front Rack", details:null},
+    {id:"overhead", label:"Overhead", details:null},
+    {id:"shoulder", label:"Shoulder", details:null},
+    {id:"suitcase", label:"Suitcase", details:null}
+  ]},
+  { id:"sandbag-clean", name:"Sandbag Clean", type:"weighted", variants:[
+    {id:"bear-hug-squat-clean", label:"Bear Hug Squat Clean", details:null},
+    {id:"ground-to-overhead", label:"Ground-to-Overhead", details:null},
+    {id:"over-shoulder", label:"Over Shoulder", details:null},
+    {id:"to-front-rack", label:"To Front Rack", details:null},
+    {id:"to-shoulder", label:"To Shoulder", details:null}
+  ]},
+  { id:"scapular-pull-up", name:"Scapular Pull-up", type:"bodyweight", variants:[
+    {id:"ring", label:"Ring", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"scapular-push-up", name:"Scapular Push-up", type:"bodyweight", variants:[
+    {id:"handstand", label:"Handstand", details:null},
+    {id:"plank", label:"Plank", details:null}
+  ]},
+  { id:"shuttle-run", name:"Shuttle Run", type:"cardio", variants:[
+    {id:"down-and-back", label:"Down-and-Back", details:null},
+    {id:"lateral", label:"Lateral", details:null},
+    {id:"object-carry", label:"Object Carry", details:null},
+    {id:"touch-line", label:"Touch Line", details:null}
+  ]},
+  { id:"single-leg-deadlift", name:"Single-Leg Deadlift", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"double-dumbbell", label:"Double Dumbbell", details:null},
+    {id:"dumbbell-contralateral", label:"Dumbbell Contralateral", details:null},
+    {id:"dumbbell-ipsilateral", label:"Dumbbell Ipsilateral", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"kickstand", label:"Kickstand", details:null}
+  ]},
+  { id:"sit-up", name:"Sit-up", type:"bodyweight", variants:[
+    {id:"abmat", label:"AbMat", details:null, type:"mobility"},
+    {id:"anchored", label:"Anchored", details:null, type:"mobility"},
+    {id:"butterfly", label:"Butterfly", details:null, type:"mobility"},
+    {id:"decline", label:"Decline", details:null, type:"mobility"},
+    {id:"straight-leg", label:"Straight-Leg", details:null, type:"mobility"},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"ski-erg", name:"Ski Erg", type:"cardio", variants:[
+    
+  ]},
+  { id:"skierg", name:"SkiErg", type:"cardio", variants:[
+    {id:"calories", label:"Calories", details:null},
+    {id:"distance", label:"Distance", details:null},
+    {id:"double-pole", label:"Double-Pole", details:null},
+    {id:"intervals", label:"Intervals", details:null},
+    {id:"max-watts", label:"Max Watts", details:null},
+    {id:"single-arm-alternating", label:"Single-Arm Alternating", details:null},
+    {id:"time", label:"Time", details:null}
+  ]},
+  { id:"sled-pull", name:"Sled Pull", type:"weighted", variants:[
+    {id:"backward-drag", label:"Backward Drag", details:null},
+    {id:"hand-over-hand", label:"Hand-over-Hand", details:null},
+    {id:"harness-forward", label:"Harness Forward", details:null},
+    {id:"lateral-drag", label:"Lateral Drag", details:null},
+    {id:"rope-pull", label:"Rope Pull", details:null}
+  ]},
+  { id:"sled-push", name:"Sled Push", type:"weighted", variants:[
+    {id:"backward", label:"Backward", details:null},
+    {id:"heavy", label:"Heavy", details:null},
+    {id:"high-handle", label:"High Handle", details:null},
+    {id:"low-handle", label:"Low Handle", details:null},
+    {id:"sprint", label:"Sprint", details:null}
+  ]},
+  { id:"sled-sprint", name:"Sled Sprint", type:"cardio", variants:[
+    {id:"backward-drag", label:"Backward Drag", details:null},
+    {id:"light-pull", label:"Light Pull", details:null},
+    {id:"light-push", label:"Light Push", details:null}
+  ]},
+  { id:"snatch-balance", name:"Snatch Balance", type:"weighted", variants:[
+    {id:"drop", label:"Drop", details:null},
+    {id:"heaving", label:"Heaving", details:null},
+    {id:"pressing", label:"Pressing", details:null}
+  ]},
+  { id:"snatch-pull", name:"Snatch Pull", type:"weighted", variants:[
+    {id:"block", label:"Block", details:null},
+    {id:"deficit", label:"Deficit", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"hang", label:"Hang", details:null},
+    {id:"high-pull", label:"High Pull", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"sots-press", name:"Sots Press", type:"weighted", variants:[
+    {id:"clean-grip", label:"Clean Grip", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"snatch-grip", label:"Snatch Grip", details:null}
+  ]},
+  { id:"split-jerk", name:"Split Jerk", type:"weighted", variants:[
+    {id:"behind-neck", label:"Behind Neck", details:null},
+    {id:"blocks", label:"Blocks", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"pause-dip", label:"Pause Dip", details:null}
+  ]},
+  { id:"split-squat", name:"Split Squat", type:"weighted", variants:[
+    {id:"barbell-back-rack", label:"Barbell Back Rack", details:null},
+    {id:"barbell-front-rack", label:"Barbell Front Rack", details:null},
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"front-foot-elevated", label:"Front-Foot Elevated", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"rear-foot-elevated", label:"Rear-Foot Elevated", details:null}
+  ]},
+  { id:"step-up", name:"Step-up", type:"weighted", variants:[
+    {id:"alternating", label:"Alternating", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"barbell-back-rack", label:"Barbell Back Rack", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"barbell-front-rack", label:"Barbell Front Rack", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"bodyweight", label:"Bodyweight", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"dumbbell-front-rack", label:"Dumbbell Front Rack", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"dumbbell-suitcase", label:"Dumbbell Suitcase", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"kettlebell-front-rack", label:"Kettlebell Front Rack", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"kettlebell-goblet", label:"Kettlebell Goblet", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"lateral", label:"Lateral", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"sandbag-bear-hug", label:"Sandbag Bear Hug", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]}
+  ]},
+  { id:"strict-press", name:"Strict Press", type:"weighted", variants:[
+    {id:"bottom-up-kettlebell", label:"Bottom-Up Kettlebell", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"seated-barbell", label:"Seated Barbell", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
+  ]},
+  { id:"sumo-deadlift-high-pull", name:"Sumo Deadlift High Pull", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null}
+  ]},
+  { id:"swim", name:"Swim", type:"cardio", variants:[
+    {id:"backstroke", label:"Backstroke", details:null},
+    {id:"breaststroke", label:"Breaststroke", details:null},
+    {id:"freestyle-distance", label:"Freestyle Distance", details:null},
+    {id:"open-water", label:"Open Water", details:null},
+    {id:"pool-intervals", label:"Pool Intervals", details:null},
+    {id:"with-fins", label:"With Fins", details:null}
+  ]},
+  { id:"thoracic-rotation", name:"Thoracic Rotation", type:"mobility", variants:[
+    {id:"bench", label:"Bench", details:null},
+    {id:"open-book", label:"Open Book", details:null},
+    {id:"quadruped", label:"Quadruped", details:null}
+  ]},
+  { id:"thruster", name:"Thruster", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"cluster", label:"Cluster", details:null},
+    {id:"dumbbell-double", label:"Dumbbell Double", details:null},
+    {id:"dumbbell-single-arm", label:"Dumbbell Single-Arm", details:null},
+    {id:"front-squat-push-press", label:"Front Squat + Push Press", details:null},
+    {id:"kettlebell-double", label:"Kettlebell Double", details:null},
+    {id:"kettlebell-single-arm", label:"Kettlebell Single-Arm", details:null},
+    {id:"sandbag", label:"Sandbag", details:null},
+    {id:"wall-ball-thruster", label:"Wall-Ball Thruster", details:null}
+  ]},
+  { id:"tire-flip", name:"Tire Flip", type:"weighted", variants:[
+    {id:"partner", label:"Partner", details:null},
+    {id:"with-jump", label:"With Jump", details:null}
+  ]},
+  { id:"triceps-extension", name:"Triceps Extension", type:"weighted", variants:[
+    {id:"band", label:"Band", details:[{key:"band", label:"Band-Farbe/-Stärke", placeholder:"z.B. Grün"}]},
+    {id:"cable", label:"Cable", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"ring", label:"Ring", details:null}
+  ]},
+  { id:"turkish-get-up", name:"Turkish Get-up", type:"weighted", variants:[
+    {id:"barbell", label:"Barbell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"half-get-up", label:"Half Get-up", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null},
+    {id:"shoe-drill", label:"Shoe Drill", details:null}
+  ]},
+  { id:"v-up", name:"V-Up", type:"bodyweight", variants:[
+    {id:"alternating", label:"Alternating", details:null},
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"tuck-up", label:"Tuck-up", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"waiter-carry", name:"Waiter Carry", type:"weighted", variants:[
+    {id:"bottom-up-kettlebell", label:"Bottom-Up Kettlebell", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null}
+  ]},
+  { id:"wall-ball", name:"Wall Ball", type:"weighted", variants:[
+    {id:"heavy", label:"Heavy", details:null},
+    {id:"high-target", label:"High Target", details:[{key:"height", label:"Zielhöhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"seated", label:"Seated", details:null},
+    {id:"single-arm", label:"Single-Arm", details:null},
+    {id:"squat-to-target", label:"Squat-to-Target", details:[{key:"height", label:"Zielhöhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
+    {id:"two-for-one", label:"Two-for-One", details:null}
+  ]},
+  { id:"wall-sit", name:"Wall Sit", type:"bodyweight", variants:[
+    {id:"single-leg", label:"Single-Leg", details:null},
+    {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
+  ]},
+  { id:"wall-walk", name:"Wall Walk", type:"bodyweight", variants:[
+    {id:"bear-crawl", label:"Bear Crawl", details:null},
+    {id:"elevated-inchworm", label:"Elevated Inchworm", details:null},
+    {id:"inchworm", label:"Inchworm", details:null},
+    {id:"partial-range", label:"Partial Range", details:null}
+  ]},
+  { id:"windmill", name:"Windmill", type:"weighted", variants:[
+    {id:"bodyweight", label:"Bodyweight", details:null},
+    {id:"bottom-up", label:"Bottom-Up", details:null},
+    {id:"dumbbell", label:"Dumbbell", details:null},
+    {id:"kettlebell", label:"Kettlebell", details:null}
+  ]},
+  { id:"worlds-greatest-stretch", name:"Worlds Greatest Stretch", type:"mobility", variants:[
+    {id:"with-rotation", label:"With Rotation", details:null}
+  ]},
+  { id:"yoke-carry", name:"Yoke Carry", type:"weighted", variants:[
+    {id:"front-rack", label:"Front Rack", details:null},
+    {id:"zercher", label:"Zercher", details:null}
+  ]},
+  { id:"zercher-squat", name:"Zercher Squat", type:"weighted", variants:[
+    {id:"from-pins", label:"From Pins", details:null},
+    {id:"pause", label:"Pause", details:null},
+    {id:"tempo", label:"Tempo", details:[{key:"tempo", label:"Tempo (z.B. 31X1)", placeholder:"z.B. 31X1"}]}
   ]}
 ];
-EXERCISE_LIBRARY.forEach(b=>{ b.variants.unshift({id:'standard', label:'Standard', detail:null}); });
-function composeVariantName(base, variant, detailVal){
+EXERCISE_LIBRARY.forEach(b=>{ b.variants.unshift({id:'standard', label:'Standard', details:null}); });
+function composeVariantName(base, variant, detailVals){
   if(!variant || variant.id==='standard') return base.name;
   let name = `${variant.label} ${base.name}`;
-  if(variant.detail && detailVal){
-    const d = variant.detail;
-    const val = d.numeric ? `${d.signed===false?'':'+'}${detailVal}${d.unit||'kg'}` : detailVal;
-    name += ` (${val})`;
+  const vals = (detailVals && typeof detailVals === 'object') ? detailVals : {};
+  if(variant.details && variant.details.length){
+    const parts = [];
+    variant.details.forEach(d=>{
+      const raw = vals[d.key];
+      if(raw===undefined || raw===null || raw==='') return;
+      const val = d.numeric ? `${d.signed===false?'':'+'}${raw}${d.unit||'kg'}` : raw;
+      parts.push(val);
+    });
+    if(parts.length) name += ` (${parts.join(', ')})`;
   }
   return name;
 }
@@ -606,7 +1515,7 @@ function matchLibraryVariant(ex){
   for(const base of EXERCISE_LIBRARY){
     for(const variant of base.variants){
       const composed = composeVariantName(base, variant, '').toLowerCase();
-      if(n === composed || (variant.detail && n.startsWith(composed))) return {base, variant};
+      if(n === composed || (variant.details && variant.details.length && n.startsWith(composed))) return {base, variant};
     }
   }
   return null;
@@ -709,7 +1618,8 @@ function isRunExercise(ex){
 function guessExerciseType(name){
   const n = name.toLowerCase();
   if(CARDIO_MACHINE_NAMES.some(c=>n.includes(c.toLowerCase()))) return 'cardio';
-  if(EXERCISE_LIBRARY.some(b=>n.includes(b.name.toLowerCase()))) return 'bodyweight';
+  const libMatch = EXERCISE_LIBRARY.find(b=>n.includes(b.name.toLowerCase()));
+  if(libMatch) return libMatch.type;
   return 'weighted';
 }
 function findOrCreateExerciseId(name, type){
@@ -756,7 +1666,7 @@ function buildTemplateFromProgression(prog){
 }
 /* ---------- Exercise-Modal (ersetzt window.prompt, das in der Hosting-Umgebung blockiert ist) ---------- */
 function openExerciseModal(onSelect){
-  state.tmp.exerciseModal = { open:true, onSelect, mode:'library', baseId:'', variantId:'', variantDetail:'', customName:'', customType:'weighted' };
+  state.tmp.exerciseModal = { open:true, onSelect, mode:'library', baseId:'', variantId:'', variantDetail:{}, customName:'', customType:'weighted' };
   render();
 }
 function closeExerciseModal(){
@@ -773,16 +1683,22 @@ function updateExerciseModal(field, val){
   if(field==='baseId'){
     const base = EXERCISE_LIBRARY.find(b=>b.id===val);
     m.variantId = base ? base.variants[0].id : '';
-    m.variantDetail = '';
+    m.variantDetail = {};
     render();
     return;
   }
   if(field==='variantId'){
-    m.variantDetail = '';
+    m.variantDetail = {};
     render();
     return;
   }
-  // customName / variantDetail: just update state + live preview text, no full re-render (keeps input focus)
+  // customName: just update state + live preview text, no full re-render (keeps input focus)
+  updateExerciseModalPreview();
+}
+function updateExerciseModalDetail(key, val){
+  const m = state.tmp.exerciseModal;
+  m.variantDetail = m.variantDetail || {};
+  m.variantDetail[key] = val;
   updateExerciseModalPreview();
 }
 function updateExerciseModalPreview(){
@@ -805,9 +1721,13 @@ function confirmExerciseModal(){
     const base = EXERCISE_LIBRARY.find(b=>b.id===m.baseId);
     if(!base){ showToast('Bitte eine Grundübung wählen'); return; }
     const variant = base.variants.find(v=>v.id===m.variantId) || base.variants[0];
-    if(variant.detail && !String(m.variantDetail||'').trim()){
-      showToast(`Bitte ${variant.detail.label} angeben`);
-      return;
+    if(variant.details && variant.details.length){
+      for(const d of variant.details){
+        if(!String((m.variantDetail||{})[d.key]||'').trim()){
+          showToast(`Bitte ${d.label} angeben`);
+          return;
+        }
+      }
     }
     name = composeVariantName(base, variant, m.variantDetail);
     type = variant.type || base.type || 'weighted';
@@ -836,10 +1756,10 @@ function renderExerciseModalRoot(){
         ${base.variants.map(v=>`<option value="${v.id}" ${v.id===m.variantId?'selected':''}>${v.label}</option>`).join('')}
       </select>
     </div>` : ''}
-    ${variant && variant.detail ? `
-    <div class="field"><label>${variant.detail.label}</label>
-      <input type="${variant.detail.numeric?'number':'text'}" value="${escapeHtml(m.variantDetail||'')}" oninput="updateExerciseModal('variantDetail',this.value)" placeholder="${variant.detail.placeholder||''}">
-    </div>` : ''}
+    ${variant && variant.details && variant.details.length ? variant.details.map(d=>`
+    <div class="field"><label>${d.label}</label>
+      <input type="${d.numeric?'number':'text'}" value="${escapeHtml((m.variantDetail||{})[d.key]||'')}" oninput="updateExerciseModalDetail('${d.key}',this.value)" placeholder="${d.placeholder||''}">
+    </div>`).join('') : ''}
     ${base ? `<div class="note">Ergebnis: <strong id="exerciseModalPreview" style="color:var(--chalk-50)">${escapeHtml(composeVariantName(base, variant, m.variantDetail))}</strong></div>` : ''}
   `;
   const customBody = `
@@ -851,6 +1771,7 @@ function renderExerciseModalRoot(){
         <option value="weighted" ${m.customType==='weighted'?'selected':''}>Mit Gewicht (Hantel/Kettlebell/Dumbbell)</option>
         <option value="bodyweight" ${m.customType==='bodyweight'?'selected':''}>Bodyweight / Gymnastics</option>
         <option value="cardio" ${m.customType==='cardio'?'selected':''}>Cardio (Row/Bike/Laufen)</option>
+        <option value="mobility" ${m.customType==='mobility'?'selected':''}>Mobility (Stretching/Prehab)</option>
       </select>
       <div class="note">Bestimmt, ob beim Loggen ein Gewichts- bzw. Kalorien-/Meter-Feld angeboten wird.</div>
     </div>
@@ -1336,6 +2257,10 @@ function formatMovementLine(m){
     if(m.unit==='m') return `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}`;
     return `${m.reps||0} kcal ${name}`;
   }
+  if(type==='mobility'){
+    if(m.unit==='sec') return `${m.reps||0}s ${name}`;
+    return `${m.reps||0}x ${name}`;
+  }
   let line = `${m.reps||0}x ${name}`;
   if(type==='weighted' && m.weight){
     line += ` - ${fmtWeight(m.weight)}`;
@@ -1365,7 +2290,10 @@ function renderWorkoutHistoryEntry(w){
     const fl = w.forLoad || {};
     const ex = state.exercises.find(e=>e.id===fl.exerciseId);
     if(fl.unit){
-      const qty = fl.unit==='m' ? `${toDisplayDistance(fl.achievedWeight)}${distanceUnitLabel()}` : `${fl.achievedWeight||0} kcal`;
+      const qty = fl.unit==='m' ? `${toDisplayDistance(fl.achievedWeight)}${distanceUnitLabel()}`
+        : fl.unit==='sec' ? `${fl.achievedWeight||0}s`
+        : fl.unit==='reps' ? `${fl.achievedWeight||0}x`
+        : `${fl.achievedWeight||0} kcal`;
       body = `<div class="moves">
         <div><span>${ex?ex.name:'—'}</span><span>${qty}</span></div>
       </div>`;
@@ -1386,11 +2314,19 @@ function renderWorkoutHistoryEntry(w){
     body = `<div class="moves">
       ${w.movements.map(m=>{
         const ex = state.exercises.find(e=>e.id===m.exerciseId);
-        const isCardio = getExerciseType(ex)==='cardio';
+        const type = getExerciseType(ex);
+        const isCardio = type==='cardio';
+        const isMobility = type==='mobility';
         const prefix = (m.timing ? `[${escapeHtml(m.timing)}] ` : '') + (m.groupId!=null ? '🔗 ' : '');
         if(isCardio){
           return m.sets.map(s=>{
             const qty = m.unit==='m' ? `${toDisplayDistance(s.reps)}${distanceUnitLabel()}` : `${s.reps||0} kcal`;
+            return `<div><span>${prefix}${ex?ex.name:'—'}: ${qty}</span></div>`;
+          }).join('');
+        }
+        if(isMobility){
+          return m.sets.map(s=>{
+            const qty = m.unit==='sec' ? `${s.reps||0}s` : `${s.reps||0}x`;
             return `<div><span>${prefix}${ex?ex.name:'—'}: ${qty}</span></div>`;
           }).join('');
         }
@@ -1470,12 +2406,13 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const isWeighted = type==='weighted';
     const isBodyweight = type==='bodyweight';
     const isCardio = type==='cardio';
+    const isMobility = type==='mobility';
     const isFollower = isEmom && mi>0 && state.tmp.wodTemplate[mi-1].groupWithNext;
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
         <select onchange="updateTemplateFieldVariant(${mi},this.value)">
-          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+          ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
             .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>` : '';
@@ -1486,8 +2423,13 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
         <button type="button" class="btn ${t.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+      </div>` : isMobility ? `
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn ${t.unit!=='sec'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'reps')">Wiederholungen</button>
+        <button type="button" class="btn ${t.unit==='sec'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'sec')">Sekunden</button>
       </div>` : '';
-    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>` : '';
+    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>`
+      : isMobility ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='sec'?'Sek.':'Wdh.'})</label><input type="number" step="1" value="${t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 10"></div></div>` : '';
     const setsField = isFollower
       ? `<div class="field" style="margin-bottom:0;align-self:center;"><div class="note" style="margin:0;">Teil des Komplexes — Sets siehe oben</div></div>`
       : `<div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':''}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>`;
@@ -1553,7 +2495,9 @@ function renderWodRowsPhase(headerFields, historyHtml){
     if(mv.repsTarget) prescriptionBits.push(mv.repsTarget+' Wdh.');
     if(mv.pctList) prescriptionBits.push(mv.pctList+'% 1RM');
     const known1rm = bestE1RM(mv.exerciseId);
-    const isCardio = getExerciseType(ex)==='cardio';
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio';
+    const isMobility = type==='mobility';
 
     const setsHtml = mv.sets.map((s,si)=>{
       if(isCardio){
@@ -1569,6 +2513,17 @@ function renderWodRowsPhase(headerFields, historyHtml){
         </div>
         <div class="field" style="margin-bottom:8px;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="updateWodSetQty(${mi},${si},this.value)" placeholder="z.B. 500"></div>
         ${gpsButton}
+      </div>`;
+      }
+      if(isMobility){
+        const qtyLabel = mv.unit==='sec' ? 'Sekunden' : 'Wiederholungen';
+        return `
+      <div class="set-block">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span class="stat-label" style="margin:0;">Satz ${si+1}</span>
+          ${mv.sets.length>1 ? `<button class="remove-row" onclick="removeWodSet(${mi},${si})">✕</button>` : ''}
+        </div>
+        <div class="field" style="margin-bottom:8px;"><label>${qtyLabel}</label><input type="number" step="1" value="${s.reps}" oninput="updateWodSetQty(${mi},${si},this.value)" placeholder="z.B. 10"></div>
       </div>`;
       }
       return `
@@ -1655,8 +2610,12 @@ function renderWodLivePhase(){
     const mv = state.tmp.wodMoves[mi];
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const s = mv.sets[si];
-    const isCardio = getExerciseType(ex)==='cardio';
-    const qtyLabel = isCardio ? (mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio';
+    const isMobility = type==='mobility';
+    const qtyLabel = isCardio ? (mv.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien')
+      : isMobility ? (mv.unit==='sec' ? 'Sekunden' : 'Wiederholungen')
+      : 'Wiederholungen';
     const qtyValue = isCardio ? (mv.unit==='m' ? toDisplayDistance(s.reps) : s.reps) : s.reps;
     const gpsButton = isCardio && isRunExercise(ex) && mv.unit==='m'
       ? `<div style="text-align:center;margin-bottom:10px;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button></div>` : '';
@@ -1669,7 +2628,7 @@ function renderWodLivePhase(){
         ${prescriptionBits.length ? `<div class="note" style="margin-bottom:8px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
         <div class="row">
           <div class="field"><label>${qtyLabel}</label><input type="number" step="1" id="liveReps_${mi}" value="${qtyValue}" placeholder="z.B. 5"></div>
-          ${isCardio ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
+          ${(isCardio || isMobility) ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
         </div>
         ${gpsButton}
       </div>`;
@@ -1842,13 +2801,20 @@ function renderForTimeFlow(historyHtml){
     const ex = state.exercises.find(e=>e.id===m.exerciseId);
     const type = getExerciseType(ex);
     const isCardio = type==='cardio';
-    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'Wiederholungen';
+    const isMobility = type==='mobility';
+    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien')
+      : isMobility ? (m.unit==='sec' ? 'Sekunden' : 'Wiederholungen')
+      : 'Wiederholungen';
     const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
     const qtyHandler = isCardio ? `updateForTimeMoveQty(${mi},this.value)` : `updateForTimeMove(${mi},'reps',this.value)`;
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'kcal')">Kalorien</button>
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+      </div>` : isMobility ? `
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn ${m.unit!=='sec'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'reps')">Wiederholungen</button>
+        <button type="button" class="btn ${m.unit==='sec'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'sec')">Sekunden</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateForTimeMoveWeight(${mi},this.value)" placeholder="z.B. 48"></div>` : '';
@@ -1857,7 +2823,7 @@ function renderForTimeFlow(historyHtml){
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
         <select onchange="updateForTimeMoveVariant(${mi},this.value)">
-          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+          ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
             .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>` : '';
@@ -2143,13 +3109,20 @@ function renderAmrapFlow(historyHtml){
     const ex = state.exercises.find(e=>e.id===m.exerciseId);
     const type = getExerciseType(ex);
     const isCardio = type==='cardio';
-    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien') : 'WH pro Runde';
+    const isMobility = type==='mobility';
+    const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien')
+      : isMobility ? (m.unit==='sec' ? 'Sekunden pro Runde' : 'WH pro Runde')
+      : 'WH pro Runde';
     const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
     const qtyHandler = isCardio ? `updateAmrapMoveQty(${mi},this.value)` : `updateAmrapMove(${mi},'reps',this.value)`;
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'kcal')">Kalorien</button>
         <button type="button" class="btn ${m.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+      </div>` : isMobility ? `
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn ${m.unit!=='sec'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'reps')">Wiederholungen</button>
+        <button type="button" class="btn ${m.unit==='sec'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'sec')">Sekunden</button>
       </div>` : '';
     const weightField = type==='weighted' ? `
         <div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(m.weight)}" oninput="updateAmrapMoveWeight(${mi},this.value)" placeholder="z.B. 48"></div>` : '';
@@ -2158,7 +3131,7 @@ function renderAmrapFlow(historyHtml){
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
         <select onchange="updateAmrapMoveVariant(${mi},this.value)">
-          ${variantMatch.base.variants.filter(v=>!v.detail || v.id===variantMatch.variant.id)
+          ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
             .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
         </select>
       </div>` : '';
@@ -2390,17 +3363,22 @@ function renderForLoadFlow(historyHtml){
   const forLoadVariantSelector = forLoadVariantMatch ? `
     <div class="field"><label>Variante</label>
       <select onchange="updateForLoadFieldVariant(this.value)">
-        ${forLoadVariantMatch.base.variants.filter(v=>!v.detail || v.id===forLoadVariantMatch.variant.id)
+        ${forLoadVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===forLoadVariantMatch.variant.id)
           .map(v=>`<option value="${v.id}" ${v.id===forLoadVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
       </select>
     </div>` : '';
   const forLoadIsCardio = getExerciseType(forLoadEx)==='cardio';
+  const forLoadIsMobility = getExerciseType(forLoadEx)==='mobility';
   const forLoadUnitToggle = forLoadIsCardio ? `
     <div class="row" style="margin-bottom:8px;">
       <button type="button" class="btn ${b.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('kcal')">Kalorien</button>
       <button type="button" class="btn ${b.unit==='m'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('m')">${distanceUnitLabel()==='mi'?'Meilen':'Meter'}</button>
+    </div>` : forLoadIsMobility ? `
+    <div class="row" style="margin-bottom:8px;">
+      <button type="button" class="btn ${b.unit!=='sec'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('reps')">Wiederholungen</button>
+      <button type="button" class="btn ${b.unit==='sec'?'btn-primary':'btn-ghost'}" onclick="setForLoadUnit('sec')">Sekunden</button>
     </div>` : '';
-  const forLoadTargetField = forLoadIsCardio ? '' : `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>`;
+  const forLoadTargetField = (forLoadIsCardio || forLoadIsMobility) ? '' : `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" min="1" value="${b.targetReps}" oninput="updateForLoadField('targetReps',this.value)" placeholder="z.B. 3"></div>`;
   const refNote = state.tmp.wodNameMatch
     ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
     : '';
@@ -2435,7 +3413,7 @@ function updateForLoadField(field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    b.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (b.unit||'kcal') : 'kcal');
+    b.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (b.unit||'kcal') : (type==='mobility' ? (b.unit==='sec'?'sec':'reps') : 'kcal'));
     b.achievedWeight = '';
     render();
   }
@@ -2513,16 +3491,20 @@ function finishForLoad(){
 }
 function renderForLoadRunning(b){
   const ex = state.exercises.find(e=>e.id===b.exerciseId);
-  const isCardio = getExerciseType(ex)==='cardio';
+  const type = getExerciseType(ex);
+  const isCardio = type==='cardio';
+  const isMobility = type==='mobility';
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
   const gpsButton = isCardio && isRunExercise(ex) && b.unit==='m'
     ? `<div style="text-align:center;margin-top:8px;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-load'})">📍 Lauf starten</button></div>` : '';
   const achievedField = isCardio
     ? `<div class="field" style="text-align:left;"><label>${b.unit==='m'?`Distanz (${distanceUnitLabel()})`:'Kalorien'}</label><input type="number" step="1" value="${b.unit==='m'?toDisplayDistance(b.achievedWeight):b.achievedWeight}" oninput="updateForLoadQty(this.value)" placeholder="z.B. 500"></div>${gpsButton}`
+    : isMobility
+    ? `<div class="field" style="text-align:left;"><label>${b.unit==='sec'?'Sekunden':'Wiederholungen'}</label><input type="number" step="1" value="${b.achievedWeight}" oninput="updateForLoadQty(this.value)" placeholder="z.B. 10"></div>`
     : `<div class="field" style="text-align:left;"><label>Erreichtes Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(b.achievedWeight)}" oninput="updateForLoadWeight(this.value)" placeholder="z.B. 82.5"></div>`;
   return `
     <div class="card" style="text-align:center;">
-      <div class="stat-label">${ex?ex.name:'—'}${isCardio ? '' : ` · Ziel: ${b.targetReps} Wdh.`}</div>
+      <div class="stat-label">${ex?ex.name:'—'}${(isCardio||isMobility) ? '' : ` · Ziel: ${b.targetReps} Wdh.`}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
       ${achievedField}
       <div class="row" style="margin-top:10px;">
@@ -2534,7 +3516,20 @@ function renderForLoadRunning(b){
 }
 function renderForLoadSummary(b){
   const ex = state.exercises.find(e=>e.id===b.exerciseId);
-  const isCardio = getExerciseType(ex)==='cardio';
+  const type = getExerciseType(ex);
+  const isCardio = type==='cardio';
+  const isMobility = type==='mobility';
+  if(isMobility){
+    const qty = b.unit==='sec' ? `${b.achievedWeight||0}s` : `${b.achievedWeight||0}x`;
+    return `
+      <div class="card" style="text-align:center;">
+        <h2>Workout abgeschlossen 🏁</h2>
+        <div class="stat-num" style="font-size:34px;margin:14px 0;">${qty}</div>
+        <div class="field" style="text-align:left;margin-top:14px;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
+        <button class="btn btn-primary" style="margin-top:10px;" onclick="saveForLoadWorkout()">Workout speichern</button>
+      </div>
+    `;
+  }
   if(isCardio){
     const qty = b.unit==='m' ? `${toDisplayDistance(b.achievedWeight)}${distanceUnitLabel()}` : `${b.achievedWeight||0} kcal`;
     return `
@@ -2563,7 +3558,10 @@ function renderForLoadSummary(b){
 async function saveForLoadWorkout(){
   const b = state.tmp.forLoadBuilder;
   const ex = state.exercises.find(e=>e.id===b.exerciseId);
-  const isCardio = getExerciseType(ex)==='cardio';
+  const type = getExerciseType(ex);
+  const isCardio = type==='cardio';
+  const isMobility = type==='mobility';
+  const isQtyBased = isCardio || isMobility;
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
@@ -2571,11 +3569,11 @@ async function saveForLoadWorkout(){
   const reps = parseInt(b.targetReps)||1;
   const workout = {
     id: uid(), date, name, note, format:'for-load', movements: [],
-    forLoad: { exerciseId: b.exerciseId, targetReps: isCardio ? null : reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight, unit: isCardio ? b.unit : null }
+    forLoad: { exerciseId: b.exerciseId, targetReps: isQtyBased ? null : reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight, unit: isQtyBased ? b.unit : null }
   };
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
-  if(!isCardio && weight && document.getElementById('forLoadSaveAsPr')?.checked){
+  if(!isQtyBased && weight && document.getElementById('forLoadSaveAsPr')?.checked){
     state.prEntries.push({id:uid(), exerciseId: b.exerciseId, value: weight, date});
     await saveKey('prEntries', state.prEntries);
   }
@@ -2591,11 +3589,11 @@ function updateTemplateField(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    t.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (t.unit||'kcal') : 'kcal');
+    t.unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? (t.unit||'kcal') : (type==='mobility' ? (t.unit==='sec'?'sec':'reps') : 'kcal'));
     if(type!=='weighted'){ t.weight=''; }
-    if(type!=='cardio'){ t.qty=''; }
+    if(type!=='cardio' && type!=='mobility'){ t.qty=''; }
     if(type!=='weighted'){ t.pctList=''; }
-    if(type==='cardio'){ t.repsTarget=''; }
+    if(type==='cardio' || type==='mobility'){ t.repsTarget=''; }
   }
   render();
 }
@@ -2699,7 +3697,8 @@ function generateWodRows(){
     const isFollower = ti>0 && tmpl[ti-1].groupWithNext;
     if(isFollower) return null;
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
-    const isCardio = getExerciseType(ex)==='cardio';
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio' || type==='mobility';
     const pctArr = parsePctList(t.pctList);
     let setsCount = parseInt(t.setsCount) || (isCardio ? 1 : Math.max(pctArr.length,1));
     if(isEmom && !t.setsCount){
@@ -2725,7 +3724,8 @@ function generateWodRows(){
 
   state.tmp.wodMoves = tmpl.map((t,ti)=>{
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
-    const isCardio = getExerciseType(ex)==='cardio';
+    const type = getExerciseType(ex);
+    const isCardio = type==='cardio' || type==='mobility';
     const pctArr = parsePctList(t.pctList);
     const setsCount = effectiveSetsCount[ti];
     const known1rm = bestE1RM(t.exerciseId);
@@ -2761,7 +3761,8 @@ function applyFeelingFillIfNeeded(){
   if(!state.tmp.wodNameMatch || !state.tmp.wodFeeling) return;
   state.tmp.wodMoves.forEach((mv,mi)=>{
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-    if(getExerciseType(ex)==='cardio') return;
+    const type = getExerciseType(ex);
+    if(type==='cardio' || type==='mobility') return;
     const prevMv = state.tmp.wodNameMatch.movements[mi];
     if(!prevMv) return;
     mv.sets.forEach((s,si)=>{
@@ -2820,11 +3821,12 @@ async function saveWod(){
   const note = state.tmp.wodNote || '';
   const movements = state.tmp.wodMoves.map(mv=>{
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-    const isCardio = getExerciseType(ex)==='cardio';
-    const sets = isCardio
+    const type = getExerciseType(ex);
+    const isQtyBased = type==='cardio' || type==='mobility';
+    const sets = isQtyBased
       ? mv.sets.filter(s=>s.reps).map(s=>({ reps: parseFloat(s.reps), weight: null, pct: null }))
       : mv.sets.filter(s=>s.reps && s.weight).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }));
-    return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isCardio ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
+    return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isQtyBased ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
   state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements});
@@ -3254,7 +4256,7 @@ function renderPrCards(){
   const prVariantSelector = prVariantMatch ? `
     <div class="field"><label>Variante</label>
       <select onchange="updatePrExerciseVariant(this.value)">
-        ${prVariantMatch.base.variants.filter(v=>!v.detail || v.id===prVariantMatch.variant.id)
+        ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
           .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
       </select>
     </div>` : '';
