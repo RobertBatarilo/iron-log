@@ -2275,8 +2275,13 @@ function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
   if(!pi || !pi.open) return '';
   const pickBody = `
-    <div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Foto wird nirgends hochgeladen.</div>
-    <input type="file" accept="image/*" capture="environment" onchange="handlePhotoImportFile(this)">
+    <div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Bild wird nirgends hochgeladen.</div>
+    <div class="field"><label>Screenshot/Bild hochladen</label>
+      <input type="file" accept="image/*" onchange="handlePhotoImportFile(this)">
+    </div>
+    <div class="field"><label>Oder Foto aufnehmen</label>
+      <input type="file" accept="image/*" capture="environment" onchange="handlePhotoImportFile(this)">
+    </div>
     ${pi.loading ? `<div class="note" style="margin-top:10px;">Texterkennung läuft …</div>` : ''}
     <button type="button" class="btn btn-ghost" style="margin-top:14px;" onclick="state.tmp.photoImport.stage='review'; render();">✏️ Stattdessen Text eingeben</button>
   `;
