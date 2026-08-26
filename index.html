@@ -414,6 +414,7 @@ function defaultTmp(){
     },
     planForm:null,
     exerciseModal:null,
+    photoImport:null,
     prExerciseSelection:null,
     confirmReset:false,
     historyCollapsed:false,
@@ -1934,7 +1935,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderPhotoImportModal();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
 }
@@ -2220,9 +2221,235 @@ function renderFormatSelector(){
     <div class="card">
       <h2>Workout-Format</h2>
       ${topRow}
+      <button class="btn btn-ghost" style="margin-top:8px;" onclick="openPhotoImportModal()">📷 Workout aus Foto</button>
       ${subSection}
     </div>
   `;
+}
+/* ---------- Foto-Import (On-Device OCR, kein Server/API-Key) ---------- */
+function openPhotoImportModal(){
+  state.tmp.photoImport = { open:true, stage:'pick', rawText:'', error:'', loading:false };
+  render();
+}
+function closePhotoImportModal(){
+  state.tmp.photoImport = null;
+  render();
+}
+function updatePhotoImportText(val){
+  state.tmp.photoImport.rawText = val;
+}
+function loadTesseractIfNeeded(){
+  if(window.Tesseract) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('Texterkennung konnte nicht geladen werden (Internetverbindung nötig).'));
+    document.head.appendChild(s);
+  });
+}
+async function handlePhotoImportFile(fileInput){
+  const file = fileInput.files && fileInput.files[0];
+  if(!file) return;
+  const pi = state.tmp.photoImport;
+  pi.loading = true; pi.error = '';
+  render();
+  try{
+    await loadTesseractIfNeeded();
+    const result = await Tesseract.recognize(file, 'deu+eng');
+    pi.rawText = (result.data.text || '').trim();
+  } catch(err){
+    pi.error = (err && err.message) ? err.message : 'Texterkennung fehlgeschlagen — bitte Text unten manuell eingeben.';
+  }
+  pi.stage = 'review';
+  pi.loading = false;
+  render();
+}
+function confirmPhotoImport(){
+  const pi = state.tmp.photoImport;
+  const text = (pi.rawText || '').trim();
+  if(!text){ showToast('Bitte Text eingeben oder Foto wählen'); return; }
+  applyParsedWorkout(text);
+}
+function renderPhotoImportModal(){
+  const pi = state.tmp.photoImport;
+  if(!pi || !pi.open) return '';
+  const pickBody = `
+    <div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Foto wird nirgends hochgeladen.</div>
+    <input type="file" accept="image/*" capture="environment" onchange="handlePhotoImportFile(this)">
+    ${pi.loading ? `<div class="note" style="margin-top:10px;">Texterkennung läuft …</div>` : ''}
+    <button type="button" class="btn btn-ghost" style="margin-top:14px;" onclick="state.tmp.photoImport.stage='review'; render();">✏️ Stattdessen Text eingeben</button>
+  `;
+  const reviewBody = `
+    ${pi.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(pi.error)}</div>` : ''}
+    <div class="field"><label>Erkannter Text (bitte prüfen und korrigieren)</label>
+      <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
+    </div>
+  `;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closePhotoImportModal()">
+      <div class="modal-box">
+        <h2>Workout aus Foto</h2>
+        ${pi.stage==='pick' ? pickBody : reviewBody}
+        <div class="row" style="margin-top:14px;">
+          <button class="btn btn-ghost" onclick="closePhotoImportModal()">Abbrechen</button>
+          ${pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+function ocrTextLines(text){
+  return (text||'').split('\n').map(l=>l.trim()).filter(Boolean);
+}
+function detectWorkoutFormat(text){
+  const t = text.toLowerCase();
+  if(/\bemom\b/.test(t) || /every\s+\d+\s*:\s*\d+/.test(t)) return 'emom';
+  if(/\bamrap\b/.test(t)) return 'amrap';
+  if(/\b1rm\b|find your|heavy single|build to a/.test(t)) return 'for-load';
+  if(/\d+\s*x\s*\d+/i.test(t) && /@|%|kg|lb/.test(t)) return 'strength';
+  return 'for-time';
+}
+function resolveExerciseIdFromName(rawName){
+  const name = (rawName||'').trim();
+  if(!name) return null;
+  const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
+  if(exact) return exact.id;
+  const partial = state.exercises.find(e=>name.toLowerCase().includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(name.toLowerCase()));
+  if(partial) return partial.id;
+  return findOrCreateExerciseId(name);
+}
+function parseForTimeText(text){
+  const lines = ocrTextLines(text);
+  const movements = [];
+  let rounds = 1, repScheme = '', timeCapMin = '', timeCapSec = '';
+  lines.forEach(line=>{
+    let m = line.match(/time\s*cap[:\s]*(\d+)\s*:?\s*(\d*)/i);
+    if(m){ timeCapMin = m[1]; timeCapSec = m[2]||'0'; return; }
+    m = line.match(/(\d+)\s*(?:x\s*)?(?:runden|rounds)/i) || line.match(/^x\s*(\d+)\b/i);
+    if(m){ rounds = m[1]; return; }
+    if(/^\d+(-\d+){1,}$/.test(line)){ repScheme = line; return; }
+    m = line.match(/^(\d+)\s+(.+)$/);
+    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+  });
+  return { movements, rounds: String(rounds), repScheme, timeCapMin, timeCapSec };
+}
+function parseAmrapText(text){
+  const lines = ocrTextLines(text);
+  const movements = [];
+  let durationMin = '20', durationSec = '0';
+  lines.forEach(line=>{
+    let m = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
+    if(m){ durationMin = m[1]; return; }
+    m = line.match(/^(\d+)\s+(.+)$/);
+    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+  });
+  return { movements, durationMin, durationSec };
+}
+function parseEmomText(text){
+  const lines = ocrTextLines(text);
+  const movements = [];
+  let intervalMin = '1', intervalSec = '0', rounds = '10';
+  lines.forEach(line=>{
+    let m = line.match(/every\s+(\d+)\s*:\s*(\d+)/i);
+    if(m){ intervalMin = m[1]; intervalSec = m[2]; return; }
+    m = line.match(/emom\D*(\d+)/i);
+    if(m){ rounds = m[1]; return; }
+    m = line.match(/^(\d+)\s+(.+)$/);
+    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+  });
+  return { movements, intervalMin, intervalSec, rounds };
+}
+function parseForLoadText(text){
+  const lines = ocrTextLines(text);
+  let name = '', timeCapMin = '10', timeCapSec = '0';
+  lines.forEach(line=>{
+    let m = line.match(/time\s*cap[:\s]*(\d+)\s*:?\s*(\d*)/i);
+    if(m){ timeCapMin = m[1]; timeCapSec = m[2]||'0'; return; }
+    if(!name){
+      m = line.match(/1rm|find your|max|heavy single|build to a/i);
+      if(m){
+        const rest = line.slice(m.index + m[0].length)
+          .replace(/^\s*1?rm\b/i, '')
+          .replace(/^[^a-zA-ZäöüÄÖÜß]+/, '')
+          .trim();
+        if(rest) name = rest;
+      }
+    }
+  });
+  return { name, timeCapMin, timeCapSec };
+}
+function parseStrengthText(text){
+  const lines = ocrTextLines(text);
+  const moves = [];
+  lines.forEach(line=>{
+    const setsReps = line.match(/(\d+)\s*x\s*(\d+)/i);
+    if(!setsReps) return;
+    const at = line.match(/@\s*([\d.,\/%]+)\s*(?:kg|lb)?/i);
+    let pctList = '', weight = '';
+    if(at){
+      const spec = at[1].trim();
+      if(spec.includes('%')) pctList = spec.replace(/%/g,'').trim();
+      else weight = spec;
+    }
+    const name = line.replace(setsReps[0], '').replace(at ? at[0] : '', '').replace(/[:\-–]+/g,' ').trim();
+    moves.push({ name, setsCount: setsReps[1], repsTarget: setsReps[2], pctList, weight });
+  });
+  return { moves };
+}
+function applyParsedWorkout(text){
+  const format = detectWorkoutFormat(text);
+  state.tmp.wodTemplate = null;
+  state.tmp.wodMoves = null;
+  state.tmp.forTimeBuilder = null;
+  state.tmp.amrapBuilder = null;
+  state.tmp.forLoadBuilder = null;
+  state.tmp.wodPhase = 'template';
+
+  if(format==='emom'){
+    const p = parseEmomText(text);
+    state.tmp.wodFormat = 'emom';
+    state.tmp.emomMin = p.intervalMin;
+    state.tmp.emomSec = p.intervalSec;
+    state.tmp.emomRounds = p.rounds;
+    if(p.movements.length){
+      state.tmp.wodTemplate = p.movements.map(mv=>({
+        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget: mv.reps||'', groupWithNext:false
+      }));
+    } else ensureWodTemplate();
+  } else if(format==='amrap'){
+    const p = parseAmrapText(text);
+    state.tmp.wodFormat = 'amrap';
+    ensureAmrapBuilder();
+    const b = state.tmp.amrapBuilder;
+    b.durationMin = p.durationMin; b.durationSec = p.durationSec;
+    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+  } else if(format==='for-load'){
+    const p = parseForLoadText(text);
+    state.tmp.wodFormat = 'for-load';
+    ensureForLoadBuilder();
+    const b = state.tmp.forLoadBuilder;
+    if(p.name) b.exerciseId = resolveExerciseIdFromName(p.name) || b.exerciseId;
+    b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
+  } else if(format==='strength'){
+    const p = parseStrengthText(text);
+    state.tmp.wodFormat = 'strength';
+    if(p.moves.length){
+      state.tmp.wodTemplate = p.moves.map(mv=>({
+        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount: mv.setsCount||'', pctList: mv.pctList||'', weight: mv.weight||'', unit:'kcal', qty:'', repsTarget: mv.repsTarget||'', groupWithNext:false
+      }));
+    } else ensureWodTemplate();
+  } else {
+    const p = parseForTimeText(text);
+    state.tmp.wodFormat = 'for-time';
+    ensureForTimeBuilder();
+    const b = state.tmp.forTimeBuilder;
+    b.rounds = p.rounds; b.repScheme = p.repScheme; b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
+    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+  }
+  state.tmp.photoImport = null;
+  showToast('Aus Foto übernommen — bitte kurz prüfen 👀');
+  render();
 }
 function loadBenchmarkWod(wodId){
   if(!wodId) return;
