@@ -3255,7 +3255,8 @@ function updateForTimeRoundValue(ri, mi, val){
   const item = b.roundsLog[ri][mi];
   item.reps = val;
   item.done = item.target!=='' && val===item.target;
-  render();
+  const cb = document.getElementById(`ftRoundCheck_${ri}_${mi}`);
+  if(cb) cb.checked = item.done;
 }
 function forTimeQtyUnitSuffix(m){
   const ex = state.exercises.find(e=>e.id===m.exerciseId);
@@ -3272,12 +3273,12 @@ function renderForTimeRunning(b){
       const ex = state.exercises.find(e=>e.id===m.exerciseId);
       return `
         <div class="checkbox-row" style="justify-content:space-between;margin-bottom:6px;">
-          <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-            <input type="checkbox" ${item.done?'checked':''} onchange="toggleForTimeRoundDone(${ri},${mi})">
+          <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+            <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:22px;">${forTimeQtyUnitSuffix(m)}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(ex?ex.name:'—')}</span>
-          </label>
-          <input type="number" step="1" value="${item.reps}" oninput="updateForTimeRoundValue(${ri},${mi},this.value)" style="width:64px;flex:0 0 auto;" placeholder="${escapeHtml(item.target)}">
-          <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:28px;">${forTimeQtyUnitSuffix(m)}</span>
+          </div>
+          <input type="number" step="1" id="ftRoundVal_${ri}_${mi}" value="${item.reps}" oninput="updateForTimeRoundValue(${ri},${mi},this.value)" style="width:64px;flex:0 0 auto;" placeholder="${escapeHtml(item.target)}">
+          <input type="checkbox" id="ftRoundCheck_${ri}_${mi}" ${item.done?'checked':''} onchange="toggleForTimeRoundDone(${ri},${mi})" style="flex:0 0 auto;">
         </div>`;
     }).join('');
     return `<div style="margin-bottom:14px;">
