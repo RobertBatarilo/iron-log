@@ -1047,7 +1047,7 @@ const EXERCISE_LIBRARY = [
     {id:"elevated", label:"Elevated", details:null},
     {id:"with-push-up", label:"With Push-up", details:null}
   ]},
-  { id:"jump-rope", name:"Jump Rope", type:"cardio", variants:[
+  { id:"jump-rope", name:"Jump Rope", type:"bodyweight", variants:[
     {id:"backward-single-under", label:"Backward Single-under", details:null},
     {id:"crossovers", label:"Crossovers", details:null},
     {id:"double-under", label:"Double-under", details:null},
@@ -1840,6 +1840,19 @@ async function setTheme(theme){
   await saveKey('profile', state.profile);
   render();
 }
+function migrateStaleExerciseTypes(){
+  let changed = false;
+  state.exercises.forEach(ex=>{
+    const match = matchLibraryVariant(ex);
+    if(!match) return;
+    const correctType = match.variant.type || match.base.type;
+    if(correctType && ex.type !== correctType){
+      ex.type = correctType;
+      changed = true;
+    }
+  });
+  return changed;
+}
 async function init(){
   const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan] = await Promise.all([
     loadKey('profile', null),
@@ -1858,6 +1871,7 @@ async function init(){
   state.trainingPlan = trainingPlan;
   if(exercises && exercises.length){
     state.exercises = exercises;
+    if(migrateStaleExerciseTypes()) await saveKey('exercises', state.exercises);
   } else {
     state.exercises = cloneDefaultExercises();
     await saveKey('exercises', state.exercises);
