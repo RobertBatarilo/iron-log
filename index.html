@@ -3262,8 +3262,8 @@ function forTimeQtyUnitSuffix(m){
   const ex = state.exercises.find(e=>e.id===m.exerciseId);
   const type = getExerciseType(ex);
   if(type==='cardio') return m.unit==='m' ? distanceUnitLabel() : 'kcal';
-  if(type==='mobility') return m.unit==='sec' ? 's' : '×';
-  return '×';
+  if(type==='mobility') return m.unit==='sec' ? 's' : 'reps';
+  return 'reps';
 }
 function renderForTimeRunning(b){
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
@@ -3274,7 +3274,7 @@ function renderForTimeRunning(b){
       return `
         <div class="checkbox-row" style="justify-content:space-between;margin-bottom:6px;">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-            <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:22px;">${forTimeQtyUnitSuffix(m)}</span>
+            <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:34px;">${forTimeQtyUnitSuffix(m)}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(ex?ex.name:'—')}</span>
           </div>
           <input type="number" step="1" id="ftRoundVal_${ri}_${mi}" value="${item.reps}" oninput="updateForTimeRoundValue(${ri},${mi},this.value)" style="width:64px;flex:0 0 auto;" placeholder="${escapeHtml(item.target)}">
