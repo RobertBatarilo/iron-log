@@ -2119,6 +2119,9 @@ function pctForIndex(arr, i){
   if(!arr.length) return null;
   return arr[i] !== undefined ? arr[i] : arr[arr.length-1];
 }
+function parseRepScheme(str){
+  return (str||'').split(/[-,\/\s]+/).map(s=>parseInt(s)).filter(n=>!isNaN(n));
+}
 function blankRowSet(){ return {reps:'', weight:'', pct:null, autoFilled:false}; }
 function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
 function ensureWodTemplate(){
@@ -2292,6 +2295,12 @@ function renderWorkoutHistoryEntry(w){
       ${ft.roundsCompleted>0 ? `<div><span>Runden</span><span>${ft.roundsCompleted}</span></div>` : ''}
       ${(ft.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
       ${ft.repScheme ? `<div class="note">Schema: ${escapeHtml(ft.repScheme)}</div>` : (ft.rounds>1 ? `<div class="note">${ft.rounds} Runden</div>` : '')}
+      ${(ft.roundsLog||[]).map((round,ri)=>`<div class="note" style="margin-top:2px;">Runde ${ri+1}: ${round.map((item,mi)=>{
+        const mv = ft.movements[mi];
+        const ex = state.exercises.find(e=>e.id===mv?.exerciseId);
+        const val = item.done ? item.target : (item.reps || '0');
+        return `${escapeHtml(ex?ex.name:'—')} ${escapeHtml(val)}${item.done?'':'/'+escapeHtml(item.target)}`;
+      }).join(' · ')}</div>`).join('')}
     </div>`;
   } else if(format==='amrap'){
     const am = w.amrap || {};
@@ -2800,7 +2809,7 @@ function blankForTimeMove(){
 }
 function ensureForTimeBuilder(){
   if(!state.tmp.forTimeBuilder){
-    state.tmp.forTimeBuilder = { phase:'build', movements:[blankForTimeMove()], rounds:'1', repScheme:'', timeCapMin:'', timeCapSec:'', startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null, roundsCompleted:0 };
+    state.tmp.forTimeBuilder = { phase:'build', movements:[blankForTimeMove()], rounds:'1', repScheme:'', timeCapMin:'', timeCapSec:'', startedAt:null, elapsedMs:0, running:false, timeCapMs:0, capped:false, finalElapsedSec:null, roundsCompleted:0, roundsLog:[] };
   }
 }
 function renderForTimeFlow(historyHtml){
@@ -2940,11 +2949,24 @@ function startForTimeWod(){
   b.capped = false;
   b.elapsedMs = 0;
   b.roundsCompleted = 0;
+  b.roundsLog = buildForTimeRoundsLog(b);
   b.startedAt = Date.now();
   b.running = true;
   b.phase = 'running';
   startTicking('live', tickForTime);
   render();
+}
+function buildForTimeRoundsLog(b){
+  const roundsCount = Math.max(1, parseInt(b.rounds)||1);
+  const schemeArr = parseRepScheme(b.repScheme);
+  const roundsLog = [];
+  for(let ri=0; ri<roundsCount; ri++){
+    roundsLog.push(b.movements.map(m=>{
+      const target = String(schemeArr.length ? pctForIndex(schemeArr, ri) : (m.reps||''));
+      return { target, reps: target, done:false };
+    }));
+  }
+  return roundsLog;
 }
 function tickForTime(){
   const b = state.tmp.forTimeBuilder;
@@ -2967,6 +2989,9 @@ function finishForTime(){
   if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
   stopTicking();
   b.finalElapsedSec = Math.round(b.elapsedMs/1000);
+  if(b.roundsLog && b.roundsLog.length){
+    b.roundsCompleted = b.roundsLog.filter(round=>round.every(item=>item.done)).length;
+  }
   b.phase = 'summary';
   render();
 }
@@ -2986,25 +3011,54 @@ function resumeForTimeClock(){
   startTicking('live', tickForTime);
   render();
 }
-function incrementForTimeRound(delta){
+function toggleForTimeRoundDone(ri, mi){
   const b = state.tmp.forTimeBuilder;
-  b.roundsCompleted = Math.max(0, b.roundsCompleted + delta);
+  const item = b.roundsLog[ri][mi];
+  item.done = !item.done;
+  if(item.done) item.reps = item.target;
   render();
+}
+function updateForTimeRoundValue(ri, mi, val){
+  const b = state.tmp.forTimeBuilder;
+  const item = b.roundsLog[ri][mi];
+  item.reps = val;
+  item.done = item.target!=='' && val===item.target;
+  render();
+}
+function forTimeQtyUnitSuffix(m){
+  const ex = state.exercises.find(e=>e.id===m.exerciseId);
+  const type = getExerciseType(ex);
+  if(type==='cardio') return m.unit==='m' ? distanceUnitLabel() : 'kcal';
+  if(type==='mobility') return m.unit==='sec' ? 's' : '×';
+  return '×';
 }
 function renderForTimeRunning(b){
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
+  const checklistHtml = (b.roundsLog||[]).map((round,ri)=>{
+    const rowsHtml = round.map((item,mi)=>{
+      const m = b.movements[mi];
+      const ex = state.exercises.find(e=>e.id===m.exerciseId);
+      return `
+        <div class="checkbox-row" style="justify-content:space-between;margin-bottom:6px;">
+          <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+            <input type="checkbox" ${item.done?'checked':''} onchange="toggleForTimeRoundDone(${ri},${mi})">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(ex?ex.name:'—')}</span>
+          </label>
+          <input type="number" step="1" value="${item.reps}" oninput="updateForTimeRoundValue(${ri},${mi},this.value)" style="width:64px;flex:0 0 auto;" placeholder="${escapeHtml(item.target)}">
+          <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:28px;">${forTimeQtyUnitSuffix(m)}</span>
+        </div>`;
+    }).join('');
+    return `<div style="margin-bottom:14px;">
+      <div class="stat-label" style="margin-bottom:6px;">Runde ${ri+1}${b.roundsLog.length>1?` / ${b.roundsLog.length}`:''}</div>
+      ${rowsHtml}
+    </div>`;
+  }).join('');
   return `
     <div class="card" style="text-align:center;">
       <div class="stat-label">${b.timeCapMs>0?'Verbleibend (Time Cap)':'Zeit läuft'}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
-      <div class="moves" style="text-align:left;margin-bottom:14px;">
-        ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
-        ${b.repScheme ? `<div class="note">Schema: ${escapeHtml(b.repScheme)}</div>` : (parseInt(b.rounds)>1 ? `<div class="note">${b.rounds} Runden</div>` : '')}
-      </div>
-      <div class="stat-num" style="margin:10px 0;">${b.roundsCompleted}<span style="font-size:16px;"> Runden</span></div>
-      <div class="row" style="margin-bottom:10px;">
-        <button class="btn btn-ghost" onclick="incrementForTimeRound(-1)">-1 Runde</button>
-        <button class="btn btn-primary" onclick="incrementForTimeRound(1)">+1 Runde</button>
+      <div style="text-align:left;max-height:360px;overflow-y:auto;margin-bottom:14px;">
+        ${checklistHtml}
       </div>
       <div class="row">
         <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForTimeClock()':'resumeForTimeClock()'}">${b.running?'Pause':'Weiter'}</button>
@@ -3033,7 +3087,7 @@ async function saveForTimeWorkout(){
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
   const workout = {
     id: uid(), date, name, note, format:'for-time', movements: [],
-    forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0 }
+    forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0, roundsLog: b.roundsLog||[] }
   };
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
