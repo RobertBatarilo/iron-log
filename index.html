@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="WOD Ledger">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pocketbase@0.25.1/dist/pocketbase.umd.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
@@ -389,10 +390,76 @@ async function saveKey(key, value){
   }catch(e){
     console.error('Speichern fehlgeschlagen', key, e);
   }
+  syncKeyToCloud(key, value);
 }
 async function deleteKey(key){
   try{ localStorage.removeItem('ironlog:'+key); }catch(e){}
 }
+
+/* ---------- Cloud-Sync (PocketBase) ---------- */
+const pb = new PocketBase('https://api.formelfuchs.at');
+const SYNC_KEYS = ['profile','exercises','workouts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
+function getPendingSync(){
+  try{ return JSON.parse(localStorage.getItem('ironlog:_pendingSync')||'[]'); }catch(e){ return []; }
+}
+function setPendingSync(list){
+  try{ localStorage.setItem('ironlog:_pendingSync', JSON.stringify([...new Set(list)])); }catch(e){}
+}
+function markPendingSync(key){
+  const list = getPendingSync();
+  if(!list.includes(key)){ list.push(key); setPendingSync(list); }
+}
+function clearPendingSync(key){
+  setPendingSync(getPendingSync().filter(k=>k!==key));
+}
+async function pushKeyToCloud(key, value){
+  if(!pb.authStore.isValid) return false;
+  try{
+    const userId = pb.authStore.record.id;
+    let existing;
+    try{
+      existing = await pb.collection('user_data').getFirstListItem(pb.filter('user = {:user} && key = {:key}', {user:userId, key}));
+    }catch(e){ existing = null; }
+    if(existing){
+      await pb.collection('user_data').update(existing.id, { value });
+    } else {
+      await pb.collection('user_data').create({ user: userId, key, value });
+    }
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+function syncKeyToCloud(key, value){
+  if(!pb.authStore.isValid || !SYNC_KEYS.includes(key)) return;
+  pushKeyToCloud(key, value).then(ok=>{ ok ? clearPendingSync(key) : markPendingSync(key); });
+}
+async function flushPendingSync(){
+  if(!pb.authStore.isValid) return;
+  for(const key of getPendingSync()){
+    const value = await loadKey(key, null);
+    if(value===null) continue;
+    if(await pushKeyToCloud(key, value)) clearPendingSync(key);
+  }
+}
+async function pullAllFromCloud(){
+  if(!pb.authStore.isValid) return {hadCloudData:false};
+  const userId = pb.authStore.record.id;
+  const records = await pb.collection('user_data').getFullList({filter: pb.filter('user = {:user}', {user:userId})});
+  records.forEach(r=>{ localStorage.setItem('ironlog:'+r.key, JSON.stringify(r.value)); });
+  return {hadCloudData: records.length>0};
+}
+async function pushAllLocalToCloud(){
+  for(const key of SYNC_KEYS){
+    const value = await loadKey(key, null);
+    if(value!==null) await pushKeyToCloud(key, value);
+  }
+}
+function hasAnyLocalData(){
+  return SYNC_KEYS.some(key=>localStorage.getItem('ironlog:'+key)!=null);
+}
+pb.authStore.onChange(()=>{ if(!pb.authStore.isValid) boot(); });
+window.addEventListener('online', flushPendingSync);
 
 /* ---------- App State ---------- */
 const DEFAULT_EXERCISES_RAW = [
@@ -434,6 +501,7 @@ function defaultTmp(){
     exerciseModal:null,
     photoImport:null,
     onboarding:null,
+    auth:{screen:'login', email:'', password:'', passwordConfirm:'', error:'', loading:false},
     historyNameFilter:null,
     prExerciseSelection:null,
     confirmReset:false,
@@ -1880,7 +1948,101 @@ function migrateStaleExerciseTypes(){
   });
   return changed;
 }
-async function init(){
+function boot(){
+  if(pb.authStore.isValid){
+    initApp();
+  } else {
+    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', loading:false};
+    renderBoot();
+  }
+}
+function renderBoot(){
+  document.getElementById('app').innerHTML = renderAuthScreen();
+}
+function toggleAuthMode(){
+  state.tmp.auth.screen = state.tmp.auth.screen==='register' ? 'login' : 'register';
+  state.tmp.auth.error = '';
+  renderBoot();
+}
+async function submitAuth(){
+  const a = state.tmp.auth;
+  const email = a.email.trim();
+  const password = a.password;
+  if(!email || !password){ a.error = 'Bitte E-Mail und Passwort eingeben'; renderBoot(); return; }
+  if(a.screen==='register' && password!==a.passwordConfirm){ a.error = 'Passwörter stimmen nicht überein'; renderBoot(); return; }
+  a.loading = true; a.error = '';
+  renderBoot();
+  try{
+    if(a.screen==='register'){
+      await pb.collection('users').create({email, password, passwordConfirm:a.passwordConfirm});
+    }
+    await pb.collection('users').authWithPassword(email, password);
+    await afterAuthSuccess();
+  }catch(e){
+    a.loading = false;
+    a.error = (e && e.response && e.response.message) || 'Anmeldung fehlgeschlagen. Bitte Angaben prüfen.';
+    renderBoot();
+  }
+}
+async function afterAuthSuccess(){
+  try{
+    const {hadCloudData} = await pullAllFromCloud();
+    if(!hadCloudData && hasAnyLocalData()){
+      state.tmp.auth.loading = false;
+      state.tmp.auth.screen = 'migration';
+      renderBoot();
+    } else {
+      await initApp();
+    }
+  }catch(e){
+    state.tmp.auth.loading = false;
+    state.tmp.auth.error = 'Verbindung zum Server fehlgeschlagen. Bitte erneut versuchen.';
+    renderBoot();
+  }
+}
+async function confirmMigration(upload){
+  if(upload) await pushAllLocalToCloud();
+  await initApp();
+}
+function logout(){
+  pb.authStore.clear();
+}
+function renderAuthScreen(){
+  const a = state.tmp.auth;
+  if(a.screen==='migration') return renderMigrationScreen();
+  const isRegister = a.screen==='register';
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;">
+        <div style="text-align:center;margin-bottom:18px;">
+          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+        </div>
+        <h2>${isRegister?'Konto erstellen':'Anmelden'}</h2>
+        ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
+        <div class="field"><label>E-Mail</label><input type="email" value="${escapeHtml(a.email)}" oninput="state.tmp.auth.email=this.value" autocomplete="username"></div>
+        <div class="field"><label>Passwort</label><input type="password" value="${escapeHtml(a.password)}" oninput="state.tmp.auth.password=this.value" autocomplete="${isRegister?'new-password':'current-password'}"></div>
+        ${isRegister ? `<div class="field"><label>Passwort bestätigen</label><input type="password" value="${escapeHtml(a.passwordConfirm)}" oninput="state.tmp.auth.passwordConfirm=this.value" autocomplete="new-password"></div>` : ''}
+        <button class="btn btn-primary" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="submitAuth()">${a.loading?'Bitte warten …':(isRegister?'Registrieren':'Anmelden')}</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="toggleAuthMode()">${isRegister?'Schon ein Konto? Anmelden':'Neu hier? Konto erstellen'}</button>
+      </div>
+    </div>
+  `;
+}
+function renderMigrationScreen(){
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;text-align:center;">
+        <h2>Bestehende Daten gefunden</h2>
+        <div class="note" style="margin:10px 0 18px;">Auf diesem Gerät liegen bereits Trainingsdaten. Jetzt in dein neues Konto hochladen?</div>
+        <button class="btn btn-primary" style="margin-bottom:8px;" onclick="confirmMigration(true)">Ja, hochladen</button>
+        <button class="btn btn-ghost" onclick="confirmMigration(false)">Nein, lokal belassen</button>
+      </div>
+    </div>
+  `;
+}
+async function initApp(){
+  flushPendingSync();
   const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan] = await Promise.all([
     loadKey('profile', null),
     loadKey('exercises', null),
@@ -5222,6 +5384,11 @@ function renderProfileSettings(){
       <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
     </div>
     <div class="card">
+      <h2 class="small">Konto</h2>
+      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')}</div>
+      <button class="btn btn-danger" onclick="logout()">Abmelden</button>
+    </div>
+    <div class="card">
       <h2>Darstellung</h2>
       <div class="row">
         <button class="btn ${theme==='dark'?'btn-primary':'btn-ghost'}" onclick="setTheme('dark')">Dunkel</button>
@@ -5324,7 +5491,7 @@ function showToast(msg){
   setTimeout(()=>el.remove(), 2200);
 }
 
-init();
+boot();
 </script>
 </body>
 </html>
