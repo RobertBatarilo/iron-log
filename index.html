@@ -433,6 +433,7 @@ function defaultTmp(){
     planForm:null,
     exerciseModal:null,
     photoImport:null,
+    onboarding:null,
     historyNameFilter:null,
     prExerciseSelection:null,
     confirmReset:false,
@@ -1892,8 +1893,9 @@ async function init(){
     loadKey('timeRecords', []),
     loadKey('trainingPlan', null)
   ]);
-  state.profile = profile;
-  applyTheme((profile && profile.theme) || 'dark');
+  state.profile = profile || {};
+  applyTheme(state.profile.theme || 'dark');
+  if(!state.profile.onboardingSeen) state.tmp.onboarding = {open:true, step:0};
   state.trainingPlan = trainingPlan;
   if(exercises && exercises.length){
     state.exercises = exercises;
@@ -1960,7 +1962,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderPhotoImportModal();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
 }
@@ -2331,6 +2333,56 @@ function renderPhotoImportModal(){
         <div class="row" style="margin-top:14px;">
           <button class="btn btn-ghost" onclick="closePhotoImportModal()">Abbrechen</button>
           ${pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+/* ---------- Onboarding ---------- */
+const ONBOARDING_SLIDES = [
+  { emoji:'🏋️', title:'Workout-Formate', text:'Strength, EMOM, AMRAP, For-Time, For-Load — plus Girls- und Hero-WODs direkt aus der Bibliothek. "Done" lädt ein früheres Workout mit den zuletzt getrackten Werten neu.' },
+  { emoji:'📷', title:'Übungsbibliothek & Foto-Import', text:'Hunderte Übungen mit Varianten zur Auswahl. Steht das Workout auf einem Board oder Screenshot? Foto hochladen — die App erkennt Übungen und Zahlen automatisch, direkt im Browser.' },
+  { emoji:'📊', title:'Fortschritt im Blick', text:'1RM-Verlauf, Bestzeiten, Körpermaße und der komplette Trainings-Verlauf — nach Name filterbar, um Fortschritt bei wiederkehrenden Workouts direkt zu vergleichen.' },
+  { emoji:'🎉', title:'Los geht\'s', text:'Alles bereit — leg direkt mit deinem ersten Workout los.' }
+];
+function nextOnboardingStep(){
+  const ob = state.tmp.onboarding;
+  if(!ob) return;
+  if(ob.step < ONBOARDING_SLIDES.length-1) ob.step++;
+  render();
+}
+function prevOnboardingStep(){
+  const ob = state.tmp.onboarding;
+  if(!ob) return;
+  if(ob.step > 0) ob.step--;
+  render();
+}
+async function skipOnboarding(){
+  state.tmp.onboarding = null;
+  state.profile.onboardingSeen = true;
+  await saveKey('profile', state.profile);
+  render();
+}
+function reopenOnboarding(){
+  state.tmp.onboarding = {open:true, step:0};
+  render();
+}
+function renderOnboardingModal(){
+  const ob = state.tmp.onboarding;
+  if(!ob || !ob.open) return '';
+  const slide = ONBOARDING_SLIDES[ob.step];
+  const isLast = ob.step === ONBOARDING_SLIDES.length-1;
+  const dots = ONBOARDING_SLIDES.map((_,i)=>`<span style="width:7px;height:7px;border-radius:50%;background:${i===ob.step?'var(--chalk-yellow)':'var(--iron-600)'};display:inline-block;"></span>`).join('');
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) skipOnboarding()">
+      <div class="modal-box" style="text-align:center;">
+        <div style="font-size:48px;margin-bottom:10px;">${slide.emoji}</div>
+        <h2>${escapeHtml(slide.title)}</h2>
+        <div class="note" style="margin:10px 0 18px;">${escapeHtml(slide.text)}</div>
+        <div style="display:flex;justify-content:center;gap:6px;margin-bottom:16px;">${dots}</div>
+        <div class="row">
+          ${ob.step>0 ? `<button class="btn btn-ghost" onclick="prevOnboardingStep()">Zurück</button>` : `<button class="btn btn-ghost" onclick="skipOnboarding()">Überspringen</button>`}
+          <button class="btn btn-primary" onclick="${isLast?'skipOnboarding()':'nextOnboardingStep()'}">${isLast?'Los geht\'s':'Weiter'}</button>
         </div>
       </div>
     </div>
@@ -5165,6 +5217,10 @@ function renderProfileSettings(){
   const theme = p.theme || 'dark';
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <div class="card">
+      <h2 class="small">Hilfe</h2>
+      <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
+    </div>
     <div class="card">
       <h2>Darstellung</h2>
       <div class="row">
