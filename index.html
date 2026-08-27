@@ -32,7 +32,6 @@
     --accent-forload:#B57EDC;
     --accent-fortime:#E0793C;
     --accent-strength:var(--plate-red);
-    --accent-done:var(--success-green);
     --font-display:'Oswald',sans-serif;
     --font-body:'Inter',sans-serif;
     --font-mono:'IBM Plex Mono',monospace;
@@ -434,7 +433,7 @@ function defaultTmp(){
     planForm:null,
     exerciseModal:null,
     photoImport:null,
-    doneSelectedName:null,
+    historyNameFilter:null,
     prExerciseSelection:null,
     confirmReset:false,
     historyCollapsed:false,
@@ -1977,7 +1976,6 @@ function iconStopwatch(){return `<svg viewBox="0 0 24 24" fill="none" stroke="cu
 function iconAmrap(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>`;}
 function iconEmom(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="12" y2="7"/><line x1="12" y1="12" x2="16" y2="14"/></svg>`;}
 function iconForLoad(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="10" width="6" height="10" rx="1"/><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/></svg>`;}
-function iconDone(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>`;}
 
 /* ---------- TODAY TAB ---------- */
 function weekDates(){
@@ -2204,11 +2202,11 @@ function renderFormatSelector(){
     {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.', color:'var(--accent-emom)', icon:iconEmom()},
     {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.', color:'var(--accent-forload)', icon:iconForLoad()},
     {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.', color:'var(--accent-fortime)', icon:iconStopwatch()},
-    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.', color:'var(--accent-strength)', icon:iconBarbell()},
-    {id:'done', label:'Done', hint:'Vergangene Workouts nach Name durchsuchen und vergleichen.', color:'var(--accent-done)', icon:iconDone()}
+    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.', color:'var(--accent-strength)', icon:iconBarbell()}
   ];
   const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl').sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero').sort((a,b)=>a.name.localeCompare(b.name,'de'));
+  const doneNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const menu = state.tmp.workoutMenu;
 
   const topRow = `
@@ -2216,11 +2214,12 @@ function renderFormatSelector(){
       <button class="btn ${menu==='formats'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('formats')">Formate</button>
       <button class="btn ${menu==='girls'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('girls')">Girls</button>
       <button class="btn ${menu==='heroes'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('heroes')">Heros</button>
+      <button class="btn ${menu==='done'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('done')">Done</button>
       <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="selectRunFormat()">Run</button>
       <button class="btn ${menu==='timer'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('timer')">Timer</button>
     </div>`;
 
-  const sectionLabels = {formats:'Formate', girls:'Girls', heroes:'Hero WODs'};
+  const sectionLabels = {formats:'Formate', girls:'Girls', heroes:'Hero WODs', done:'Done'};
   let subContent = '';
   if(menu==='formats'){
     const current = formats.find(f=>f.id===state.tmp.wodFormat);
@@ -2236,6 +2235,13 @@ function renderFormatSelector(){
         ${list.map(w=>`<button class="btn ${w.name===state.tmp.wodName?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="loadBenchmarkWod('${w.id}')">${w.name}</button>`).join('')}
       </div>
       <div class="note" style="margin-top:8px;">Übernimmt automatisch Format, Übungen und Rep-Schema.</div>`;
+  } else if(menu==='done'){
+    subContent = doneNames.length ? `
+      <div class="row" style="flex-wrap:wrap;gap:8px;">
+        ${doneNames.map((n,i)=>`<button class="btn ${n===state.tmp.wodName?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="loadDoneWorkout(${i})">${escapeHtml(n)}</button>`).join('')}
+      </div>
+      <div class="note" style="margin-top:8px;">Lädt die zuletzt getrackten Werte als neues Workout zum Anpassen.</div>` : `
+      <div class="note">Noch keine benannten Workouts gespeichert.</div>`;
   }
   const subSection = subContent ? `
     <hr class="hairline" style="margin:14px 0 10px;">
@@ -2513,14 +2519,28 @@ function toggleHistoryCollapsed(){
   state.tmp.historyCollapsed = !state.tmp.historyCollapsed;
   render();
 }
+function setHistoryNameFilter(name){
+  state.tmp.historyNameFilter = name || null;
+  render();
+}
 function renderWorkoutHistory(){
   const collapsed = state.tmp.historyCollapsed;
-  const history = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date));
-  const html = history.length ? history.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Noch keine Workouts gespeichert.</div>`;
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+  const filterName = state.tmp.historyNameFilter;
+  let history = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date));
+  if(filterName) history = history.filter(w=>w.name===filterName);
+  const html = history.length ? history.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Keine Workouts gefunden.</div>`;
+  const filterHtml = uniqueNames.length ? `
+    <div class="field" style="margin-bottom:10px;"><label>Nach Name filtern</label>
+      <select onchange="setHistoryNameFilter(this.value)">
+        <option value="">Alle</option>
+        ${uniqueNames.map(n=>`<option value="${escapeHtml(n)}" ${n===filterName?'selected':''}>${escapeHtml(n)}</option>`).join('')}
+      </select>
+    </div>` : '';
   return `
     <div class="card">
       <h2 class="small" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleHistoryCollapsed()">Verlauf <span>${collapsed?'▸':'▾'}</span></h2>
-      ${collapsed ? '' : html}
+      ${collapsed ? '' : filterHtml + html}
     </div>
   `;
 }
@@ -2639,7 +2659,6 @@ function renderWorkout(){
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
   if(state.tmp.wodFormat==='for-load') return formatSelector + renderForLoadFlow(historyHtml);
   if(state.tmp.wodFormat==='run') return formatSelector + renderRunFlow(historyHtml);
-  if(state.tmp.wodFormat==='done') return formatSelector + renderDoneFlow();
 
   ensureWodTemplate();
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
@@ -2651,31 +2670,68 @@ function renderWorkout(){
     : renderWodTemplatePhase(headerFields, historyHtml));
 }
 
-function selectDoneName(name){
-  state.tmp.doneSelectedName = name || null;
+function loadDoneWorkout(index){
+  const doneNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+  const name = doneNames[index];
+  if(!name) return;
+  const w = findWorkoutByName(name);
+  if(!w) return;
+  const fmt = w.format || 'strength';
+
+  state.tmp.wodName = name;
+  state.tmp.wodDate = todayStr();
+  state.tmp.wodTemplate = null; state.tmp.wodMoves = null; state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null; state.tmp.amrapBuilder = null; state.tmp.forLoadBuilder = null;
+  state.tmp.gps = null;
+  state.tmp.wodFormat = fmt;
+
+  if(fmt==='strength' || fmt==='emom'){
+    state.tmp.wodTemplate = w.movements.map((m,mi)=>{
+      const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
+      const next = w.movements[mi+1];
+      const isQtyBased = m.unit!=null;
+      const firstSet = m.sets[0];
+      return {
+        exerciseId: m.exerciseId,
+        timing: m.timing || '',
+        setsCount: String(m.sets.length || ''),
+        pctList: pcts.length ? pcts.join(',') : '',
+        weight: (!isQtyBased && firstSet) ? String(firstSet.weight ?? '') : '',
+        unit: m.unit || 'kcal',
+        qty: (isQtyBased && firstSet) ? String(firstSet.reps ?? '') : '',
+        repsTarget: m.repsTarget || ((!isQtyBased && firstSet) ? String(firstSet.reps ?? '') : ''),
+        groupWithNext: !!(m.groupId!=null && next && next.groupId===m.groupId)
+      };
+    });
+  } else if(fmt==='for-time' && w.forTime){
+    ensureForTimeBuilder();
+    const ft = w.forTime, b = state.tmp.forTimeBuilder;
+    b.movements = ft.movements.map(m=>({exerciseId:m.exerciseId, reps:String(m.reps??''), weight:String(m.weight??''), unit:m.unit||'reps'}));
+    b.rounds = String(ft.rounds||1);
+    b.repScheme = ft.repScheme||'';
+    if(ft.timeCapSec){
+      b.timeCapMin = String(Math.floor(ft.timeCapSec/60));
+      b.timeCapSec = String(ft.timeCapSec%60);
+    }
+  } else if(fmt==='amrap' && w.amrap){
+    ensureAmrapBuilder();
+    const am = w.amrap, b = state.tmp.amrapBuilder;
+    b.movements = am.movements.map(m=>({exerciseId:m.exerciseId, reps:String(m.reps??''), weight:String(m.weight??''), unit:m.unit||'reps'}));
+    b.durationMin = String(Math.floor((am.durationSec||1200)/60));
+    b.durationSec = String((am.durationSec||1200)%60);
+  } else if(fmt==='for-load' && w.forLoad){
+    ensureForLoadBuilder();
+    const fl = w.forLoad, b = state.tmp.forLoadBuilder;
+    b.exerciseId = fl.exerciseId;
+    b.targetReps = String(fl.targetReps||3);
+    b.unit = fl.unit || 'kcal';
+    b.achievedWeight = String(fl.achievedWeight ?? '');
+    if(fl.timeCapSec){
+      b.timeCapMin = String(Math.floor(fl.timeCapSec/60));
+      b.timeCapSec = String(fl.timeCapSec%60);
+    }
+  }
   render();
-}
-function renderDoneFlow(){
-  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
-  const selected = state.tmp.doneSelectedName;
-  const picker = `
-    <div class="card">
-      <h2>Done</h2>
-      <div class="field"><label>Workout</label>
-        <select onchange="selectDoneName(this.value)">
-          <option value="">– wählen –</option>
-          ${uniqueNames.map(n=>`<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`).join('')}
-        </select>
-      </div>
-      ${!uniqueNames.length ? `<div class="note">Noch keine benannten Workouts gespeichert.</div>` : ''}
-    </div>
-  `;
-  if(!selected) return picker;
-  const entries = state.workouts.filter(w=>w.name===selected).sort((a,b)=>b.date.localeCompare(a.date));
-  const list = entries.length
-    ? entries.map(renderWorkoutHistoryEntry).join('')
-    : `<div class="note">Keine Einträge gefunden.</div>`;
-  return picker + list;
 }
 function buildHeaderFields(uniqueNames){
   const disabledAttr = isWodInProgress() ? 'disabled' : '';
