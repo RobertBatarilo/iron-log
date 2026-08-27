@@ -27,6 +27,12 @@
     --plate-red-dim:#8E2F2A;
     --chalk-yellow:#E8B93F;
     --success-green:#6B9E63;
+    --accent-amrap:var(--chalk-yellow);
+    --accent-emom:#5B8DEF;
+    --accent-forload:#B57EDC;
+    --accent-fortime:#E0793C;
+    --accent-strength:var(--plate-red);
+    --accent-done:var(--success-green);
     --font-display:'Oswald',sans-serif;
     --font-body:'Inter',sans-serif;
     --font-mono:'IBM Plex Mono',monospace;
@@ -149,13 +155,19 @@
     font-size:14px;
     cursor:pointer;
     width:100%;
+    transition:transform 0.08s ease;
   }
-  .btn-primary{background:var(--plate-red);color:var(--chalk-50);}
-  .btn-primary:active{background:var(--plate-red-dim);}
+  .btn:active{transform:scale(0.97);}
+  .btn-primary{background:var(--plate-red);color:var(--chalk-50);box-shadow:0 0 20px -6px var(--plate-red);}
+  .btn-primary:active{background:var(--plate-red-dim);box-shadow:0 0 10px -6px var(--plate-red-dim);}
   .btn-ghost{background:var(--iron-700);color:var(--chalk-50);}
   .btn-ghost:active{background:var(--iron-600);}
   .btn-sm{padding:8px 10px;font-size:12px;width:auto;}
   .btn-danger{background:transparent;color:var(--plate-red);border:1px solid var(--plate-red-dim);}
+  .format-btn{gap:8px;}
+  .format-btn svg{width:16px;height:16px;flex:0 0 auto;}
+  .format-btn.btn-primary{background:var(--format-accent);box-shadow:0 0 20px -6px var(--format-accent);}
+  .format-btn.btn-primary:active{filter:brightness(0.85);}
   .feel-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
   .feel-btn{
     background:var(--graphite-900);
@@ -236,6 +248,8 @@
     cursor:pointer;
   }
   .checkbox-row input[type="checkbox"]{width:auto;accent-color:var(--chalk-yellow);}
+  .checkbox-row input[type="checkbox"]:checked{animation:checkPop 0.22s ease;}
+  @keyframes checkPop{0%{transform:scale(1);}40%{transform:scale(1.25);}100%{transform:scale(1);}}
   .wod-result{
     font-family:var(--font-mono);
     color:var(--plate-red);
@@ -247,11 +261,15 @@
   .wod-result small{font-family:var(--font-body);color:var(--iron-500);font-weight:400;font-size:11px;}
   .remove-row{background:none;border:none;color:var(--iron-500);cursor:pointer;font-size:18px;line-height:1;padding:4px 8px;}
   .empty-state{
+    position:relative;
     text-align:center;
     padding:30px 10px;
     color:var(--iron-500);
   }
   .empty-state .glyph{font-size:32px;display:block;margin-bottom:8px;}
+  .empty-state .watermark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0.06;pointer-events:none;}
+  .empty-state .watermark svg{width:96px;height:96px;}
+  .empty-state>*:not(.watermark){position:relative;}
   .wod-card{
     border-left:3px solid var(--chalk-yellow);
     padding-left:12px;
@@ -299,6 +317,7 @@
     padding:6px 2px;
   }
   nav.bottom button.active{color:var(--chalk-yellow);}
+  nav.bottom button.active svg{filter:drop-shadow(0 0 6px var(--chalk-yellow));}
   nav.bottom svg{width:20px;height:20px;}
   .toast{
     position:fixed;
@@ -1955,6 +1974,10 @@ function iconChart(){return `<svg viewBox="0 0 24 24" fill="none" stroke="curren
 function iconUser(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.5-4 4-6 7.5-6s6 2 7.5 6"/></svg>`;}
 function iconHome(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></svg>`;}
 function iconStopwatch(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><line x1="12" y1="13" x2="12" y2="9"/><line x1="9" y1="3" x2="15" y2="3"/><line x1="12" y1="3" x2="12" y2="5"/></svg>`;}
+function iconAmrap(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>`;}
+function iconEmom(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="12" y2="7"/><line x1="12" y1="12" x2="16" y2="14"/></svg>`;}
+function iconForLoad(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="10" width="6" height="10" rx="1"/><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/></svg>`;}
+function iconDone(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>`;}
 
 /* ---------- TODAY TAB ---------- */
 function weekDates(){
@@ -2177,12 +2200,12 @@ function selectRunFormat(){
 }
 function renderFormatSelector(){
   const formats = [
-    {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.'},
-    {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
-    {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'},
-    {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
-    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'},
-    {id:'done', label:'Done', hint:'Vergangene Workouts nach Name durchsuchen und vergleichen.'}
+    {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.', color:'var(--accent-amrap)', icon:iconAmrap()},
+    {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.', color:'var(--accent-emom)', icon:iconEmom()},
+    {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.', color:'var(--accent-forload)', icon:iconForLoad()},
+    {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.', color:'var(--accent-fortime)', icon:iconStopwatch()},
+    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.', color:'var(--accent-strength)', icon:iconBarbell()},
+    {id:'done', label:'Done', hint:'Vergangene Workouts nach Name durchsuchen und vergleichen.', color:'var(--accent-done)', icon:iconDone()}
   ];
   const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl').sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero').sort((a,b)=>a.name.localeCompare(b.name,'de'));
@@ -2203,7 +2226,7 @@ function renderFormatSelector(){
     const current = formats.find(f=>f.id===state.tmp.wodFormat);
     subContent = `
       <div class="row" style="flex-wrap:wrap;gap:8px;">
-        ${formats.map(f=>`<button class="btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;" onclick="setWodFormat('${f.id}')">${f.label}</button>`).join('')}
+        ${formats.map(f=>`<button class="btn format-btn ${state.tmp.wodFormat===f.id?'btn-primary':'btn-ghost'}" style="flex:1 1 45%;--format-accent:${f.color};" onclick="setWodFormat('${f.id}')">${f.icon}${f.label}</button>`).join('')}
       </div>
       ${current ? `<div class="note" style="margin-top:8px;">${current.hint}</div>` : ''}`;
   } else if(menu==='girls' || menu==='heroes'){
@@ -4903,7 +4926,7 @@ function renderProgress1RM(){
       ${exWithLogs.length ? `
       <div class="field"><select onchange="setProgressExercise(this.value)">${exOptions}</select></div>
       <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
-      ` : `<div class="empty-state">Noch keine Trainingsdaten vorhanden.</div>`}
+      ` : `<div class="empty-state"><div class="watermark">${iconBarbell()}</div>Noch keine Trainingsdaten vorhanden.</div>`}
     </div>
     ${renderPrCards()}
   `;
@@ -4932,7 +4955,7 @@ function renderProgressBody(){
     <div class="card">
       <h2>Körpermaße über Zeit</h2>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:14px;">${metricButtons}</div>
-      ${hasDataForSelected ? `<div class="chart-wrap"><canvas id="bodyChart"></canvas></div>` : `<div class="empty-state">Noch keine ${escapeHtml(selectedBm.label)}-Messungen vorhanden.</div>`}
+      ${hasDataForSelected ? `<div class="chart-wrap"><canvas id="bodyChart"></canvas></div>` : `<div class="empty-state"><div class="watermark">${iconBarbell()}</div>Noch keine ${escapeHtml(selectedBm.label)}-Messungen vorhanden.</div>`}
     </div>
     <div class="card">
       <h2>Neue Messung</h2>
