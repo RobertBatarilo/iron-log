@@ -415,6 +415,7 @@ function defaultTmp(){
     planForm:null,
     exerciseModal:null,
     photoImport:null,
+    doneSelectedName:null,
     prExerciseSelection:null,
     confirmReset:false,
     historyCollapsed:false,
@@ -1494,6 +1495,12 @@ const EXERCISE_LIBRARY = [
   ]}
 ];
 EXERCISE_LIBRARY.forEach(b=>{ b.variants.unshift({id:'standard', label:'Standard', details:null}); });
+EXERCISE_LIBRARY.sort((a,b)=>a.name.localeCompare(b.name,'de'));
+EXERCISE_LIBRARY.forEach(b=>{
+  const standard = b.variants[0];
+  const rest = b.variants.slice(1).sort((v1,v2)=>v1.label.localeCompare(v2.label,'de'));
+  b.variants = [standard, ...rest];
+});
 function composeVariantName(base, variant, detailVals){
   if(!variant || variant.id==='standard') return base.name;
   let name = `${variant.label} ${base.name}`;
@@ -2010,7 +2017,7 @@ function renderToday(){
   }).join('');
 
   const planDay = state.trainingPlan && state.trainingPlan.days ? state.trainingPlan.days[todaysPlanKey()] : null;
-  let planHtml;
+  let planHtml = '';
   if(planDay){
     planHtml = `
       <div class="suggestion-box">
@@ -2024,11 +2031,6 @@ function renderToday(){
       <div class="note" style="text-align:center;">Heute ist laut Plan kein Training vorgesehen.</div>
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setTab('workout')">Trotzdem trainieren</button>
     `;
-  } else {
-    planHtml = `
-      <div class="empty-state">Noch kein Trainingsplan erstellt.</div>
-      <button class="btn btn-primary" style="margin-top:12px;" onclick="setTab('profile')">Plan erstellen</button>
-    `;
   }
 
   const lastWorkout = state.workouts.slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
@@ -2038,10 +2040,10 @@ function renderToday(){
       <h2 class="small">Diese Woche</h2>
       <div class="row" style="gap:4px;">${weekStrip}</div>
     </div>
-    <div class="card">
+    ${planHtml ? `<div class="card">
       <h2>Heute</h2>
       ${planHtml}
-    </div>
+    </div>` : ''}
     <div class="card">
       <h2 class="small">Letztes Training</h2>
       ${lastWorkout
@@ -2179,7 +2181,8 @@ function renderFormatSelector(){
     {id:'emom', label:'EMOM', hint:'Every x:xx — feste Intervalle, Sätze sind relevant.'},
     {id:'for-load', label:'For Load', hint:'Bestes Gewicht in einem Zeitfenster finden.'},
     {id:'for-time', label:'For Time', hint:'Feste Aufgabe, Stoppuhr läuft, optional Time-Cap.'},
-    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'}
+    {id:'strength', label:'Strength', hint:'Sätze × Wdh. × Gewicht — klassisches Krafttraining.'},
+    {id:'done', label:'Done', hint:'Vergangene Workouts nach Name durchsuchen und vergleichen.'}
   ];
   const girlWods = CROSSFIT_WODS.filter(w=>w.category==='girl').sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const heroWods = CROSSFIT_WODS.filter(w=>w.category==='hero').sort((a,b)=>a.name.localeCompare(b.name,'de'));
@@ -2613,6 +2616,7 @@ function renderWorkout(){
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
   if(state.tmp.wodFormat==='for-load') return formatSelector + renderForLoadFlow(historyHtml);
   if(state.tmp.wodFormat==='run') return formatSelector + renderRunFlow(historyHtml);
+  if(state.tmp.wodFormat==='done') return formatSelector + renderDoneFlow();
 
   ensureWodTemplate();
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
@@ -2624,6 +2628,32 @@ function renderWorkout(){
     : renderWodTemplatePhase(headerFields, historyHtml));
 }
 
+function selectDoneName(name){
+  state.tmp.doneSelectedName = name || null;
+  render();
+}
+function renderDoneFlow(){
+  const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+  const selected = state.tmp.doneSelectedName;
+  const picker = `
+    <div class="card">
+      <h2>Done</h2>
+      <div class="field"><label>Workout</label>
+        <select onchange="selectDoneName(this.value)">
+          <option value="">– wählen –</option>
+          ${uniqueNames.map(n=>`<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+      </div>
+      ${!uniqueNames.length ? `<div class="note">Noch keine benannten Workouts gespeichert.</div>` : ''}
+    </div>
+  `;
+  if(!selected) return picker;
+  const entries = state.workouts.filter(w=>w.name===selected).sort((a,b)=>b.date.localeCompare(a.date));
+  const list = entries.length
+    ? entries.map(renderWorkoutHistoryEntry).join('')
+    : `<div class="note">Keine Einträge gefunden.</div>`;
+  return picker + list;
+}
 function buildHeaderFields(uniqueNames){
   const disabledAttr = isWodInProgress() ? 'disabled' : '';
   return `
