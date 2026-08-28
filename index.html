@@ -501,7 +501,7 @@ function defaultTmp(){
     exerciseModal:null,
     photoImport:null,
     onboarding:null,
-    auth:{screen:'login', email:'', password:'', passwordConfirm:'', error:'', loading:false},
+    auth:{screen:'login', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null},
     historyNameFilter:null,
     prExerciseSelection:null,
     confirmReset:false,
@@ -1949,10 +1949,17 @@ function migrateStaleExerciseTypes(){
   return changed;
 }
 function boot(){
+  const resetToken = new URLSearchParams(location.search).get('token');
+  if(resetToken){
+    history.replaceState(null, '', location.pathname);
+    state.tmp.auth = {screen:'reset', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken};
+    renderBoot();
+    return;
+  }
   if(pb.authStore.isValid){
     initApp();
   } else {
-    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', loading:false};
+    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null};
     renderBoot();
   }
 }
@@ -2007,9 +2014,56 @@ async function confirmMigration(upload){
 function logout(){
   pb.authStore.clear();
 }
+function showForgotScreen(){
+  state.tmp.auth.screen = 'forgot';
+  state.tmp.auth.error = '';
+  state.tmp.auth.info = '';
+  renderBoot();
+}
+function backToLogin(){
+  state.tmp.auth.screen = 'login';
+  state.tmp.auth.error = '';
+  state.tmp.auth.info = '';
+  renderBoot();
+}
+async function requestPasswordReset(){
+  const a = state.tmp.auth;
+  const email = a.email.trim();
+  if(!email){ a.error = 'Bitte E-Mail eingeben'; renderBoot(); return; }
+  a.loading = true; a.error = '';
+  renderBoot();
+  try{
+    await pb.collection('users').requestPasswordReset(email);
+  }catch{
+    // Absichtlich keine Fehlermeldung nach außen: verhindert, dass sich die App
+    // zum Ausspähen registrierter E-Mail-Adressen missbrauchen lässt.
+  }
+  a.loading = false;
+  a.info = 'Falls ein Konto mit dieser E-Mail existiert, wurde ein Link zum Zurücksetzen verschickt.';
+  renderBoot();
+}
+async function confirmPasswordReset(){
+  const a = state.tmp.auth;
+  const password = a.password;
+  if(!password){ a.error = 'Bitte neues Passwort eingeben'; renderBoot(); return; }
+  if(password !== a.passwordConfirm){ a.error = 'Passwörter stimmen nicht überein'; renderBoot(); return; }
+  a.loading = true; a.error = '';
+  renderBoot();
+  try{
+    await pb.collection('users').confirmPasswordReset(a.resetToken, password, a.passwordConfirm);
+    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', info:'Passwort geändert. Bitte anmelden.', loading:false, resetToken:null};
+    renderBoot();
+  }catch(e){
+    a.loading = false;
+    a.error = 'Link ungültig oder abgelaufen. Bitte fordere einen neuen an.';
+    renderBoot();
+  }
+}
 function renderAuthScreen(){
   const a = state.tmp.auth;
   if(a.screen==='migration') return renderMigrationScreen();
+  if(a.screen==='forgot') return renderForgotScreen();
+  if(a.screen==='reset') return renderResetScreen();
   const isRegister = a.screen==='register';
   return `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
@@ -2019,12 +2073,53 @@ function renderAuthScreen(){
           <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
         </div>
         <h2>${isRegister?'Konto erstellen':'Anmelden'}</h2>
+        ${a.info ? `<div class="note" style="color:var(--success-green);margin-bottom:10px;">${escapeHtml(a.info)}</div>` : ''}
         ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
         <div class="field"><label>E-Mail</label><input type="email" value="${escapeHtml(a.email)}" oninput="state.tmp.auth.email=this.value" autocomplete="username"></div>
         <div class="field"><label>Passwort</label><input type="password" value="${escapeHtml(a.password)}" oninput="state.tmp.auth.password=this.value" autocomplete="${isRegister?'new-password':'current-password'}"></div>
         ${isRegister ? `<div class="field"><label>Passwort bestätigen</label><input type="password" value="${escapeHtml(a.passwordConfirm)}" oninput="state.tmp.auth.passwordConfirm=this.value" autocomplete="new-password"></div>` : ''}
         <button class="btn btn-primary" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="submitAuth()">${a.loading?'Bitte warten …':(isRegister?'Registrieren':'Anmelden')}</button>
         <button class="btn btn-ghost" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="toggleAuthMode()">${isRegister?'Schon ein Konto? Anmelden':'Neu hier? Konto erstellen'}</button>
+        ${!isRegister ? `<button class="btn btn-ghost" style="margin-top:4px;" ${a.loading?'disabled':''} onclick="showForgotScreen()">Passwort vergessen?</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+function renderForgotScreen(){
+  const a = state.tmp.auth;
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;">
+        <div style="text-align:center;margin-bottom:18px;">
+          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+        </div>
+        <h2>Passwort vergessen</h2>
+        <div class="note" style="margin-bottom:10px;">Gib deine E-Mail-Adresse ein, wir schicken dir einen Link zum Zurücksetzen.</div>
+        ${a.info ? `<div class="note" style="color:var(--success-green);margin-bottom:10px;">${escapeHtml(a.info)}</div>` : ''}
+        ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
+        <div class="field"><label>E-Mail</label><input type="email" value="${escapeHtml(a.email)}" oninput="state.tmp.auth.email=this.value" autocomplete="username"></div>
+        <button class="btn btn-primary" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="requestPasswordReset()">${a.loading?'Bitte warten …':'Link anfordern'}</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="backToLogin()">Zurück zur Anmeldung</button>
+      </div>
+    </div>
+  `;
+}
+function renderResetScreen(){
+  const a = state.tmp.auth;
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;">
+        <div style="text-align:center;margin-bottom:18px;">
+          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+        </div>
+        <h2>Neues Passwort festlegen</h2>
+        ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
+        <div class="field"><label>Neues Passwort</label><input type="password" value="${escapeHtml(a.password)}" oninput="state.tmp.auth.password=this.value" autocomplete="new-password"></div>
+        <div class="field"><label>Passwort bestätigen</label><input type="password" value="${escapeHtml(a.passwordConfirm)}" oninput="state.tmp.auth.passwordConfirm=this.value" autocomplete="new-password"></div>
+        <button class="btn btn-primary" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="confirmPasswordReset()">${a.loading?'Bitte warten …':'Passwort speichern'}</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="backToLogin()">Zurück zur Anmeldung</button>
       </div>
     </div>
   `;
