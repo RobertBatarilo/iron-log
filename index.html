@@ -1948,11 +1948,24 @@ function migrateStaleExerciseTypes(){
   });
   return changed;
 }
+function decodeJwtPayload(token){
+  try{
+    const base64 = token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+    return JSON.parse(atob(base64));
+  }catch{
+    return null;
+  }
+}
 function boot(){
-  const resetToken = new URLSearchParams(location.search).get('token');
-  if(resetToken){
+  const token = new URLSearchParams(location.search).get('token');
+  if(token){
     history.replaceState(null, '', location.pathname);
-    state.tmp.auth = {screen:'reset', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken};
+    const payload = decodeJwtPayload(token);
+    if(payload && payload.type==='verification'){
+      handleVerificationToken(token);
+      return;
+    }
+    state.tmp.auth = {screen:'reset', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:token};
     renderBoot();
     return;
   }
@@ -1962,6 +1975,21 @@ function boot(){
     state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null};
     renderBoot();
   }
+}
+async function handleVerificationToken(token){
+  state.tmp.auth = {screen:'verifying', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:true, resetToken:null};
+  renderBoot();
+  try{
+    await pb.collection('users').confirmVerification(token);
+    if(pb.authStore.isValid) await pb.collection('users').authRefresh();
+    state.tmp.auth = {screen:'verified', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null};
+  }catch(e){
+    state.tmp.auth = {screen:'verified', email:'', password:'', passwordConfirm:'', error:'Link ungültig oder abgelaufen.', info:'', loading:false, resetToken:null};
+  }
+  renderBoot();
+}
+function continueAfterVerification(){
+  if(pb.authStore.isValid){ initApp(); } else { backToLogin(); }
 }
 function renderBoot(){
   document.getElementById('app').innerHTML = renderAuthScreen();
@@ -1975,15 +2003,19 @@ async function submitAuth(){
   const a = state.tmp.auth;
   const email = a.email.trim();
   const password = a.password;
+  const isRegister = a.screen==='register';
   if(!email || !password){ a.error = 'Bitte E-Mail und Passwort eingeben'; renderBoot(); return; }
-  if(a.screen==='register' && password!==a.passwordConfirm){ a.error = 'Passwörter stimmen nicht überein'; renderBoot(); return; }
+  if(isRegister && password!==a.passwordConfirm){ a.error = 'Passwörter stimmen nicht überein'; renderBoot(); return; }
   a.loading = true; a.error = '';
   renderBoot();
   try{
-    if(a.screen==='register'){
+    if(isRegister){
       await pb.collection('users').create({email, password, passwordConfirm:a.passwordConfirm});
     }
     await pb.collection('users').authWithPassword(email, password);
+    if(isRegister){
+      try{ await pb.collection('users').requestVerification(email); }catch{}
+    }
     await afterAuthSuccess();
   }catch(e){
     a.loading = false;
@@ -2013,6 +2045,15 @@ async function confirmMigration(upload){
 }
 function logout(){
   pb.authStore.clear();
+}
+async function resendVerification(){
+  if(!pb.authStore.record) return;
+  try{
+    await pb.collection('users').requestVerification(pb.authStore.record.email);
+    showToast('Bestätigungs-Mail gesendet');
+  }catch{
+    showToast('Senden fehlgeschlagen. Bitte später erneut versuchen.');
+  }
 }
 function showForgotScreen(){
   state.tmp.auth.screen = 'forgot';
@@ -2064,6 +2105,8 @@ function renderAuthScreen(){
   if(a.screen==='migration') return renderMigrationScreen();
   if(a.screen==='forgot') return renderForgotScreen();
   if(a.screen==='reset') return renderResetScreen();
+  if(a.screen==='verifying') return renderVerifyingScreen();
+  if(a.screen==='verified') return renderVerifiedScreen();
   const isRegister = a.screen==='register';
   return `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
@@ -2120,6 +2163,37 @@ function renderResetScreen(){
         <div class="field"><label>Passwort bestätigen</label><input type="password" value="${escapeHtml(a.passwordConfirm)}" oninput="state.tmp.auth.passwordConfirm=this.value" autocomplete="new-password"></div>
         <button class="btn btn-primary" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="confirmPasswordReset()">${a.loading?'Bitte warten …':'Passwort speichern'}</button>
         <button class="btn btn-ghost" style="margin-top:8px;" ${a.loading?'disabled':''} onclick="backToLogin()">Zurück zur Anmeldung</button>
+      </div>
+    </div>
+  `;
+}
+function renderVerifyingScreen(){
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;text-align:center;">
+        <div style="margin-bottom:18px;">
+          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+        </div>
+        <div class="note">Bestätige E-Mail …</div>
+      </div>
+    </div>
+  `;
+}
+function renderVerifiedScreen(){
+  const a = state.tmp.auth;
+  return `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div class="card" style="max-width:380px;width:100%;text-align:center;">
+        <div style="margin-bottom:18px;">
+          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+        </div>
+        ${a.error
+          ? `<div class="note" style="color:var(--plate-red);margin-bottom:14px;">${escapeHtml(a.error)}</div>`
+          : `<h2>E-Mail bestätigt</h2><div class="note" style="margin-bottom:14px;">Deine E-Mail-Adresse wurde erfolgreich bestätigt.</div>`
+        }
+        <button class="btn btn-primary" onclick="continueAfterVerification()">Weiter</button>
       </div>
     </div>
   `;
@@ -5481,6 +5555,10 @@ function renderProfileSettings(){
     <div class="card">
       <h2 class="small">Konto</h2>
       <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')}</div>
+      ${pb.authStore.record && !pb.authStore.record.verified ? `
+        <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
+        <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="resendVerification()">Bestätigungs-Mail erneut senden</button>
+      ` : ''}
       <button class="btn btn-danger" onclick="logout()">Abmelden</button>
     </div>
     <div class="card">
@@ -5525,10 +5603,6 @@ function renderProfileSettings(){
       </div>
       <div class="note" style="margin-bottom:10px;">Gilt für Gewichts- und Distanz-Angaben bei For Time / AMRAP / For Load. Bereits gespeicherte Werte werden intern weiterhin in kg/Meter geführt und nur zur Anzeige umgerechnet.</div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
-    </div>
-    <div class="card">
-      <h2 class="small">Konto</h2>
-      <div class="note">Deine Daten liegen aktuell ausschließlich lokal auf diesem Gerät — es gibt noch kein Konto und keine Cloud-Synchronisierung. Anmeldedaten- und Passwortverwaltung kommen, sobald die Backend-Anbindung steht.</div>
     </div>
   `;
 }
