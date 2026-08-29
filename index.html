@@ -1935,6 +1935,12 @@ async function setTheme(theme){
   await saveKey('profile', state.profile);
   render();
 }
+async function setGenderChoice(g){
+  state.profile = state.profile || {};
+  state.profile.gender = g;
+  await saveKey('profile', state.profile);
+  render();
+}
 function migrateStaleExerciseTypes(){
   let changed = false;
   state.exercises.forEach(ex=>{
@@ -2772,8 +2778,8 @@ function parseMovementLine(line){
   if(!line) return null;
   let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(m|km|cal|kcal)\b\s+(.+)$/i);
   if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2].toLowerCase() };
-  m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*\d+(?:[.,]\d+)?\s+(.+)$/);
-  if(m) return { reps: m[1].replace(',', '.'), name: m[2].trim() };
+  m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(?:\d+(?:[.,]\d+)?)\s*(m|km|cal|kcal)?\b\s+(.+)$/i);
+  if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2] ? m[2].toLowerCase() : undefined };
   m = line.match(/^(\d+)\s+(.+)$/);
   if(m) return { reps: m[1], name: m[2].trim() };
   return null;
@@ -2961,6 +2967,7 @@ function applyParsedWorkout(text){
     state.tmp.emomSec = p.intervalSec;
     state.tmp.emomRounds = p.rounds;
     if(p.movements.length){
+      const extraLeftover = [];
       state.tmp.wodTemplate = p.movements.map(mv=>{
         const exerciseId = resolveExerciseIdFromName(mv.name);
         const ex = state.exercises.find(e=>e.id===exerciseId);
@@ -2970,18 +2977,23 @@ function applyParsedWorkout(text){
           if(mv.unit==='m'){ unit = 'm'; qty = mv.reps; repsTarget = ''; }
           else if(mv.unit==='km'){ unit = 'm'; qty = String(Math.round(parseFloat(mv.reps) * 1000)); repsTarget = ''; }
           else { unit = 'kcal'; qty = mv.reps; repsTarget = ''; }
+        } else if(!isCardioMove && mv.reps && (mv.unit==='m' || mv.unit==='km')){
+          repsTarget = '';
+          extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
         }
         return { exerciseId, timing:'', setsCount:'', pctList:'', weight:'', unit, qty, repsTarget, groupWithNext:false };
       });
+      leftoverLines = p.leftover.concat(extraLeftover);
     } else if(nameInfo.name){
       state.tmp.wodTemplate = [{
         exerciseId: resolveExerciseIdFromName(nameInfo.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false
       }];
+      leftoverLines = p.leftover;
     } else {
       ensureWodTemplate();
+      leftoverLines = p.leftover;
     }
     activeMovements = state.tmp.wodTemplate;
-    leftoverLines = p.leftover;
   } else if(format==='amrap'){
     const p = parseAmrapText(parseLines);
     state.tmp.wodFormat = 'amrap';
@@ -3509,19 +3521,25 @@ function startLiveWorkout(){
     restRemaining: 0,
     restTotal: 0,
     restStartedAt: null,
+    emomRunning: false,
+    emomRemaining: 0,
+    emomTotal: 0,
+    emomStartedAt: null,
     finished: false
   };
   state.tmp.wodPhase = 'live';
+  if(state.tmp.wodFormat==='emom'){
+    const live = state.tmp.live;
+    live.emomTotal = getEmomIntervalSec()*1000;
+    live.emomRemaining = live.emomTotal;
+    live.emomStartedAt = Date.now();
+    live.emomRunning = true;
+    startTicking('live', tickEmomLive);
+  }
   render();
 }
-function renderWodLivePhase(){
-  const live = state.tmp.live;
-  if(live.finished) return renderWodSummaryPhase();
-  if(live.resting) return renderRestScreen(live);
-
-  const group = live.flat[live.pos];
-  const isComplex = group.length>1;
-  const blocks = group.map(({mi,si})=>{
+function renderLiveGroupBlocks(group){
+  return group.map(({mi,si})=>{
     const mv = state.tmp.wodMoves[mi];
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const s = mv.sets[si];
@@ -3548,6 +3566,29 @@ function renderWodLivePhase(){
         ${gpsButton}
       </div>`;
   }).join('');
+}
+function goToPreviousLiveRound(){
+  const live = state.tmp.live;
+  if(!live || live.pos<=0) return;
+  live.pos -= 1;
+  live.resting = false;
+  live.restRunning = false;
+  if(state.tmp.wodFormat==='emom'){
+    live.emomRemaining = live.emomTotal;
+    live.emomStartedAt = Date.now();
+    if(live.emomRunning) startTicking('live', tickEmomLive);
+  }
+  render();
+}
+function renderWodLivePhase(){
+  const live = state.tmp.live;
+  if(live.finished) return renderWodSummaryPhase();
+  if(state.tmp.wodFormat==='emom') return renderEmomLivePhase(live);
+  if(live.resting) return renderRestScreen(live);
+
+  const group = live.flat[live.pos];
+  const isComplex = group.length>1;
+  const blocks = renderLiveGroupBlocks(group);
   const timing = state.tmp.wodMoves[group[0].mi].timing;
 
   return `
@@ -3556,23 +3597,51 @@ function renderWodLivePhase(){
       ${timing ? `<div class="note" style="margin-bottom:10px;">${escapeHtml(timing)}</div>` : ''}
       ${blocks}
       <button class="btn btn-primary" onclick="completeLiveSet()">✓ ${isComplex?'Runde':'Satz'} erledigt</button>
-      <button class="btn btn-ghost" style="margin-top:10px;" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
+      <div class="row" style="margin-top:10px;">
+        ${live.pos>0 ? `<button class="btn btn-ghost" onclick="goToPreviousLiveRound()">← Zurück</button>` : ''}
+        <button class="btn btn-ghost" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
+      </div>
     </div>
   `;
 }
-function completeLiveSet(){
-  const live = state.tmp.live;
+function renderEmomLivePhase(live){
   const group = live.flat[live.pos];
+  const isComplex = group.length>1;
+  const blocks = renderLiveGroupBlocks(group);
+  return `
+    <div class="card" style="text-align:center;">
+      <div class="stat-label">${isComplex?'Runde':'Satz'} ${live.pos+1} / ${live.flat.length}</div>
+      <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(live.emomRemaining,false)}</div>
+      <div style="text-align:left;">${blocks}</div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn btn-ghost" onclick="${live.emomRunning?'pauseEmomLiveTimer()':'resumeEmomLiveTimer()'}">${live.emomRunning?'Pause':'Weiter'}</button>
+        <button class="btn btn-ghost" onclick="captureLiveGroupValues(state.tmp.live.flat[state.tmp.live.pos]); showToast('Werte gespeichert'); render();">Werte speichern</button>
+      </div>
+      <div class="row">
+        ${live.pos>0 ? `<button class="btn btn-ghost" onclick="goToPreviousLiveRound()">← Zurück</button>` : ''}
+        <button class="btn btn-ghost" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
+      </div>
+    </div>
+  `;
+}
+function captureLiveGroupValues(group){
   group.forEach(({mi,si})=>{
     const mv = state.tmp.wodMoves[mi];
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const isCardio = getExerciseType(ex)==='cardio';
-    const rawReps = document.getElementById(`liveReps_${mi}`).value;
-    mv.sets[si].reps = (isCardio && mv.unit==='m') ? String(fromDisplayDistance(rawReps)) : rawReps;
+    const repsEl = document.getElementById(`liveReps_${mi}`);
+    if(repsEl){
+      const rawReps = repsEl.value;
+      mv.sets[si].reps = (isCardio && mv.unit==='m') ? String(fromDisplayDistance(rawReps)) : rawReps;
+    }
     const weightEl = document.getElementById(`liveWeight_${mi}`);
     if(weightEl) mv.sets[si].weight = weightEl.value;
     mv.sets[si].autoFilled = false;
   });
+}
+function completeLiveSet(){
+  const live = state.tmp.live;
+  captureLiveGroupValues(live.flat[live.pos]);
 
   if(live.pos >= live.flat.length-1){
     live.finished = true;
@@ -3629,6 +3698,7 @@ function resumeRest(){
 }
 function pauseLiveRest(){
   const live = state.tmp.live;
+  if(live && live.emomRunning){ pauseEmomLiveTimer(); return; }
   if(live && live.resting && live.restRunning){ pauseRest(); return; }
   const ft = state.tmp.forTimeBuilder;
   if(ft && ft.phase==='running' && ft.running){ pauseForTimeClock(); return; }
@@ -3664,6 +3734,43 @@ function exitLiveWorkout(){
   stopTicking();
   state.tmp.wodPhase = 'rows';
   state.tmp.live = null;
+  render();
+}
+function tickEmomLive(){
+  const live = state.tmp.live;
+  if(!live || !live.emomRunning){ stopTicking(); return; }
+  const remaining = live.emomRemaining - (Date.now()-live.emomStartedAt);
+  const display = document.getElementById('timerBigDisplay');
+  if(remaining>0){
+    if(display) display.textContent = fmtClock(remaining,false);
+    return;
+  }
+  beep();
+  captureLiveGroupValues(live.flat[live.pos]);
+  if(live.pos >= live.flat.length-1){
+    live.emomRunning = false;
+    live.finished = true;
+    stopTicking();
+    render();
+    return;
+  }
+  live.pos += 1;
+  live.emomRemaining = live.emomTotal;
+  live.emomStartedAt = Date.now();
+  render();
+}
+function pauseEmomLiveTimer(){
+  const live = state.tmp.live;
+  if(live.emomRunning){ live.emomRemaining = Math.max(0, live.emomRemaining - (Date.now()-live.emomStartedAt)); }
+  live.emomRunning = false;
+  stopTicking();
+  render();
+}
+function resumeEmomLiveTimer(){
+  const live = state.tmp.live;
+  live.emomStartedAt = Date.now();
+  live.emomRunning = true;
+  startTicking('live', tickEmomLive);
   render();
 }
 function renderWodSummaryPhase(){
@@ -5745,10 +5852,10 @@ function renderProfileSettings(){
       <div class="row">
         <div class="field"><label>Alter</label><input type="number" id="pAge" value="${p.age||''}"></div>
         <div class="field"><label>Geschlecht</label>
-          <select id="pGender">
-            <option value="m" ${p.gender==='m'?'selected':''}>Männlich</option>
-            <option value="w" ${p.gender==='w'?'selected':''}>Weiblich</option>
-          </select>
+          <div class="row">
+            <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
+            <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
+          </div>
         </div>
       </div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
@@ -5812,7 +5919,6 @@ async function saveProfile(){
     height: parseFloat(document.getElementById('pHeight').value)||null,
     weight: parseFloat(document.getElementById('pWeight').value)||null,
     age: parseInt(document.getElementById('pAge').value)||null,
-    gender: document.getElementById('pGender').value,
     weightUnit: document.getElementById('pWeightUnit').value,
     distanceUnit: document.getElementById('pDistanceUnit').value,
     scaleTier: document.getElementById('pScaleTier').value
