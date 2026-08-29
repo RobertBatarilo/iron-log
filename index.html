@@ -2630,11 +2630,43 @@ async function handlePhotoImportFile(fileInput){
   pi.loading = false;
   render();
 }
+const OPTION_LINE_RE = /^option\s+([a-z0-9]+)\s*[:.\-]?\s*(.*)$/i;
+function detectPhotoImportOptions(text){
+  const lines = text.split('\n');
+  const options = [];
+  lines.forEach(line=>{
+    const t = line.trim();
+    const m = t.match(OPTION_LINE_RE);
+    if(m) options.push({ id: t, label: m[1].toUpperCase(), content: m[2].trim() || t });
+  });
+  return { lines, options };
+}
 function confirmPhotoImport(){
   const pi = state.tmp.photoImport;
   const text = (pi.rawText || '').trim();
   if(!text){ showToast('Bitte Text eingeben oder Foto wählen'); return; }
+  const { lines, options } = detectPhotoImportOptions(text);
+  if(options.length >= 2){
+    pi.optionLines = lines;
+    pi.optionChoices = options;
+    pi.stage = 'chooseOption';
+    render();
+    return;
+  }
   applyParsedWorkout(text);
+}
+function choosePhotoImportOption(idx){
+  const pi = state.tmp.photoImport;
+  const chosen = pi.optionChoices && pi.optionChoices[idx];
+  if(!chosen) return;
+  const reconstructed = pi.optionLines
+    .filter(line=>{
+      const t = line.trim();
+      return !OPTION_LINE_RE.test(t) || t === chosen.id;
+    })
+    .map(line=> line.trim()===chosen.id ? chosen.content : line)
+    .join('\n');
+  applyParsedWorkout(reconstructed);
 }
 function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
@@ -2656,14 +2688,25 @@ function renderPhotoImportModal(){
       <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
     </div>
   `;
+  const chooseOptionBody = `
+    <div class="note" style="margin-bottom:14px;">Mehrere Optionen erkannt — welche soll übernommen werden?</div>
+    ${(pi.optionChoices||[]).map((opt,i)=>`
+      <button type="button" class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:8px;white-space:normal;" onclick="choosePhotoImportOption(${i})">
+        <strong>Option ${escapeHtml(opt.label)}</strong><br>${escapeHtml(opt.content)}
+      </button>`).join('')}
+  `;
+  const body = pi.stage==='pick' ? pickBody : pi.stage==='chooseOption' ? chooseOptionBody : reviewBody;
+  const footer = pi.stage==='chooseOption'
+    ? `<button class="btn btn-ghost" onclick="state.tmp.photoImport.stage='review'; render();">Zurück</button>`
+    : (pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : '');
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closePhotoImportModal()">
       <div class="modal-box">
         <h2>Workout aus Foto</h2>
-        ${pi.stage==='pick' ? pickBody : reviewBody}
+        ${body}
         <div class="row" style="margin-top:14px;">
           <button class="btn btn-ghost" onclick="closePhotoImportModal()">Abbrechen</button>
-          ${pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : ''}
+          ${footer}
         </div>
       </div>
     </div>
@@ -2727,8 +2770,8 @@ function matchRoundsCount(line){
 }
 function parseMovementLine(line){
   if(!line) return null;
-  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(?:m|km|cal|kcal)\b\s+(.+)$/i);
-  if(m) return { reps: m[1].replace(',', '.'), name: m[2].trim() };
+  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(m|km|cal|kcal)\b\s+(.+)$/i);
+  if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2].toLowerCase() };
   m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*\d+(?:[.,]\d+)?\s+(.+)$/);
   if(m) return { reps: m[1].replace(',', '.'), name: m[2].trim() };
   m = line.match(/^(\d+)\s+(.+)$/);
@@ -2878,6 +2921,20 @@ function parseStrengthText(text){
   });
   return { moves };
 }
+const TARGETING_REPS_RE = /\btargeting\s+(\d+)\+?\s*reps?\b/i;
+function applyTargetingRepsFromLeftover(leftoverLines, movements){
+  if(!movements || !movements.length || !leftoverLines || !leftoverLines.length) return;
+  let capturedNum = null;
+  for(const line of leftoverLines){
+    const m = line.match(TARGETING_REPS_RE);
+    if(m){ capturedNum = m[1]; break; }
+  }
+  if(capturedNum==null) return;
+  const emptyRepsMoves = movements.filter(mv=>'repsTarget' in mv && !mv.repsTarget);
+  if(emptyRepsMoves.length===1){
+    emptyRepsMoves[0].repsTarget = capturedNum;
+  }
+}
 function applyParsedWorkout(text){
   const format = detectWorkoutFormat(text);
   const allLines = ocrTextLines(text);
@@ -2904,9 +2961,18 @@ function applyParsedWorkout(text){
     state.tmp.emomSec = p.intervalSec;
     state.tmp.emomRounds = p.rounds;
     if(p.movements.length){
-      state.tmp.wodTemplate = p.movements.map(mv=>({
-        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget: mv.reps||'', groupWithNext:false
-      }));
+      state.tmp.wodTemplate = p.movements.map(mv=>{
+        const exerciseId = resolveExerciseIdFromName(mv.name);
+        const ex = state.exercises.find(e=>e.id===exerciseId);
+        const isCardioMove = getExerciseType(ex)==='cardio';
+        let unit = 'kcal', qty = '', repsTarget = mv.reps || '';
+        if(isCardioMove && mv.reps && mv.unit){
+          if(mv.unit==='m'){ unit = 'm'; qty = mv.reps; repsTarget = ''; }
+          else if(mv.unit==='km'){ unit = 'm'; qty = String(Math.round(parseFloat(mv.reps) * 1000)); repsTarget = ''; }
+          else { unit = 'kcal'; qty = mv.reps; repsTarget = ''; }
+        }
+        return { exerciseId, timing:'', setsCount:'', pctList:'', weight:'', unit, qty, repsTarget, groupWithNext:false };
+      });
     } else if(nameInfo.name){
       state.tmp.wodTemplate = [{
         exerciseId: resolveExerciseIdFromName(nameInfo.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false
@@ -2965,6 +3031,8 @@ function applyParsedWorkout(text){
       }
     }
   }
+
+  applyTargetingRepsFromLeftover(leftoverLines, state.tmp.wodTemplate);
 
   if(leftoverLines.length) state.tmp.wodNote = leftoverLines.join('\n');
 
@@ -3255,7 +3323,6 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const isBodyweight = type==='bodyweight';
     const isCardio = type==='cardio';
     const isMobility = type==='mobility';
-    const isFollower = isEmom && mi>0 && state.tmp.wodTemplate[mi-1].groupWithNext;
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
       <div class="field"><label>Variante</label>
@@ -3278,9 +3345,9 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       </div>` : '';
     const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>`
       : isMobility ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='sec'?'Sek.':'Wdh.'})</label><input type="number" step="1" value="${t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 10"></div></div>` : '';
-    const setsField = isFollower
-      ? `<div class="field" style="margin-bottom:0;align-self:center;"><div class="note" style="margin:0;">Teil des Komplexes — Sets siehe oben</div></div>`
-      : `<div class="field" style="margin-bottom:0;"><label>Sets ${isEmom?'(Standard: Runden)':''}</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="${isEmom?'z.B. '+state.tmp.emomRounds:'z.B. 5'}"></div>`;
+    const setsField = isEmom
+      ? ''
+      : `<div class="field" style="margin-bottom:0;"><label>Sets</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="z.B. 5"></div>`;
     const groupToggle = (isEmom && mi < state.tmp.wodTemplate.length-1) ? `
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;color:var(--chalk-60);">
         <input type="checkbox" ${t.groupWithNext?'checked':''} onchange="updateTemplateField(${mi},'groupWithNext',this.checked)">
