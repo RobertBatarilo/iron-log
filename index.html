@@ -1712,7 +1712,7 @@ function isRunExercise(ex){
 }
 function guessExerciseType(name){
   const n = name.toLowerCase();
-  if(CARDIO_MACHINE_NAMES.some(c=>n.includes(c.toLowerCase()))) return 'cardio';
+  if(CARDIO_MACHINE_NAMES.some(c=>new RegExp('\\b'+c.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(n))) return 'cardio';
   const libMatch = EXERCISE_LIBRARY.find(b=>n.includes(b.name.toLowerCase()));
   if(libMatch) return libMatch.type;
   return 'weighted';
@@ -2722,6 +2722,54 @@ function renderOnboardingModal(){
 function ocrTextLines(text){
   return (text||'').split('\n').map(l=>l.trim()).filter(Boolean);
 }
+function matchRoundsCount(line){
+  return line.match(/(\d+)\s*(?:x\s*)?(?:sets?|runden|rounds)\b/i) || line.match(/^x\s*(\d+)\b/i);
+}
+function parseMovementLine(line){
+  if(!line) return null;
+  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(?:m|km|cal|kcal)\b\s+(.+)$/i);
+  if(m) return { reps: m[1].replace(',', '.'), name: m[2].trim() };
+  m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*\d+(?:[.,]\d+)?\s+(.+)$/);
+  if(m) return { reps: m[1].replace(',', '.'), name: m[2].trim() };
+  m = line.match(/^(\d+)\s+(.+)$/);
+  if(m) return { reps: m[1], name: m[2].trim() };
+  return null;
+}
+const WOD_NAME_KEYWORD_RE = /\b(emom|amrap|every|time\s*cap|rounds?|runden|rx|int|intermediate|bas|basis|scaled|beginner|score|for\s*time)\b/i;
+function extractWorkoutName(lines){
+  const remaining = lines.slice();
+  if(!remaining.length) return { name: null, remainingLines: remaining };
+  const first = remaining[0];
+  const quoted = first.match(/^["“]([^"”]+)["”]$/);
+  if(quoted){
+    remaining.shift();
+    return { name: quoted[1].trim(), remainingLines: remaining };
+  }
+  if(!/\d/.test(first) && !WOD_NAME_KEYWORD_RE.test(first) && first.length<=40){
+    remaining.shift();
+    return { name: first.trim(), remainingLines: remaining };
+  }
+  return { name: null, remainingLines: remaining };
+}
+const SCALING_TIER_PATTERNS = [
+  { key:'rx', re:/^rx\b/i },
+  { key:'intermediate', re:/^(int|intermediate)\b/i },
+  { key:'scaled', re:/^(bas|basis|scaled|beginner)\b/i }
+];
+function parseScalingLines(lines){
+  const tiers = {};
+  const remainingLines = [];
+  lines.forEach(line=>{
+    const tierDef = SCALING_TIER_PATTERNS.find(t=>t.re.test(line));
+    const nums = tierDef && line.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)\s*kg/i);
+    if(tierDef && nums){
+      tiers[tierDef.key] = { male: parseFloat(nums[1].replace(',','.')), female: parseFloat(nums[2].replace(',','.')) };
+      return;
+    }
+    remainingLines.push(line);
+  });
+  return { tiers, remainingLines };
+}
 function detectWorkoutFormat(text){
   const t = text.toLowerCase();
   if(/\bemom\b/.test(t) || /every\s+\d+\s*:\s*\d+/.test(t)) return 'emom';
@@ -2735,50 +2783,63 @@ function resolveExerciseIdFromName(rawName){
   if(!name) return null;
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
-  const partial = state.exercises.find(e=>name.toLowerCase().includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(name.toLowerCase()));
+  const nameWords = name.toLowerCase().split(/\s+/);
+  const partial = state.exercises.find(e=>{
+    const exWords = e.name.toLowerCase().split(/\s+/);
+    return exWords.every(w=>nameWords.includes(w)) || nameWords.every(w=>exWords.includes(w));
+  });
   if(partial) return partial.id;
   return findOrCreateExerciseId(name);
 }
-function parseForTimeText(text){
-  const lines = ocrTextLines(text);
+function parseForTimeText(lines){
   const movements = [];
+  const leftover = [];
   let rounds = 1, repScheme = '', timeCapMin = '', timeCapSec = '';
   lines.forEach(line=>{
-    let m = line.match(/time\s*cap[:\s]*(\d+)\s*:?\s*(\d*)/i);
-    if(m){ timeCapMin = m[1]; timeCapSec = m[2]||'0'; return; }
-    m = line.match(/(\d+)\s*(?:x\s*)?(?:runden|rounds)/i) || line.match(/^x\s*(\d+)\b/i);
-    if(m){ rounds = m[1]; return; }
-    if(/^\d+(-\d+){1,}$/.test(line)){ repScheme = line; return; }
-    m = line.match(/^(\d+)\s+(.+)$/);
-    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+    let consumed = false;
+    const cap = line.match(/time\s*cap[:\s]*(\d+)\s*:?\s*(\d*)/i);
+    if(cap){ timeCapMin = cap[1]; timeCapSec = cap[2]||'0'; consumed = true; }
+    const roundsM = matchRoundsCount(line);
+    if(roundsM){ rounds = roundsM[1]; consumed = true; }
+    if(/^\d+(-\d+){1,}$/.test(line)){ repScheme = line; consumed = true; }
+    if(consumed) return;
+    const mv = parseMovementLine(line);
+    if(mv){ movements.push(mv); return; }
+    leftover.push(line);
   });
-  return { movements, rounds: String(rounds), repScheme, timeCapMin, timeCapSec };
+  return { movements, rounds: String(rounds), repScheme, timeCapMin, timeCapSec, leftover };
 }
-function parseAmrapText(text){
-  const lines = ocrTextLines(text);
+function parseAmrapText(lines){
   const movements = [];
+  const leftover = [];
   let durationMin = '20', durationSec = '0';
   lines.forEach(line=>{
-    let m = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
-    if(m){ durationMin = m[1]; return; }
-    m = line.match(/^(\d+)\s+(.+)$/);
-    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+    let consumed = false;
+    const dur = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
+    if(dur){ durationMin = dur[1]; consumed = true; }
+    if(consumed) return;
+    const mv = parseMovementLine(line);
+    if(mv){ movements.push(mv); return; }
+    leftover.push(line);
   });
-  return { movements, durationMin, durationSec };
+  return { movements, durationMin, durationSec, leftover };
 }
-function parseEmomText(text){
-  const lines = ocrTextLines(text);
+function parseEmomText(lines){
   const movements = [];
+  const leftover = [];
   let intervalMin = '1', intervalSec = '0', rounds = '10';
   lines.forEach(line=>{
-    let m = line.match(/every\s+(\d+)\s*:\s*(\d+)/i);
-    if(m){ intervalMin = m[1]; intervalSec = m[2]; return; }
-    m = line.match(/emom\D*(\d+)/i);
-    if(m){ rounds = m[1]; return; }
-    m = line.match(/^(\d+)\s+(.+)$/);
-    if(m){ movements.push({reps:m[1], name:m[2].trim()}); return; }
+    let consumed = false;
+    const interval = line.match(/every\s+(\d+)\s*:\s*(\d+)/i);
+    if(interval){ intervalMin = interval[1]; intervalSec = interval[2]; consumed = true; }
+    const roundsM = matchRoundsCount(line) || line.match(/emom\D*(\d+)/i);
+    if(roundsM){ rounds = roundsM[1]; consumed = true; }
+    if(consumed) return;
+    const mv = parseMovementLine(line);
+    if(mv){ movements.push(mv); return; }
+    leftover.push(line);
   });
-  return { movements, intervalMin, intervalSec, rounds };
+  return { movements, intervalMin, intervalSec, rounds, leftover };
 }
 function parseForLoadText(text){
   const lines = ocrTextLines(text);
@@ -2819,15 +2880,25 @@ function parseStrengthText(text){
 }
 function applyParsedWorkout(text){
   const format = detectWorkoutFormat(text);
+  const allLines = ocrTextLines(text);
+  const nameInfo = extractWorkoutName(allLines);
+  const scalingInfo = parseScalingLines(nameInfo.remainingLines);
+  const parseLines = scalingInfo.remainingLines;
+
   state.tmp.wodTemplate = null;
   state.tmp.wodMoves = null;
   state.tmp.forTimeBuilder = null;
   state.tmp.amrapBuilder = null;
   state.tmp.forLoadBuilder = null;
   state.tmp.wodPhase = 'template';
+  state.tmp.wodName = null;
+  state.tmp.wodNote = null;
+
+  let activeMovements = null;
+  let leftoverLines = [];
 
   if(format==='emom'){
-    const p = parseEmomText(text);
+    const p = parseEmomText(parseLines);
     state.tmp.wodFormat = 'emom';
     state.tmp.emomMin = p.intervalMin;
     state.tmp.emomSec = p.intervalSec;
@@ -2836,14 +2907,24 @@ function applyParsedWorkout(text){
       state.tmp.wodTemplate = p.movements.map(mv=>({
         exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget: mv.reps||'', groupWithNext:false
       }));
-    } else ensureWodTemplate();
+    } else if(nameInfo.name){
+      state.tmp.wodTemplate = [{
+        exerciseId: resolveExerciseIdFromName(nameInfo.name), timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false
+      }];
+    } else {
+      ensureWodTemplate();
+    }
+    activeMovements = state.tmp.wodTemplate;
+    leftoverLines = p.leftover;
   } else if(format==='amrap'){
-    const p = parseAmrapText(text);
+    const p = parseAmrapText(parseLines);
     state.tmp.wodFormat = 'amrap';
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
     b.durationMin = p.durationMin; b.durationSec = p.durationSec;
     if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+    activeMovements = b.movements;
+    leftoverLines = p.leftover;
   } else if(format==='for-load'){
     const p = parseForLoadText(text);
     state.tmp.wodFormat = 'for-load';
@@ -2860,13 +2941,33 @@ function applyParsedWorkout(text){
       }));
     } else ensureWodTemplate();
   } else {
-    const p = parseForTimeText(text);
+    const p = parseForTimeText(parseLines);
     state.tmp.wodFormat = 'for-time';
     ensureForTimeBuilder();
     const b = state.tmp.forTimeBuilder;
     b.rounds = p.rounds; b.repScheme = p.repScheme; b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
     if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+    activeMovements = b.movements;
+    leftoverLines = p.leftover;
   }
+
+  if(nameInfo.name) state.tmp.wodName = nameInfo.name;
+
+  if(Object.keys(scalingInfo.tiers).length && state.profile && state.profile.scaleTier && state.profile.gender && activeMovements){
+    const tier = scalingInfo.tiers[state.profile.scaleTier];
+    if(tier){
+      const kg = state.profile.gender==='w' ? tier.female : tier.male;
+      if(kg!=null && !isNaN(kg)){
+        activeMovements.forEach(mv=>{
+          const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+          if(ex && getExerciseType(ex)==='weighted') mv.weight = String(kg);
+        });
+      }
+    }
+  }
+
+  if(leftoverLines.length) state.tmp.wodNote = leftoverLines.join('\n');
+
   state.tmp.photoImport = null;
   showToast('Aus Foto übernommen — bitte kurz prüfen 👀');
   render();
@@ -5604,6 +5705,19 @@ function renderProfileSettings(){
       <div class="note" style="margin-bottom:10px;">Gilt für Gewichts- und Distanz-Angaben bei For Time / AMRAP / For Load. Bereits gespeicherte Werte werden intern weiterhin in kg/Meter geführt und nur zur Anzeige umgerechnet.</div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
     </div>
+    <div class="card">
+      <h2 class="small">Skalierung</h2>
+      <div class="field">
+        <label>Skalierungsstufe</label>
+        <select id="pScaleTier">
+          <option value="rx" ${(!p.scaleTier||p.scaleTier==='rx')?'selected':''}>Rx</option>
+          <option value="intermediate" ${p.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
+          <option value="scaled" ${p.scaleTier==='scaled'?'selected':''}>Scaled</option>
+        </select>
+      </div>
+      <div class="note" style="margin-bottom:10px;">Wird beim Foto-Import automatisch für Gewichts-Vorgaben wie "Rx: 22,5/15kg" verwendet (in Kombination mit deinem Geschlecht unter Grunddaten). Bleibt pro Übung weiterhin überschreibbar.</div>
+      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
+    </div>
   `;
 }
 function renderProfileData(){
@@ -5633,7 +5747,8 @@ async function saveProfile(){
     age: parseInt(document.getElementById('pAge').value)||null,
     gender: document.getElementById('pGender').value,
     weightUnit: document.getElementById('pWeightUnit').value,
-    distanceUnit: document.getElementById('pDistanceUnit').value
+    distanceUnit: document.getElementById('pDistanceUnit').value,
+    scaleTier: document.getElementById('pScaleTier').value
   };
   await saveKey('profile', state.profile);
   showToast('Profil gespeichert');
