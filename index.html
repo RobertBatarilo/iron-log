@@ -2605,11 +2605,29 @@ function renderFormatSelector(){
 }
 /* ---------- Foto-Import (On-Device OCR, kein Server/API-Key) ---------- */
 function openPhotoImportModal(){
-  state.tmp.photoImport = { open:true, stage:'pick', rawText:'', error:'', loading:false };
+  state.tmp.photoImport = {
+    open:true, stage:'pick', rawText:'', error:'', loading:false,
+    imgSrc:'', sourceFile:null,
+    naturalWidth:0, naturalHeight:0,
+    cropTop:0, cropBottom:1
+  };
   render();
 }
+function cleanupPhotoImportImage(){
+  const pi = state.tmp.photoImport;
+  if(pi && pi.imgSrc){ URL.revokeObjectURL(pi.imgSrc); pi.imgSrc=''; }
+  if(pi) pi.sourceFile = null;
+}
 function closePhotoImportModal(){
+  cleanupPhotoImportImage();
   state.tmp.photoImport = null;
+  render();
+}
+function backToPhotoImportPick(){
+  cleanupPhotoImportImage();
+  const pi = state.tmp.photoImport;
+  pi.naturalWidth=0; pi.naturalHeight=0; pi.cropTop=0; pi.cropBottom=1;
+  pi.stage='pick';
   render();
 }
 function updatePhotoImportText(val){
@@ -2625,15 +2643,39 @@ function loadTesseractIfNeeded(){
     document.head.appendChild(s);
   });
 }
-async function handlePhotoImportFile(fileInput){
+function handlePhotoImportFile(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if(!file) return;
   const pi = state.tmp.photoImport;
+  if(pi.imgSrc) URL.revokeObjectURL(pi.imgSrc);
+  pi.error = '';
+  pi.sourceFile = file;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    pi.imgSrc = url;
+    pi.naturalWidth = img.naturalWidth;
+    pi.naturalHeight = img.naturalHeight;
+    pi.cropTop = 0; pi.cropBottom = 1;
+    pi.stage = 'crop';
+    render();
+  };
+  img.onerror = ()=>{
+    URL.revokeObjectURL(url);
+    pi.error = 'Bild konnte nicht geladen werden — bitte Text unten manuell eingeben.';
+    pi.stage = 'review';
+    render();
+  };
+  img.src = url;
+}
+async function runOcrOnSource(source){
+  const pi = state.tmp.photoImport;
+  cleanupPhotoImportImage();
   pi.loading = true; pi.error = '';
   render();
   try{
     await loadTesseractIfNeeded();
-    const result = await Tesseract.recognize(file, 'deu+eng');
+    const result = await Tesseract.recognize(source, 'deu+eng');
     pi.rawText = (result.data.text || '').trim();
   } catch(err){
     pi.error = (err && err.message) ? err.message : 'Texterkennung fehlgeschlagen — bitte Text unten manuell eingeben.';
@@ -2641,6 +2683,68 @@ async function handlePhotoImportFile(fileInput){
   pi.stage = 'review';
   pi.loading = false;
   render();
+}
+function confirmCropAndRunOcr(){
+  const pi = state.tmp.photoImport;
+  const img = document.querySelector('#cropContainer img');
+  if(!img){ runOcrOnSource(pi.sourceFile); return; }
+  const sw = pi.naturalWidth;
+  const sy = Math.round(pi.cropTop * pi.naturalHeight);
+  const sh = Math.max(1, Math.round((pi.cropBottom - pi.cropTop) * pi.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = sw; canvas.height = sh;
+  canvas.getContext('2d').drawImage(img, 0, sy, sw, sh, 0, 0, sw, sh);
+  runOcrOnSource(canvas);
+}
+function skipCropAndRunOcr(){
+  runOcrOnSource(state.tmp.photoImport.sourceFile);
+}
+let _cropDrag = null;
+const CROP_MIN_GAP = 0.05;
+function startCropDrag(event, which){
+  event.preventDefault();
+  const container = document.getElementById('cropContainer');
+  if(!container) return;
+  const rect = container.getBoundingClientRect();
+  const pi = state.tmp.photoImport;
+  _cropDrag = {
+    which, rectTop: rect.top, rectHeight: rect.height,
+    handleEl: document.getElementById(which==='top' ? 'cropHandleTop' : 'cropHandleBottom'),
+    overlayTopEl: document.getElementById('cropOverlayTop'),
+    overlayBottomEl: document.getElementById('cropOverlayBottom'),
+    otherFraction: which==='top' ? pi.cropBottom : pi.cropTop,
+    lastFraction: which==='top' ? pi.cropTop : pi.cropBottom
+  };
+  const el = event.currentTarget;
+  el.setPointerCapture(event.pointerId);
+  el.addEventListener('pointermove', onCropDragMove);
+  el.addEventListener('pointerup', endCropDrag);
+  el.addEventListener('pointercancel', endCropDrag);
+}
+function onCropDragMove(event){
+  if(!_cropDrag) return;
+  const d = _cropDrag;
+  let frac = (event.clientY - d.rectTop) / d.rectHeight;
+  frac = Math.max(0, Math.min(1, frac));
+  if(d.which==='top') frac = Math.max(0, Math.min(frac, d.otherFraction - CROP_MIN_GAP));
+  else frac = Math.min(1, Math.max(frac, d.otherFraction + CROP_MIN_GAP));
+  d.lastFraction = frac;
+  const pct = (frac*100).toFixed(2) + '%';
+  d.handleEl.style.top = `calc(${pct} - 14px)`;
+  if(d.which==='top') d.overlayTopEl.style.height = pct;
+  else d.overlayBottomEl.style.height = ((1-frac)*100).toFixed(2) + '%';
+}
+function endCropDrag(event){
+  if(!_cropDrag) return;
+  const d = _cropDrag;
+  const pi = state.tmp.photoImport;
+  if(pi){ if(d.which==='top') pi.cropTop = d.lastFraction; else pi.cropBottom = d.lastFraction; }
+  const el = event.currentTarget;
+  el.removeEventListener('pointermove', onCropDragMove);
+  el.removeEventListener('pointerup', endCropDrag);
+  el.removeEventListener('pointercancel', endCropDrag);
+  try{ el.releasePointerCapture(event.pointerId); }catch(e){}
+  _cropDrag = null;
 }
 const OPTION_LINE_RE = /^option\s+([a-z0-9]+)\s*[:.\-]?\s*(.*)$/i;
 function detectPhotoImportOptions(text){
@@ -2700,6 +2804,28 @@ function renderPhotoImportModal(){
       <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
     </div>
   `;
+  const cropBody = `
+    <div class="field"><label>Trainingsbereich markieren — oben/unten ziehen</label></div>
+    <div id="cropContainer" style="position:relative;width:100%;aspect-ratio:${pi.naturalWidth}/${pi.naturalHeight};touch-action:none;user-select:none;">
+      <div style="position:absolute;inset:0;overflow:hidden;border-radius:10px;border:1px solid var(--iron-700);">
+        <img src="${pi.imgSrc}" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;pointer-events:none;">
+        <div id="cropOverlayTop" style="position:absolute;left:0;top:0;width:100%;height:${(pi.cropTop*100).toFixed(2)}%;background:rgba(0,0,0,0.65);pointer-events:none;"></div>
+        <div id="cropOverlayBottom" style="position:absolute;left:0;bottom:0;width:100%;height:${((1-pi.cropBottom)*100).toFixed(2)}%;background:rgba(0,0,0,0.65);pointer-events:none;"></div>
+      </div>
+      <div id="cropHandleTop" onpointerdown="startCropDrag(event,'top')" style="position:absolute;left:0;top:calc(${(pi.cropTop*100).toFixed(2)}% - 14px);width:100%;height:28px;cursor:ns-resize;touch-action:none;display:flex;align-items:center;">
+        <div style="width:100%;height:4px;background:var(--chalk-yellow);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,0.5);"></div>
+      </div>
+      <div id="cropHandleBottom" onpointerdown="startCropDrag(event,'bottom')" style="position:absolute;left:0;top:calc(${(pi.cropBottom*100).toFixed(2)}% - 14px);width:100%;height:28px;cursor:ns-resize;touch-action:none;display:flex;align-items:center;">
+        <div style="width:100%;height:4px;background:var(--chalk-yellow);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,0.5);"></div>
+      </div>
+    </div>
+    ${pi.loading ? `<div class="note" style="margin-top:10px;">Texterkennung läuft …</div>` : ''}
+    <div class="row" style="margin-top:14px;gap:8px;">
+      <button type="button" class="btn btn-ghost" style="flex:1;" onclick="backToPhotoImportPick()">◀ Anderes Foto</button>
+      <button type="button" class="btn btn-ghost" style="flex:1;" onclick="skipCropAndRunOcr()">Ganzes Bild</button>
+    </div>
+    <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="confirmCropAndRunOcr()">✂️ Zuschnitt übernehmen</button>
+  `;
   const chooseOptionBody = `
     <div class="note" style="margin-bottom:14px;">Mehrere Optionen erkannt — welche soll übernommen werden?</div>
     ${(pi.optionChoices||[]).map((opt,i)=>`
@@ -2707,7 +2833,7 @@ function renderPhotoImportModal(){
         <strong>Option ${escapeHtml(opt.label)}</strong><br>${escapeHtml(opt.content)}
       </button>`).join('')}
   `;
-  const body = pi.stage==='pick' ? pickBody : pi.stage==='chooseOption' ? chooseOptionBody : reviewBody;
+  const body = pi.stage==='pick' ? pickBody : pi.stage==='crop' ? cropBody : pi.stage==='chooseOption' ? chooseOptionBody : reviewBody;
   const footer = pi.stage==='chooseOption'
     ? `<button class="btn btn-ghost" onclick="state.tmp.photoImport.stage='review'; render();">Zurück</button>`
     : (pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : '');
@@ -2883,18 +3009,43 @@ function parseEmomText(lines){
   const movements = [];
   const leftover = [];
   let intervalMin = '1', intervalSec = '0', rounds = '10';
+  let totalDurationMin = null;
+  const minuteBlocks = [];
   lines.forEach(line=>{
     let consumed = false;
     const interval = line.match(/every\s+(\d+)\s*:\s*(\d+)/i);
     if(interval){ intervalMin = interval[1]; intervalSec = interval[2]; consumed = true; }
+    const totalDur = !interval && line.match(/^(\d+)(?::(\d+))?\s*(?:min\.?)?\s*emom\b/i);
+    if(totalDur){ totalDurationMin = parseInt(totalDur[1]) + (totalDur[2] ? parseInt(totalDur[2])/60 : 0); consumed = true; }
     const roundsM = matchRoundsCount(line) || line.match(/emom\D*(\d+)/i);
     if(roundsM){ rounds = roundsM[1]; consumed = true; }
+    const minuteMatch = !consumed && line.match(/^minute\s+(\d+)\s*:\s*(.+)$/i);
+    if(minuteMatch){ minuteBlocks.push({ num: parseInt(minuteMatch[1]), content: minuteMatch[2].trim(), raw: line }); consumed = true; }
     if(consumed) return;
     const mv = parseMovementLine(line);
     if(mv){ movements.push(mv); return; }
     leftover.push(line);
   });
-  return { movements, intervalMin, intervalSec, rounds, leftover };
+
+  let minuteBlockCount = 0;
+  if(minuteBlocks.length >= 2 && totalDurationMin){
+    minuteBlockCount = minuteBlocks.length;
+    intervalMin = String(minuteBlockCount);
+    intervalSec = '0';
+    rounds = String(Math.round(totalDurationMin / minuteBlockCount));
+    movements.length = 0;
+    minuteBlocks.sort((a,b)=>a.num-b.num).forEach(block=>{
+      block.content.split('+').forEach(seg=>{
+        const segMv = parseMovementLine(seg.trim());
+        if(segMv) movements.push(segMv);
+        else if(seg.trim()) leftover.push(seg.trim());
+      });
+    });
+  } else {
+    minuteBlocks.forEach(b=>leftover.push(b.raw));
+  }
+
+  return { movements, intervalMin, intervalSec, rounds, leftover, minuteBlockCount };
 }
 function parseForLoadText(text){
   const lines = ocrTextLines(text);
@@ -2974,7 +3125,7 @@ function applyParsedWorkout(text){
     state.tmp.emomRounds = p.rounds;
     if(p.movements.length){
       const extraLeftover = [];
-      state.tmp.wodTemplate = p.movements.map(mv=>{
+      state.tmp.wodTemplate = p.movements.map((mv, idx)=>{
         const exerciseId = resolveExerciseIdFromName(mv.name);
         const ex = state.exercises.find(e=>e.id===exerciseId);
         const isCardioMove = getExerciseType(ex)==='cardio';
@@ -2992,7 +3143,8 @@ function applyParsedWorkout(text){
           repsTarget = '';
           extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
         }
-        return { exerciseId, timing:'', setsCount:'', pctList:'', weight:'', unit, qty, repsTarget, groupWithNext:false };
+        const groupWithNext = p.minuteBlockCount >= 2 && idx < p.movements.length - 1;
+        return { exerciseId, timing:'', setsCount:'', pctList:'', weight:'', unit, qty, repsTarget, groupWithNext };
       });
       leftoverLines = p.leftover.concat(extraLeftover);
     } else if(nameInfo.name){
