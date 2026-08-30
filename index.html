@@ -489,7 +489,7 @@ function defaultTmp(){
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
-    emomMin:1, emomSec:30, emomRounds:10,
+    emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
     gps:null,
     timer:{
       mode:'stopwatch',
@@ -3146,6 +3146,7 @@ function applyParsedWorkout(text){
   state.tmp.wodPhase = 'template';
   state.tmp.wodName = null;
   state.tmp.wodNote = null;
+  state.tmp.emomAlternateCycles = 0;
 
   let activeMovements = null;
   let leftoverLines = [];
@@ -3157,17 +3158,15 @@ function applyParsedWorkout(text){
     state.tmp.emomSec = p.intervalSec;
     state.tmp.emomRounds = p.rounds;
     if(p.minuteBlockCount >= 2 && p.blockMovementGroups && p.blockMovementGroups.length){
-      const cycles = p.cyclesCount || 1;
       const built = [];
       const extraLeftover = [];
-      for(let c=0; c<cycles; c++){
-        p.blockMovementGroups.forEach(blockMovs=>{
-          blockMovs.forEach((mv, mi)=>{
-            built.push(buildEmomMovementEntry(mv, mi < blockMovs.length-1, '1', c===0 ? extraLeftover : null));
-          });
+      p.blockMovementGroups.forEach(blockMovs=>{
+        blockMovs.forEach((mv, mi)=>{
+          built.push(buildEmomMovementEntry(mv, mi < blockMovs.length-1, '', extraLeftover));
         });
-      }
+      });
       state.tmp.wodTemplate = built;
+      state.tmp.emomAlternateCycles = p.cyclesCount || 0;
       leftoverLines = p.leftover.concat(extraLeftover);
     } else if(p.movements.length){
       const extraLeftover = [];
@@ -3610,6 +3609,7 @@ function renderWodRowsPhase(headerFields, historyHtml){
 function startLiveWorkout(){
   const moves = state.tmp.wodMoves;
   const flat = [];
+  const groups = [];
   let i = 0;
   while(i < moves.length){
     const gid = moves[i].groupId;
@@ -3619,11 +3619,23 @@ function startLiveWorkout(){
     }
     const groupIdx = [];
     for(let k=i;k<=j;k++) groupIdx.push(k);
-    const setsCount = moves[groupIdx[0]].sets.length;
-    for(let si=0; si<setsCount; si++){
-      flat.push(groupIdx.map(mi=>({mi,si})));
-    }
+    groups.push(groupIdx);
     i = j+1;
+  }
+  const alternateCycles = parseInt(state.tmp.emomAlternateCycles) || 0;
+  if(state.tmp.wodFormat==='emom' && alternateCycles > 1){
+    for(let si=0; si<alternateCycles; si++){
+      groups.forEach(groupIdx=>{
+        flat.push(groupIdx.map(mi=>({mi, si})));
+      });
+    }
+  } else {
+    groups.forEach(groupIdx=>{
+      const setsCount = moves[groupIdx[0]].sets.length;
+      for(let si=0; si<setsCount; si++){
+        flat.push(groupIdx.map(mi=>({mi,si})));
+      }
+    });
   }
   if(!flat.length){ showToast('Keine Sätze vorhanden'); return; }
   state.tmp.live = {
@@ -3697,6 +3709,19 @@ function goToPreviousLiveRound(){
   }
   render();
 }
+function goToNextLiveRound(){
+  const live = state.tmp.live;
+  if(!live || live.pos>=live.flat.length-1) return;
+  live.pos += 1;
+  live.resting = false;
+  live.restRunning = false;
+  if(state.tmp.wodFormat==='emom'){
+    live.emomRemaining = live.emomTotal;
+    live.emomStartedAt = Date.now();
+    if(live.emomRunning) startTicking('live', tickEmomLive);
+  }
+  render();
+}
 function renderWodLivePhase(){
   const live = state.tmp.live;
   if(live.finished) return renderWodSummaryPhase();
@@ -3716,6 +3741,7 @@ function renderWodLivePhase(){
       <button class="btn btn-primary" onclick="completeLiveSet()">✓ ${isComplex?'Runde':'Satz'} erledigt</button>
       <div class="row" style="margin-top:10px;">
         ${live.pos>0 ? `<button class="btn btn-ghost" onclick="goToPreviousLiveRound()">← Zurück</button>` : ''}
+        ${live.pos<live.flat.length-1 ? `<button class="btn btn-ghost" onclick="goToNextLiveRound()">Vor →</button>` : ''}
         <button class="btn btn-ghost" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
       </div>
     </div>
@@ -3736,6 +3762,7 @@ function renderEmomLivePhase(live){
       </div>
       <div class="row">
         ${live.pos>0 ? `<button class="btn btn-ghost" onclick="goToPreviousLiveRound()">← Zurück</button>` : ''}
+        ${live.pos<live.flat.length-1 ? `<button class="btn btn-ghost" onclick="goToNextLiveRound()">Vor →</button>` : ''}
         <button class="btn btn-ghost" onclick="exitLiveWorkout()">Geführten Modus verlassen</button>
       </div>
     </div>
@@ -4890,7 +4917,7 @@ function generateWodRows(){
     const pctArr = parsePctList(t.pctList);
     let setsCount = parseInt(t.setsCount) || (isCardio ? 1 : Math.max(pctArr.length,1));
     if(isEmom && !t.setsCount){
-      setsCount = parseInt(state.tmp.emomRounds) || setsCount;
+      setsCount = parseInt(state.tmp.emomAlternateCycles) || parseInt(state.tmp.emomRounds) || setsCount;
     }
     return setsCount;
   });
