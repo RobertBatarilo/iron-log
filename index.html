@@ -398,7 +398,7 @@ async function deleteKey(key){
 
 /* ---------- Cloud-Sync (PocketBase) ---------- */
 const pb = new PocketBase('https://api.formelfuchs.at');
-const SYNC_KEYS = ['profile','exercises','workouts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
+const SYNC_KEYS = ['profile','exercises','workouts','drafts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
 function getPendingSync(){
   try{ return JSON.parse(localStorage.getItem('ironlog:_pendingSync')||'[]'); }catch(e){ return []; }
 }
@@ -486,7 +486,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null,
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
@@ -515,6 +515,7 @@ let state = {
   profile:null,
   exercises:[],
   workouts:[],
+  drafts:[],
   nutritionLogs:[],
   measurements:[],
   prEntries:[],
@@ -2224,7 +2225,7 @@ function renderMigrationScreen(){
 }
 async function initApp(){
   flushPendingSync();
-  const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan] = await Promise.all([
+  const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan, drafts] = await Promise.all([
     loadKey('profile', null),
     loadKey('exercises', null),
     loadKey('workouts', null),
@@ -2234,7 +2235,8 @@ async function initApp(){
     loadKey('measurements', []),
     loadKey('prEntries', []),
     loadKey('timeRecords', []),
-    loadKey('trainingPlan', null)
+    loadKey('trainingPlan', null),
+    loadKey('drafts', [])
   ]);
   state.profile = profile || {};
   applyTheme(state.profile.theme || 'dark');
@@ -2257,6 +2259,7 @@ async function initApp(){
   state.measurements = measurements;
   state.prEntries = prEntries;
   state.timeRecords = timeRecords;
+  state.drafts = drafts || [];
 
   document.getElementById('app').innerHTML = appShell();
   render();
@@ -2410,6 +2413,7 @@ function renderToday(){
       <h2>Heute</h2>
       ${planHtml}
     </div>` : ''}
+    ${renderDraftsCard()}
     <div class="card">
       <h2 class="small">Letztes Training</h2>
       ${lastWorkout
@@ -2418,6 +2422,24 @@ function renderToday(){
       <button class="btn btn-ghost" style="margin-top:12px;" onclick="setTab('workout')">Neues Workout erfassen</button>
     </div>
   `;
+}
+function renderDraftsCard(){
+  if(!state.drafts || !state.drafts.length) return '';
+  const sorted = state.drafts.slice().sort((a,b)=> a.date.localeCompare(b.date) || (a.createdAt-b.createdAt));
+  const todayD = todayStr();
+  const items = sorted.map(d=>{
+    const isToday = d.date===todayD;
+    return `
+      <div class="wod-card">
+        <div class="wname">${escapeHtml(d.name)||'Workout'} <span class="wdate">${fmtDate(d.date)}${isToday ? ' · HEUTE' : ''}</span></div>
+        <div class="note" style="margin:2px 0 8px;">${WOD_FORMAT_LABELS[d.format]||d.format}</div>
+        <div class="row" style="gap:8px;">
+          <button class="btn-sm btn-primary" onclick="loadDraftIntoBuilder('${d.id}')">Fortsetzen</button>
+          <button class="btn-sm btn-ghost" style="flex:0 0 auto;width:auto;" onclick="deleteDraft('${d.id}')">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+  return `<div class="card"><h2 class="small">Entwürfe</h2>${items}</div>`;
 }
 function startPlannedWorkout(){
   const planDay = state.trainingPlan.days[todaysPlanKey()];
@@ -2541,6 +2563,7 @@ function selectRunFormat(){
     setWodFormat('run');
   }
 }
+const WOD_FORMAT_LABELS = { amrap:'AMRAP', emom:'EMOM', 'for-load':'For Load', 'for-time':'For Time', strength:'Strength' };
 function renderFormatSelector(){
   const formats = [
     {id:'amrap', label:'AMRAP', hint:'So viele Runden wie möglich in der Zeit.', color:'var(--accent-amrap)', icon:iconAmrap()},
@@ -3265,6 +3288,79 @@ function setWodFormat(fmt){
   state.tmp.amrapBuilder = null;
   state.tmp.forLoadBuilder = null;
   state.tmp.gps = null;
+  state.tmp.loadedDraftId = null;
+  render();
+}
+async function saveWodDraft(){
+  const format = state.tmp.wodFormat;
+  const date = document.getElementById('wodDate')?.value || todayStr();
+  const name = (document.getElementById('wodName')?.value || '').trim();
+  let payload;
+  if(format==='for-time'){
+    ensureForTimeBuilder();
+    const b = state.tmp.forTimeBuilder;
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), rounds:b.rounds, repScheme:b.repScheme, timeCapMin:b.timeCapMin, timeCapSec:b.timeCapSec };
+  } else if(format==='amrap'){
+    ensureAmrapBuilder();
+    const b = state.tmp.amrapBuilder;
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec };
+  } else if(format==='for-load'){
+    ensureForLoadBuilder();
+    const b = state.tmp.forLoadBuilder;
+    payload = { exerciseId:b.exerciseId, targetReps:b.targetReps, timeCapMin:b.timeCapMin, timeCapSec:b.timeCapSec, unit:b.unit };
+  } else if(format==='run'){
+    return;
+  } else {
+    ensureWodTemplate();
+    payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
+  }
+
+  const existing = state.tmp.loadedDraftId ? state.drafts.find(d=>d.id===state.tmp.loadedDraftId) : null;
+  if(existing){
+    existing.format = format; existing.date = date; existing.name = name; existing.payload = payload;
+  } else {
+    const draft = { id: uid(), format, date, name, createdAt: Date.now(), payload };
+    state.drafts.push(draft);
+    state.tmp.loadedDraftId = draft.id;
+  }
+  await saveKey('drafts', state.drafts);
+  showToast('Entwurf gespeichert 📝');
+  render();
+}
+function loadDraftIntoBuilder(id){
+  const draft = state.drafts.find(d=>d.id===id);
+  if(!draft){ showToast('Entwurf nicht gefunden'); return; }
+
+  state.tmp.wodFormat = draft.format;
+  state.tmp.wodTemplate = null; state.tmp.wodMoves = null; state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null; state.tmp.amrapBuilder = null; state.tmp.forLoadBuilder = null; state.tmp.gps = null;
+
+  const p = draft.payload;
+  if(draft.format==='for-time'){
+    ensureForTimeBuilder();
+    Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
+  } else if(draft.format==='amrap'){
+    ensureAmrapBuilder();
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+  } else if(draft.format==='for-load'){
+    ensureForLoadBuilder();
+    Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
+  } else {
+    state.tmp.wodTemplate = JSON.parse(JSON.stringify(p.wodTemplate));
+    state.tmp.emomMin = p.emomMin; state.tmp.emomSec = p.emomSec; state.tmp.emomRounds = p.emomRounds; state.tmp.emomAlternateCycles = p.emomAlternateCycles;
+  }
+
+  state.tmp.wodDate = draft.date;
+  state.tmp.wodName = draft.name;
+  state.tmp.loadedDraftId = draft.id;
+  state.tmp.workoutMenu = null;
+  setTab('workout');
+}
+async function deleteDraft(id){
+  state.drafts = state.drafts.filter(d=>d.id!==id);
+  if(state.tmp.loadedDraftId===id) state.tmp.loadedDraftId = null;
+  await saveKey('drafts', state.drafts);
+  showToast('Entwurf gelöscht');
   render();
 }
 function toggleHistoryCollapsed(){
@@ -3586,7 +3682,10 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       ${refNote}
       ${moveBlocks}
       <button class="add-move-btn" onclick="addTemplateMove()">+ Bewegung hinzufügen</button>
-      <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
+        <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
+      </div>
     </div>
     ${historyHtml}
   `;
@@ -4030,7 +4129,10 @@ function renderForTimeFlow(historyHtml){
         <div class="field"><label>Time Cap Min.</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForTimeField('timeCapMin',this.value)"></div>
         <div class="field"><label>Time Cap Sek.</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForTimeField('timeCapSec',this.value)"></div>
       </div>
-      <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
+        <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
+      </div>
     </div>
     ${historyHtml}
   `;
@@ -4239,8 +4341,12 @@ async function saveForTimeWorkout(){
     state.timeRecords.push({id:uid(), name, time: fmtClock(b.finalElapsedSec*1000,false), date, note: b.capped?'Time Cap':''});
     await saveKey('timeRecords', state.timeRecords);
   }
+  if(state.tmp.loadedDraftId){
+    state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
+    await saveKey('drafts', state.drafts);
+  }
   state.tmp.forTimeBuilder = null;
-  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast('Workout gespeichert 🏋️');
   render();
 }
@@ -4380,7 +4486,10 @@ function renderAmrapFlow(historyHtml){
         <div class="field"><label>Dauer Min.</label><input type="number" step="1" min="0" value="${b.durationMin}" oninput="updateAmrapField('durationMin',this.value)"></div>
         <div class="field"><label>Dauer Sek.</label><input type="number" step="1" min="0" max="59" value="${b.durationSec}" oninput="updateAmrapField('durationSec',this.value)"></div>
       </div>
-      <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
+        <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
+      </div>
     </div>
     ${historyHtml}
   `;
@@ -4551,8 +4660,12 @@ async function saveAmrapWorkout(){
   };
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
+  if(state.tmp.loadedDraftId){
+    state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
+    await saveKey('drafts', state.drafts);
+  }
   state.tmp.amrapBuilder = null;
-  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast('Workout gespeichert 🏋️');
   render();
 }
@@ -4615,7 +4728,10 @@ function renderForLoadFlow(historyHtml){
         <div class="field"><label>Time Cap Min.</label><input type="number" step="1" min="0" value="${b.timeCapMin}" oninput="updateForLoadField('timeCapMin',this.value)"></div>
         <div class="field"><label>Time Cap Sek.</label><input type="number" step="1" min="0" max="59" value="${b.timeCapSec}" oninput="updateForLoadField('timeCapSec',this.value)"></div>
       </div>
-      <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
+        <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
+      </div>
     </div>
     ${historyHtml}
   `;
@@ -4791,8 +4907,12 @@ async function saveForLoadWorkout(){
     state.prEntries.push({id:uid(), exerciseId: b.exerciseId, value: weight, date});
     await saveKey('prEntries', state.prEntries);
   }
+  if(state.tmp.loadedDraftId){
+    state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
+    await saveKey('drafts', state.drafts);
+  }
   state.tmp.forLoadBuilder = null;
-  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
+  state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast('Workout gespeichert 🏋️');
   render();
 }
@@ -5051,6 +5171,10 @@ async function saveWod(){
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
   state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements});
   await saveKey('workouts', state.workouts);
+  if(state.tmp.loadedDraftId){
+    state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
+    await saveKey('drafts', state.drafts);
+  }
   state.tmp.wodTemplate = null;
   state.tmp.wodMoves = null;
   state.tmp.wodPhase = 'template';
@@ -5059,6 +5183,7 @@ async function saveWod(){
   state.tmp.wodNameMatch = null;
   state.tmp.wodFeeling = null;
   state.tmp.wodNote = null;
+  state.tmp.loadedDraftId = null;
   showToast('Workout gespeichert 🏋️');
   render();
 }
@@ -6079,8 +6204,8 @@ async function saveProfile(){
 }
 async function resetAll(){
   stopTicking();
-  await Promise.all(['profile','exercises','workouts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', tmp: defaultTmp()};
+  await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
