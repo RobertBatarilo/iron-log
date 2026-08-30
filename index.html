@@ -2340,6 +2340,9 @@ function weekDates(){
 function workoutsOnDate(d){
   return state.workouts.filter(w=>w.date===d);
 }
+function draftsOnDate(d){
+  return state.drafts.filter(x=>x.date===d);
+}
 function openDayDetailModal(d){
   state.tmp.dayDetailDate = d;
   render();
@@ -2352,14 +2355,27 @@ function renderDayDetailModalRoot(){
   const d = state.tmp.dayDetailDate;
   if(!d) return '';
   const dayWorkouts = workoutsOnDate(d);
-  const body = dayWorkouts.length
+  const dayDrafts = draftsOnDate(d);
+  const workoutsBody = dayWorkouts.length
     ? dayWorkouts.map(renderWorkoutHistoryEntry).join('')
-    : `<div class="note">Kein Training an diesem Tag.</div>`;
+    : (dayDrafts.length ? '' : `<div class="note">Kein Training an diesem Tag.</div>`);
+  const draftsBody = dayDrafts.length ? `
+    <h2 class="small" style="margin-top:${dayWorkouts.length?'14px':'0'};">Entwürfe</h2>
+    ${dayDrafts.map(dr=>`
+      <div class="wod-card">
+        <div class="wname">${escapeHtml(dr.name)||'Workout'} <span class="wdate">${WOD_FORMAT_LABELS[dr.format]||dr.format}</span></div>
+        <div class="row" style="gap:8px;margin-top:8px;">
+          <button class="btn-sm btn-primary" onclick="closeDayDetailModal();loadDraftIntoBuilder('${dr.id}')">Fortsetzen</button>
+          <button class="btn-sm btn-ghost" style="flex:0 0 auto;width:auto;" onclick="deleteDraft('${dr.id}')">✕</button>
+        </div>
+      </div>`).join('')}
+  ` : '';
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closeDayDetailModal()">
       <div class="modal-box">
         <h2>${fmtDate(d)}</h2>
-        ${body}
+        ${workoutsBody}
+        ${draftsBody}
         <button class="btn btn-ghost" style="margin-top:14px;" onclick="closeDayDetailModal()">Schließen</button>
       </div>
     </div>
@@ -3315,14 +3331,14 @@ async function saveWodDraft(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
 
-  const existing = state.tmp.loadedDraftId ? state.drafts.find(d=>d.id===state.tmp.loadedDraftId) : null;
-  if(existing){
-    existing.format = format; existing.date = date; existing.name = name; existing.payload = payload;
+  let target = state.drafts.find(d=>d.date===date);
+  if(target){
+    target.format = format; target.name = name; target.payload = payload;
   } else {
-    const draft = { id: uid(), format, date, name, createdAt: Date.now(), payload };
-    state.drafts.push(draft);
-    state.tmp.loadedDraftId = draft.id;
+    target = { id: uid(), format, date, name, createdAt: Date.now(), payload };
+    state.drafts.push(target);
   }
+  state.tmp.loadedDraftId = target.id;
   await saveKey('drafts', state.drafts);
   showToast('Entwurf gespeichert 📝');
   render();
