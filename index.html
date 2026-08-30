@@ -6001,13 +6001,11 @@ function renderProfileSettings(){
         <div class="field"><label>Größe (cm)</label><input type="number" id="pHeight" value="${p.height||''}"></div>
         <div class="field"><label>Gewicht (kg)</label><input type="number" step="0.1" id="pWeight" value="${p.weight||''}"></div>
       </div>
-      <div class="row">
-        <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
-        <div class="field"><label>Geschlecht</label>
-          <div class="row">
-            <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
-            <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
-          </div>
+      <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
+      <div class="field"><label>Geschlecht</label>
+        <div class="row">
+          <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
+          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
         </div>
       </div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
