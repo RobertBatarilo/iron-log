@@ -3020,32 +3020,45 @@ function parseEmomText(lines){
     const roundsM = matchRoundsCount(line) || line.match(/emom\D*(\d+)/i);
     if(roundsM){ rounds = roundsM[1]; consumed = true; }
     const minuteMatch = !consumed && line.match(/^minute\s+(\d+)\s*:\s*(.+)$/i);
-    if(minuteMatch){ minuteBlocks.push({ num: parseInt(minuteMatch[1]), content: minuteMatch[2].trim(), raw: line }); consumed = true; }
+    if(minuteMatch){ minuteBlocks.push({ num: parseInt(minuteMatch[1]), content: minuteMatch[2].trim(), raw: [line] }); return; }
     if(consumed) return;
+    // OCR-Zeilenumbruch: eine unvollständige "Minute N:"-Zeile endet oft mitten in einem
+    // Übungsnamen (z.B. "...+ 1"), die fehlende Fortsetzung landet als eigene Zeile darunter.
+    const lastBlock = minuteBlocks[minuteBlocks.length-1];
+    if(lastBlock && /(?:\+|\d)\s*$/.test(lastBlock.content)){
+      lastBlock.content += ' ' + line;
+      lastBlock.raw.push(line);
+      return;
+    }
     const mv = parseMovementLine(line);
     if(mv){ movements.push(mv); return; }
     leftover.push(line);
   });
 
   let minuteBlockCount = 0;
+  let blockMovementGroups = [];
+  let cyclesCount = 0;
   if(minuteBlocks.length >= 2 && totalDurationMin){
     minuteBlockCount = minuteBlocks.length;
-    intervalMin = String(minuteBlockCount);
+    intervalMin = '1';
     intervalSec = '0';
-    rounds = String(Math.round(totalDurationMin / minuteBlockCount));
+    rounds = String(Math.round(totalDurationMin));
+    cyclesCount = Math.round(totalDurationMin / minuteBlockCount);
     movements.length = 0;
     minuteBlocks.sort((a,b)=>a.num-b.num).forEach(block=>{
+      const blockMovs = [];
       block.content.split('+').forEach(seg=>{
         const segMv = parseMovementLine(seg.trim());
-        if(segMv) movements.push(segMv);
+        if(segMv){ blockMovs.push(segMv); movements.push(segMv); }
         else if(seg.trim()) leftover.push(seg.trim());
       });
+      blockMovementGroups.push(blockMovs);
     });
   } else {
-    minuteBlocks.forEach(b=>leftover.push(b.raw));
+    minuteBlocks.forEach(b=>b.raw.forEach(r=>leftover.push(r)));
   }
 
-  return { movements, intervalMin, intervalSec, rounds, leftover, minuteBlockCount };
+  return { movements, intervalMin, intervalSec, rounds, leftover, minuteBlockCount, blockMovementGroups, cyclesCount };
 }
 function parseForLoadText(text){
   const lines = ocrTextLines(text);
@@ -3098,6 +3111,26 @@ function applyTargetingRepsFromLeftover(leftoverLines, movements){
     emptyRepsMoves[0].repsTarget = capturedNum;
   }
 }
+function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
+  const exerciseId = resolveExerciseIdFromName(mv.name);
+  const ex = state.exercises.find(e=>e.id===exerciseId);
+  const isCardioMove = getExerciseType(ex)==='cardio';
+  const isDistanceWeightedMove = !isCardioMove && isDistanceWeightedExercise(ex);
+  let unit = 'kcal', qty = '', repsTarget = mv.reps || '';
+  if(isCardioMove && mv.reps && mv.unit){
+    if(mv.unit==='m'){ unit = 'm'; qty = mv.reps; repsTarget = ''; }
+    else if(mv.unit==='km'){ unit = 'm'; qty = String(Math.round(parseFloat(mv.reps) * 1000)); repsTarget = ''; }
+    else { unit = 'kcal'; qty = mv.reps; repsTarget = ''; }
+  } else if(isDistanceWeightedMove){
+    unit = 'm';
+    if(mv.reps) qty = mv.unit==='km' ? String(Math.round(parseFloat(mv.reps) * 1000)) : mv.reps;
+    repsTarget = '';
+  } else if(!isCardioMove && mv.reps && (mv.unit==='m' || mv.unit==='km') && extraLeftover){
+    repsTarget = '';
+    extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
+  }
+  return { exerciseId, timing:'', setsCount, pctList:'', weight:'', unit, qty, repsTarget, groupWithNext };
+}
 function applyParsedWorkout(text){
   const format = detectWorkoutFormat(text);
   const allLines = ocrTextLines(text);
@@ -3123,29 +3156,22 @@ function applyParsedWorkout(text){
     state.tmp.emomMin = p.intervalMin;
     state.tmp.emomSec = p.intervalSec;
     state.tmp.emomRounds = p.rounds;
-    if(p.movements.length){
+    if(p.minuteBlockCount >= 2 && p.blockMovementGroups && p.blockMovementGroups.length){
+      const cycles = p.cyclesCount || 1;
+      const built = [];
       const extraLeftover = [];
-      state.tmp.wodTemplate = p.movements.map((mv, idx)=>{
-        const exerciseId = resolveExerciseIdFromName(mv.name);
-        const ex = state.exercises.find(e=>e.id===exerciseId);
-        const isCardioMove = getExerciseType(ex)==='cardio';
-        const isDistanceWeightedMove = !isCardioMove && isDistanceWeightedExercise(ex);
-        let unit = 'kcal', qty = '', repsTarget = mv.reps || '';
-        if(isCardioMove && mv.reps && mv.unit){
-          if(mv.unit==='m'){ unit = 'm'; qty = mv.reps; repsTarget = ''; }
-          else if(mv.unit==='km'){ unit = 'm'; qty = String(Math.round(parseFloat(mv.reps) * 1000)); repsTarget = ''; }
-          else { unit = 'kcal'; qty = mv.reps; repsTarget = ''; }
-        } else if(isDistanceWeightedMove){
-          unit = 'm';
-          if(mv.reps) qty = mv.unit==='km' ? String(Math.round(parseFloat(mv.reps) * 1000)) : mv.reps;
-          repsTarget = '';
-        } else if(!isCardioMove && mv.reps && (mv.unit==='m' || mv.unit==='km')){
-          repsTarget = '';
-          extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
-        }
-        const groupWithNext = p.minuteBlockCount >= 2 && idx < p.movements.length - 1;
-        return { exerciseId, timing:'', setsCount:'', pctList:'', weight:'', unit, qty, repsTarget, groupWithNext };
-      });
+      for(let c=0; c<cycles; c++){
+        p.blockMovementGroups.forEach(blockMovs=>{
+          blockMovs.forEach((mv, mi)=>{
+            built.push(buildEmomMovementEntry(mv, mi < blockMovs.length-1, '1', c===0 ? extraLeftover : null));
+          });
+        });
+      }
+      state.tmp.wodTemplate = built;
+      leftoverLines = p.leftover.concat(extraLeftover);
+    } else if(p.movements.length){
+      const extraLeftover = [];
+      state.tmp.wodTemplate = p.movements.map(mv=>buildEmomMovementEntry(mv, false, '', extraLeftover));
       leftoverLines = p.leftover.concat(extraLeftover);
     } else if(nameInfo.name){
       state.tmp.wodTemplate = [{
