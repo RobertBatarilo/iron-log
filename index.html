@@ -3331,7 +3331,13 @@ async function saveWodDraft(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
 
-  let target = state.drafts.find(d=>d.date===date);
+  // Nur dieselbe Entwurfs-Zeile aktualisieren, wenn die Session bereits an einen Entwurf
+  // gebunden ist UND das Datum seitdem unverändert ist — ändert der Nutzer das Datum
+  // (z.B. um einen zweiten Entwurf für einen anderen/denselben Tag anzulegen), wird
+  // bewusst ein neuer Eintrag erzeugt, statt den bestehenden zu überschreiben. So sind
+  // mehrere Entwürfe pro Tag möglich (z.B. zwei Workouts am selben Tag).
+  const linked = state.tmp.loadedDraftId ? state.drafts.find(d=>d.id===state.tmp.loadedDraftId) : null;
+  let target = (linked && linked.date===date) ? linked : null;
   if(target){
     target.format = format; target.name = name; target.payload = payload;
   } else {
