@@ -507,7 +507,9 @@ function defaultTmp(){
     confirmReset:false,
     historyCollapsed:false,
     dayDetailDate:null,
-    workoutMenu:'formats'
+    workoutMenu:'formats',
+    boxScreen:'home',
+    boxScheduleEditId:null
   };
 }
 
@@ -522,6 +524,7 @@ let state = {
   timeRecords:[],
   trainingPlan:null,
   activeTab:'today',
+  box:{ loaded:false, membership:null, scheduleSlots:[], todaysWorkouts:[], pendingMemberships:[] },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -2269,6 +2272,7 @@ function bottomNavHtml(){
   return [
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
+    navBtn('box','Box', iconBuilding()),
     navBtn('progress','Fortschritt', iconChart()),
     navBtn('profile','Profil', iconUser())
   ].join('');
@@ -2298,6 +2302,7 @@ function setTab(tab){
     else if(activeTicker==='live') pauseLiveRest();
   }
   state.activeTab = tab;
+  if(tab==='box') loadBoxData();
   render();
 }
 function render(){
@@ -2305,6 +2310,7 @@ function render(){
   const content = document.getElementById('content');
   if(state.activeTab==='today') content.innerHTML = renderToday();
   if(state.activeTab==='workout') content.innerHTML = renderWorkout();
+  if(state.activeTab==='box') content.innerHTML = renderBox();
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
@@ -2324,6 +2330,7 @@ function iconStopwatch(){return `<svg viewBox="0 0 24 24" fill="none" stroke="cu
 function iconAmrap(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>`;}
 function iconEmom(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="12" y2="7"/><line x1="12" y1="12" x2="16" y2="14"/></svg>`;}
 function iconForLoad(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="10" width="6" height="10" rx="1"/><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/></svg>`;}
+function iconBuilding(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1"/><line x1="8" y1="7" x2="8" y2="7.01"/><line x1="12" y1="7" x2="12" y2="7.01"/><line x1="16" y1="7" x2="16" y2="7.01"/><line x1="8" y1="11" x2="8" y2="11.01"/><line x1="12" y1="11" x2="12" y2="11.01"/><line x1="16" y1="11" x2="16" y2="11.01"/><line x1="8" y1="15" x2="8" y2="15.01"/><line x1="16" y1="15" x2="16" y2="15.01"/><rect x="10" y="15" width="4" height="6"/></svg>`;}
 
 /* ---------- TODAY TAB ---------- */
 function weekDates(){
@@ -3383,6 +3390,304 @@ async function deleteDraft(id){
   showToast('Entwurf gelöscht');
   render();
 }
+
+/* ---------- BOX / GYM ---------- */
+// Box-Daten (schedule_slots, box_workouts, memberships) sind geteilte Daten mehrerer
+// Nutzer, nicht die Single-Owner-Blobs von loadKey/saveKey/SYNC_KEYS — deshalb direkte
+// pb.collection(...)-Aufrufe statt des lokalen Cache-Musters, frisch geladen bei jedem
+// Öffnen des Box-Tabs (kein Realtime in Phase 1).
+const WEEKDAY_NAMES = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+function isBoxOwner(){
+  const m = state.box.membership;
+  return !!(m && m.status==='active' && m.role==='owner');
+}
+async function loadBoxData(){
+  if(!pb.authStore.isValid) return;
+  const userId = pb.authStore.record.id;
+  try{
+    const memberships = await pb.collection('memberships').getFullList({
+      filter: pb.filter('user = {:user}', {user:userId}),
+      expand:'box'
+    });
+    const mine = memberships.find(m=>m.status==='active') || memberships.find(m=>m.status==='pending') || null;
+    state.box.membership = mine;
+    if(mine && mine.status==='active'){
+      const boxId = mine.box;
+      const [slots, workouts] = await Promise.all([
+        pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
+        pb.collection('box_workouts').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:todayStr()}), sort:'created'})
+      ]);
+      state.box.scheduleSlots = slots;
+      state.box.todaysWorkouts = workouts;
+      state.box.pendingMemberships = mine.role==='owner'
+        ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
+        : [];
+    } else {
+      state.box.scheduleSlots = [];
+      state.box.todaysWorkouts = [];
+      state.box.pendingMemberships = [];
+    }
+  }catch(e){
+    console.error('Box-Daten konnten nicht geladen werden', e);
+  }
+  state.box.loaded = true;
+  render();
+}
+function setBoxScreen(screen){
+  state.tmp.boxScreen = screen;
+  state.tmp.boxScheduleEditId = null;
+  render();
+}
+async function joinBoxByCode(){
+  const code = (document.getElementById('boxJoinCode')?.value || '').trim();
+  if(!code){ showToast('Bitte einen Code eingeben'); return; }
+  try{
+    const box = await pb.collection('boxes').getFirstListItem(pb.filter('inviteCode = {:code}', {code}));
+    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending' });
+    showToast('Anfrage gesendet');
+    await loadBoxData();
+  }catch(e){
+    showToast('Code ungültig oder Anfrage existiert bereits');
+  }
+}
+async function createBoxFlow(){
+  const name = (document.getElementById('boxCreateName')?.value || '').trim();
+  if(!name){ showToast('Bitte einen Namen eingeben'); return; }
+  try{
+    const box = await pb.collection('boxes').create({ name, slug: slug(name), owner: pb.authStore.record.id, inviteCode: uid() });
+    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'owner', status:'active' });
+    showToast('Box erstellt 🏋️');
+    await loadBoxData();
+  }catch(e){
+    showToast('Box konnte nicht erstellt werden');
+  }
+}
+async function approveMembership(id, approve){
+  try{
+    await pb.collection('memberships').update(id, {status: approve?'active':'rejected'});
+    showToast(approve?'Mitglied bestätigt':'Anfrage abgelehnt');
+    await loadBoxData();
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
+  }
+}
+async function saveScheduleSlot(id){
+  const weekday = parseInt(document.getElementById('slotWeekday').value);
+  const startTime = document.getElementById('slotStartTime').value.trim();
+  const label = document.getElementById('slotLabel').value.trim();
+  const coachName = document.getElementById('slotCoachName').value.trim();
+  if(!startTime || !label){ showToast('Bitte Uhrzeit und Bezeichnung angeben'); return; }
+  const boxId = state.box.membership.box;
+  try{
+    if(id){
+      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName});
+    } else {
+      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName});
+    }
+    state.tmp.boxScheduleEditId = null;
+    showToast('Kursplan gespeichert');
+    await loadBoxData();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+async function deleteScheduleSlot(id){
+  try{
+    await pb.collection('schedule_slots').delete(id);
+    showToast('Termin gelöscht');
+    await loadBoxData();
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
+}
+async function publishBoxWorkout(){
+  if(!isBoxOwner()) return;
+  const format = state.tmp.wodFormat;
+  const date = document.getElementById('wodDate')?.value || todayStr();
+  const name = (document.getElementById('wodName')?.value || '').trim();
+  let payload;
+  if(format==='for-time'){
+    ensureForTimeBuilder();
+    const b = state.tmp.forTimeBuilder;
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), rounds:b.rounds, repScheme:b.repScheme, timeCapMin:b.timeCapMin, timeCapSec:b.timeCapSec };
+  } else if(format==='amrap'){
+    ensureAmrapBuilder();
+    const b = state.tmp.amrapBuilder;
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec };
+  } else if(format==='for-load'){
+    ensureForLoadBuilder();
+    const b = state.tmp.forLoadBuilder;
+    payload = { exerciseId:b.exerciseId, targetReps:b.targetReps, timeCapMin:b.timeCapMin, timeCapSec:b.timeCapSec, unit:b.unit };
+  } else if(format==='run'){
+    return;
+  } else {
+    ensureWodTemplate();
+    payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
+  }
+  try{
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, publishedBy: pb.authStore.record.id });
+    showToast('An Box veröffentlicht 📣');
+  }catch(e){
+    showToast('Veröffentlichen fehlgeschlagen');
+  }
+}
+function importBoxWorkout(id){
+  const w = state.box.todaysWorkouts.find(x=>x.id===id);
+  if(!w){ showToast('Workout nicht gefunden'); return; }
+  state.tmp.wodFormat = w.format;
+  state.tmp.wodTemplate = null; state.tmp.wodMoves = null; state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null; state.tmp.amrapBuilder = null; state.tmp.forLoadBuilder = null; state.tmp.gps = null;
+
+  const p = w.payload;
+  if(w.format==='for-time'){
+    ensureForTimeBuilder();
+    Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
+  } else if(w.format==='amrap'){
+    ensureAmrapBuilder();
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+  } else if(w.format==='for-load'){
+    ensureForLoadBuilder();
+    Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
+  } else {
+    state.tmp.wodTemplate = JSON.parse(JSON.stringify(p.wodTemplate));
+    state.tmp.emomMin = p.emomMin; state.tmp.emomSec = p.emomSec; state.tmp.emomRounds = p.emomRounds; state.tmp.emomAlternateCycles = p.emomAlternateCycles;
+  }
+
+  state.tmp.wodDate = todayStr();
+  state.tmp.wodName = w.name;
+  state.tmp.loadedDraftId = null; // NICHT verknüpfen — box_workouts bleibt unangetastet, "Entwurf speichern" legt einen eigenen neuen Entwurf an
+  state.tmp.workoutMenu = null;
+  setTab('workout');
+}
+function renderBoxJoinOrCreate(){
+  return `
+    <div class="card">
+      <h2>Box beitreten</h2>
+      <div class="field"><label>Einladungscode</label><input type="text" id="boxJoinCode" placeholder="Code von deiner Box"></div>
+      <button class="btn btn-primary" onclick="joinBoxByCode()">Beitreten</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Eigene Box leiten?</h2>
+      <div class="field"><label>Box-Name</label><input type="text" id="boxCreateName" placeholder="z.B. CrossFit Nordkreuz"></div>
+      <button class="btn btn-ghost" onclick="createBoxFlow()">Box erstellen</button>
+    </div>
+  `;
+}
+function renderBoxSchedule(slots){
+  if(!slots.length) return `<div class="note">Noch kein Kursplan hinterlegt.</div>`;
+  const byDay = {};
+  slots.forEach(s=>{ (byDay[s.weekday] = byDay[s.weekday]||[]).push(s); });
+  const order = [1,2,3,4,5,6,0];
+  return order.filter(d=>byDay[d]).map(d=>`
+    <div style="margin-bottom:10px;">
+      <div class="stat-label">${WEEKDAY_NAMES[d]}</div>
+      ${byDay[d].sort((a,b)=>a.startTime.localeCompare(b.startTime)).map(s=>`
+        <div class="history-item"><span class="date">${escapeHtml(s.startTime)}</span><span class="val">${escapeHtml(s.label)}${s.coachName?' · '+escapeHtml(s.coachName):''}</span></div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+function renderBoxTodaysWorkouts(workouts){
+  if(!workouts.length) return `<div class="note">Heute wurde noch kein Workout veröffentlicht.</div>`;
+  return workouts.map(w=>`
+    <div class="wod-card">
+      <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${WOD_FORMAT_LABELS[w.format]||w.format}</span></div>
+      <button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>
+    </div>
+  `).join('');
+}
+function renderScheduleSlotForm(s, editId){
+  return `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
+      <div class="row">
+        <div class="field"><label>Wochentag</label>
+          <select id="slotWeekday">
+            ${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${s.weekday===d?'selected':''}>${WEEKDAY_NAMES[d]}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
+      </div>
+      <div class="field"><label>Bezeichnung</label><input type="text" id="slotLabel" value="${escapeHtml(s.label||'')}" placeholder="CrossFit"></div>
+      <div class="field"><label>Coach (optional)</label><input type="text" id="slotCoachName" value="${escapeHtml(s.coachName||'')}"></div>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="state.tmp.boxScheduleEditId=null; render();">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveScheduleSlot('${editId==='new'?'':editId}')">Speichern</button>
+      </div>
+    </div>
+  `;
+}
+function renderBoxManage(box){
+  const pending = state.box.pendingMemberships;
+  const editId = state.tmp.boxScheduleEditId;
+  const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
+  const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:''} : editing;
+  return `
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;" onclick="setBoxScreen('home')">← Zurück</h2>
+      <div class="note">Einladungscode: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+    </div>
+    ${pending.length ? `
+      <div class="card">
+        <h2 class="small">Beitrittsanfragen</h2>
+        ${pending.map(m=>`
+          <div class="history-item">
+            <span class="val">${escapeHtml(m.expand?.user?.email||'Nutzer')}</span>
+            <span>
+              <button class="btn-sm btn-primary" style="width:auto;" onclick="approveMembership('${m.id}',true)">Annehmen</button>
+              <button class="btn-sm btn-ghost" style="width:auto;" onclick="approveMembership('${m.id}',false)">Ablehnen</button>
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    <div class="card">
+      <h2 class="small">Kursplan</h2>
+      ${state.box.scheduleSlots.map(s=>`
+        <div class="history-item">
+          <span class="date">${WEEKDAY_NAMES[s.weekday]} ${escapeHtml(s.startTime)}</span>
+          <span class="val">${escapeHtml(s.label)}</span>
+          <span>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
+          </span>
+        </div>
+      `).join('')}
+      ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
+    </div>
+    <div class="card">
+      <h2 class="small">Workout veröffentlichen</h2>
+      <div class="note">Wechsle zum "Workout"-Tab, erstelle dort ein Workout wie gewohnt und nutze den Button "📣 An Box veröffentlichen".</div>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="setTab('workout')">Zum Workout-Tab</button>
+    </div>
+  `;
+}
+function renderBox(){
+  const b = state.box;
+  if(!b.membership){
+    return renderBoxJoinOrCreate();
+  }
+  if(b.membership.status==='pending'){
+    const boxName = b.membership.expand?.box?.name || 'Box';
+    return `
+      <div class="card" style="text-align:center;">
+        <h2>Beitrittsanfrage gesendet</h2>
+        <div class="note">Deine Anfrage für "${escapeHtml(boxName)}" wartet auf Bestätigung durch den Box-Betreiber.</div>
+      </div>
+    `;
+  }
+  const box = b.membership.expand?.box;
+  if(isBoxOwner() && state.tmp.boxScreen==='manage'){
+    return renderBoxManage(box);
+  }
+  return `
+    <div class="card">
+      <h2>${escapeHtml(box?.name || 'Box')}</h2>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxScreen('manage')">⚙️ Box verwalten</button>` : ''}
+    </div>
+    <div class="card"><h2 class="small">Wochenplan</h2>${renderBoxSchedule(b.scheduleSlots)}</div>
+    <div class="card"><h2 class="small">Heutiges Workout</h2>${renderBoxTodaysWorkouts(b.todaysWorkouts)}</div>
+  `;
+}
 function toggleHistoryCollapsed(){
   state.tmp.historyCollapsed = !state.tmp.historyCollapsed;
   render();
@@ -3706,6 +4011,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
       </div>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -4153,6 +4459,7 @@ function renderForTimeFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
       </div>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -4510,6 +4817,7 @@ function renderAmrapFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
       </div>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -4752,6 +5060,7 @@ function renderForLoadFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
       </div>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
