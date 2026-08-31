@@ -289,6 +289,13 @@
     border-radius:20px;
     margin-left:6px;
   }
+  .chip-owner{
+    background:var(--chalk-yellow);
+    color:var(--graphite-900);
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+  }
   nav.bottom{
     position:fixed;
     bottom:0;left:0;right:0;
@@ -2266,6 +2273,7 @@ async function initApp(){
 
   document.getElementById('app').innerHTML = appShell();
   render();
+  loadBoxData(); // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist
 }
 
 function bottomNavHtml(){
@@ -3661,6 +3669,13 @@ function renderBoxManage(box){
     </div>
   `;
 }
+function renderRoleBadge(){
+  const m = state.box.membership;
+  if(!m || m.status!=='active') return '';
+  return m.role==='owner'
+    ? `<span class="chip chip-owner">Coach</span>`
+    : `<span class="chip">Mitglied</span>`;
+}
 function renderBox(){
   const b = state.box;
   if(!b.membership){
@@ -3681,7 +3696,7 @@ function renderBox(){
   }
   return `
     <div class="card">
-      <h2>${escapeHtml(box?.name || 'Box')}</h2>
+      <h2>${escapeHtml(box?.name || 'Box')} ${renderRoleBadge()}</h2>
       ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxScreen('manage')">⚙️ Box verwalten</button>` : ''}
     </div>
     <div class="card"><h2 class="small">Wochenplan</h2>${renderBoxSchedule(b.scheduleSlots)}</div>
@@ -6435,7 +6450,7 @@ function renderProfileSettings(){
     </div>
     <div class="card">
       <h2 class="small">Konto</h2>
-      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')}</div>
+      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')} ${renderRoleBadge()}</div>
       ${pb.authStore.record && !pb.authStore.record.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
         <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="resendVerification()">Bestätigungs-Mail erneut senden</button>
