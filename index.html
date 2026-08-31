@@ -296,6 +296,13 @@
     text-transform:uppercase;
     letter-spacing:0.04em;
   }
+  .chip-reserved{ background:var(--success-green); color:var(--chalk-50); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
+  .chip-available{ background:transparent; border:1px solid var(--success-green); color:var(--success-green); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
+  .chip-waitlist{ background:var(--chalk-yellow); color:var(--graphite-900); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
+  .chip-full{ background:var(--iron-700); color:var(--iron-500); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
+  .box-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
+  .box-stat-tile{background:var(--graphite-900);border:1px solid var(--iron-600);border-radius:9px;padding:12px;text-align:left;}
+  .box-avatar{border-radius:50%;background-size:cover;background-position:center;background-color:var(--iron-700);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;color:var(--chalk-50);flex-shrink:0;}
   nav.bottom{
     position:fixed;
     bottom:0;left:0;right:0;
@@ -516,7 +523,12 @@ function defaultTmp(){
     dayDetailDate:null,
     workoutMenu:'formats',
     boxScreen:'home',
-    boxScheduleEditId:null
+    boxScheduleEditId:null,
+    boxSubTab:'home',
+    scheduleSelectedDate:null,
+    workoutsSelectedDate:null,
+    boxFreeformOpen:false,
+    boxResultFormId:null
   };
 }
 
@@ -531,7 +543,7 @@ let state = {
   timeRecords:[],
   trainingPlan:null,
   activeTab:'today',
-  box:{ loaded:false, membership:null, scheduleSlots:[], todaysWorkouts:[], pendingMemberships:[] },
+  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{} },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -3409,6 +3421,12 @@ function isBoxOwner(){
   const m = state.box.membership;
   return !!(m && m.status==='active' && m.role==='owner');
 }
+function addMinutesToTime(hhmm, minutes){
+  const parts = (hhmm||'00:00').split(':').map(Number);
+  const total = parts[0]*60 + parts[1] + (parseInt(minutes)||0);
+  const hh = Math.floor(((total%1440)+1440)%1440/60), mm = ((total%60)+60)%60;
+  return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+}
 async function loadBoxData(){
   if(!pb.authStore.isValid) return;
   const userId = pb.authStore.record.id;
@@ -3421,19 +3439,18 @@ async function loadBoxData(){
     state.box.membership = mine;
     if(mine && mine.status==='active'){
       const boxId = mine.box;
-      const [slots, workouts] = await Promise.all([
-        pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
-        pb.collection('box_workouts').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:todayStr()}), sort:'created'})
+      const [slots] = await Promise.all([
+        pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'})
       ]);
       state.box.scheduleSlots = slots;
-      state.box.todaysWorkouts = workouts;
       state.box.pendingMemberships = mine.role==='owner'
         ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
         : [];
+      await loadMyBookings(boxId);
     } else {
       state.box.scheduleSlots = [];
-      state.box.todaysWorkouts = [];
       state.box.pendingMemberships = [];
+      state.box.myBookings = [];
     }
   }catch(e){
     console.error('Box-Daten konnten nicht geladen werden', e);
@@ -3445,6 +3462,201 @@ function setBoxScreen(screen){
   state.tmp.boxScreen = screen;
   state.tmp.boxScheduleEditId = null;
   render();
+}
+function setBoxSubTab(tab){
+  state.tmp.boxSubTab = tab;
+  render();
+  if(tab==='schedule'){
+    selectScheduleDate(state.tmp.scheduleSelectedDate || todayStr());
+  } else if(tab==='workouts'){
+    selectWorkoutsDate(state.tmp.workoutsSelectedDate || todayStr());
+  }
+}
+/* ---- Profilbild ---- */
+function boxAvatarUrl(record, size){
+  if(!record || !record.avatar) return null;
+  try{
+    if(pb.files && typeof pb.files.getURL==='function') return pb.files.getURL(record, record.avatar, size?{thumb:size}:undefined);
+    if(typeof pb.getFileUrl==='function') return pb.getFileUrl(record, record.avatar);
+  }catch(e){}
+  return null;
+}
+async function uploadAvatar(file){
+  if(!file) return;
+  const formData = new FormData();
+  formData.append('avatar', file);
+  try{
+    await pb.collection('users').update(pb.authStore.record.id, formData);
+    showToast('Profilbild aktualisiert');
+    render();
+  }catch(e){
+    showToast('Upload fehlgeschlagen');
+  }
+}
+/* ---- Buchungen / Anwesenheit ---- */
+async function loadMyBookings(boxId){
+  try{
+    state.box.myBookings = await pb.collection('bookings').getFullList({
+      filter: pb.filter('box = {:box} && user = {:user}', {box:boxId, user:pb.authStore.record.id}),
+      expand:'classInstance',
+      sort:'-created'
+    });
+  }catch(e){
+    state.box.myBookings = [];
+  }
+}
+function attendanceStats(bookings){
+  const todayD = todayStr(), startOfWeek = weekDates()[0], monthPrefix = todayD.slice(0,7), yearPrefix = todayD.slice(0,4);
+  const dates = bookings.filter(b=>b.status==='attended').map(b=>b.expand?.classInstance?.date).filter(Boolean);
+  return {
+    week: dates.filter(d=>d>=startOfWeek && d<=todayD).length,
+    month: dates.filter(d=>d.startsWith(monthPrefix)).length,
+    year: dates.filter(d=>d.startsWith(yearPrefix)).length,
+    allTime: dates.length
+  };
+}
+function getNextUpcomingBooking(bookings){
+  const todayD = todayStr();
+  const upcoming = bookings.filter(b=>(b.status==='reserved'||b.status==='attended') && b.expand?.classInstance?.date>=todayD);
+  upcoming.sort((a,b)=>(a.expand.classInstance.date+a.expand.classInstance.startTime).localeCompare(b.expand.classInstance.date+b.expand.classInstance.startTime));
+  return upcoming.length ? {booking:upcoming[0], instance:upcoming[0].expand.classInstance} : null;
+}
+async function ensureClassInstancesForDate(boxId, dateStr){
+  const key = boxId+'|'+dateStr;
+  state.tmp.scheduleEnsuredDates = state.tmp.scheduleEnsuredDates || new Set();
+  if(state.tmp.scheduleEnsuredDates.has(key)) return;
+  try{
+    const existing = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr})});
+    if(existing.length===0){
+      const weekday = new Date(dateStr+'T00:00:00').getDay();
+      const slots = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
+      await Promise.all(slots.map(s=>pb.collection('class_instances').create({
+        box:boxId, scheduleSlot:s.id, date:dateStr, startTime:s.startTime, label:s.label, coachName:s.coachName||'', capacity:s.capacity
+      }, {requestKey:null})));
+    }
+    state.tmp.scheduleEnsuredDates.add(key);
+  }catch(e){
+    console.error('Termine konnten nicht erzeugt werden', e);
+  }
+}
+async function loadClassInstancesForDate(boxId, dateStr){
+  try{
+    const instances = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), sort:'startTime'});
+    const bookings = instances.length
+      ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || ')})
+      : [];
+    state.box.scheduleDate = dateStr;
+    state.box.classInstances = instances;
+    state.box.classBookings = bookings;
+  }catch(e){
+    state.box.scheduleDate = dateStr;
+    state.box.classInstances = [];
+    state.box.classBookings = [];
+  }
+  render();
+}
+async function selectScheduleDate(d){
+  state.tmp.scheduleSelectedDate = d;
+  render();
+  const boxId = state.box.membership.box;
+  await ensureClassInstancesForDate(boxId, d);
+  await loadClassInstancesForDate(boxId, d);
+}
+function classInstanceStatus(instance){
+  const myId = pb.authStore.record.id;
+  const mine = state.box.classBookings.find(b=>b.classInstance===instance.id && b.user===myId) || null;
+  const activeCount = state.box.classBookings.filter(b=>b.classInstance===instance.id && (b.status==='reserved'||b.status==='attended')).length;
+  const spotsLeft = instance.capacity - activeCount;
+  let pill;
+  if(mine && (mine.status==='reserved'||mine.status==='attended')) pill='RESERVIERT';
+  else if(mine && mine.status==='waitlist') pill='WARTELISTE';
+  else pill = spotsLeft>0 ? 'VERFÜGBAR' : 'AUSGEBUCHT';
+  return {pill, mine, spotsLeft};
+}
+async function toggleBooking(instanceId){
+  const instance = state.box.classInstances.find(i=>i.id===instanceId);
+  if(!instance) return;
+  const st = classInstanceStatus(instance);
+  try{
+    if(st.mine && (st.mine.status==='reserved'||st.mine.status==='waitlist')){
+      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
+      showToast('Buchung storniert');
+    } else if(st.mine){
+      await pb.collection('bookings').update(st.mine.id, {status: st.spotsLeft>0?'reserved':'waitlist'});
+      showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
+    } else {
+      await pb.collection('bookings').create({classInstance:instanceId, user:pb.authStore.record.id, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist'});
+      showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
+    }
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+    await loadMyBookings(state.box.membership.box);
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
+  }
+}
+function canCheckIn(bookingRow, instance){
+  return bookingRow.status==='reserved' && instance.date<=todayStr();
+}
+async function checkIn(bookingId){
+  try{
+    await pb.collection('bookings').update(bookingId, {status:'attended'});
+    showToast('Eingecheckt ✅');
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+    await loadMyBookings(state.box.membership.box);
+  }catch(e){
+    showToast('Check-in fehlgeschlagen');
+  }
+}
+/* ---- Box-Workouts (Ergebnisse) ---- */
+async function selectWorkoutsDate(d){
+  state.tmp.workoutsSelectedDate = d;
+  render();
+  await loadWorkoutsForDate(state.box.membership.box, d);
+}
+async function loadWorkoutsForDate(boxId, dateStr){
+  try{
+    const workouts = await pb.collection('box_workouts').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), sort:'created'});
+    const resultsByWorkout = {};
+    await Promise.all(workouts.map(async w=>{
+      resultsByWorkout[w.id] = await pb.collection('box_workout_results').getFullList({filter: pb.filter('boxWorkout = {:w}', {w:w.id}), sort:'-created', requestKey:null});
+    }));
+    state.box.tabWorkoutsDate = dateStr;
+    state.box.tabWorkouts = workouts;
+    state.box.workoutResults = resultsByWorkout;
+  }catch(e){
+    state.box.tabWorkoutsDate = dateStr;
+    state.box.tabWorkouts = [];
+    state.box.workoutResults = {};
+  }
+  render();
+}
+async function publishWorkoutResult(workoutId){
+  const resultText = (document.getElementById('resultText_'+workoutId)?.value||'').trim();
+  const scaling = document.getElementById('resultScaling_'+workoutId)?.value || '';
+  if(!resultText){ showToast('Bitte ein Ergebnis eingeben'); return; }
+  try{
+    await pb.collection('box_workout_results').create({ boxWorkout:workoutId, user:pb.authStore.record.id, userEmail:pb.authStore.record.email, resultText, scaling: scaling||undefined });
+    state.tmp.boxResultFormId = null;
+    showToast('Ergebnis gespeichert');
+    state.box.workoutResults[workoutId] = await pb.collection('box_workout_results').getFullList({filter: pb.filter('boxWorkout = {:w}', {w:workoutId}), sort:'-created'});
+    render();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+async function publishFreeformBoxWorkout(date){
+  if(!isBoxOwner()) return;
+  const title = (document.getElementById('freeformTitle')?.value||'').trim();
+  const body = (document.getElementById('freeformBody')?.value||'').trim();
+  if(!title || !body){ showToast('Bitte Titel und Beschreibung eingeben'); return; }
+  try{
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id });
+    state.tmp.boxFreeformOpen = false;
+    showToast('An Box veröffentlicht 📣');
+    await loadWorkoutsForDate(state.box.membership.box, date);
+  }catch(e){
+    showToast('Veröffentlichen fehlgeschlagen');
+  }
 }
 async function joinBoxByCode(){
   const code = (document.getElementById('boxJoinCode')?.value || '').trim();
@@ -3484,13 +3696,15 @@ async function saveScheduleSlot(id){
   const startTime = document.getElementById('slotStartTime').value.trim();
   const label = document.getElementById('slotLabel').value.trim();
   const coachName = document.getElementById('slotCoachName').value.trim();
+  const durationMin = parseInt(document.getElementById('slotDuration').value) || 60;
+  const capacity = parseInt(document.getElementById('slotCapacity').value) || 12;
   if(!startTime || !label){ showToast('Bitte Uhrzeit und Bezeichnung angeben'); return; }
   const boxId = state.box.membership.box;
   try{
     if(id){
-      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName});
+      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity});
     } else {
-      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName});
+      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity});
     }
     state.tmp.boxScheduleEditId = null;
     showToast('Kursplan gespeichert');
@@ -3533,14 +3747,14 @@ async function publishBoxWorkout(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, publishedBy: pb.authStore.record.id });
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id });
     showToast('An Box veröffentlicht 📣');
   }catch(e){
     showToast('Veröffentlichen fehlgeschlagen');
   }
 }
 function importBoxWorkout(id){
-  const w = state.box.todaysWorkouts.find(x=>x.id===id);
+  const w = state.box.tabWorkouts.find(x=>x.id===id);
   if(!w){ showToast('Workout nicht gefunden'); return; }
   state.tmp.wodFormat = w.format;
   state.tmp.wodTemplate = null; state.tmp.wodMoves = null; state.tmp.wodPhase = 'template';
@@ -3581,29 +3795,6 @@ function renderBoxJoinOrCreate(){
     </div>
   `;
 }
-function renderBoxSchedule(slots){
-  if(!slots.length) return `<div class="note">Noch kein Kursplan hinterlegt.</div>`;
-  const byDay = {};
-  slots.forEach(s=>{ (byDay[s.weekday] = byDay[s.weekday]||[]).push(s); });
-  const order = [1,2,3,4,5,6,0];
-  return order.filter(d=>byDay[d]).map(d=>`
-    <div style="margin-bottom:10px;">
-      <div class="stat-label">${WEEKDAY_NAMES[d]}</div>
-      ${byDay[d].sort((a,b)=>a.startTime.localeCompare(b.startTime)).map(s=>`
-        <div class="history-item"><span class="date">${escapeHtml(s.startTime)}</span><span class="val">${escapeHtml(s.label)}${s.coachName?' · '+escapeHtml(s.coachName):''}</span></div>
-      `).join('')}
-    </div>
-  `).join('');
-}
-function renderBoxTodaysWorkouts(workouts){
-  if(!workouts.length) return `<div class="note">Heute wurde noch kein Workout veröffentlicht.</div>`;
-  return workouts.map(w=>`
-    <div class="wod-card">
-      <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${WOD_FORMAT_LABELS[w.format]||w.format}</span></div>
-      <button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>
-    </div>
-  `).join('');
-}
 function renderScheduleSlotForm(s, editId){
   return `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
@@ -3618,6 +3809,10 @@ function renderScheduleSlotForm(s, editId){
       <div class="field"><label>Bezeichnung</label><input type="text" id="slotLabel" value="${escapeHtml(s.label||'')}" placeholder="CrossFit"></div>
       <div class="field"><label>Coach (optional)</label><input type="text" id="slotCoachName" value="${escapeHtml(s.coachName||'')}"></div>
       <div class="row">
+        <div class="field"><label>Dauer (Min.)</label><input type="number" step="1" id="slotDuration" value="${s.durationMin||60}"></div>
+        <div class="field"><label>Kapazität</label><input type="number" step="1" id="slotCapacity" value="${s.capacity||12}"></div>
+      </div>
+      <div class="row">
         <button class="btn btn-ghost" onclick="state.tmp.boxScheduleEditId=null; render();">Abbrechen</button>
         <button class="btn btn-primary" onclick="saveScheduleSlot('${editId==='new'?'':editId}')">Speichern</button>
       </div>
@@ -3628,7 +3823,7 @@ function renderBoxManage(box){
   const pending = state.box.pendingMemberships;
   const editId = state.tmp.boxScheduleEditId;
   const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-  const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:''} : editing;
+  const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12} : editing;
   return `
     <div class="card">
       <h2 class="small" style="cursor:pointer;" onclick="setBoxScreen('home')">← Zurück</h2>
@@ -3664,7 +3859,7 @@ function renderBoxManage(box){
     </div>
     <div class="card">
       <h2 class="small">Workout veröffentlichen</h2>
-      <div class="note">Wechsle zum "Workout"-Tab, erstelle dort ein Workout wie gewohnt und nutze den Button "📣 An Box veröffentlichen".</div>
+      <div class="note">Wechsle zum "Workout"-Tab, erstelle dort ein Workout wie gewohnt und nutze den Button "📣 An Box veröffentlichen", oder veröffentliche ein Freitext-WOD direkt im Workouts-Unterreiter.</div>
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setTab('workout')">Zum Workout-Tab</button>
     </div>
   `;
@@ -3675,6 +3870,152 @@ function renderRoleBadge(){
   return m.role==='owner'
     ? `<span class="chip chip-owner">Coach</span>`
     : `<span class="chip">Mitglied</span>`;
+}
+function renderWeekdayStrip(selected, onSelectFnName){
+  return weekDates().map(d=>{
+    const isSel = d===selected;
+    return `<div style="text-align:center;flex:1;cursor:pointer;" onclick="${onSelectFnName}('${d}')">
+      <div class="stat-label">${WEEKDAY_NAMES[new Date(d+'T00:00:00').getDay()]}</div>
+      <div style="width:34px;height:34px;margin:4px auto 0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:600;${isSel?'background:var(--chalk-yellow);color:var(--graphite-900);':'border:1px solid var(--iron-700);color:var(--iron-500);'}">${d.slice(8,10)}</div>
+    </div>`;
+  }).join('');
+}
+function renderBoxHome(box){
+  const bookings = state.box.myBookings;
+  const stats = attendanceStats(bookings);
+  const goal = box?.checkinGoal || 8;
+  const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
+  const next = getNextUpcomingBooking(bookings);
+  const me = pb.authStore.record;
+  const avatarUrl = boxAvatarUrl(me, '100x100');
+  const initials = (me?.email||'?').slice(0,2).toUpperCase();
+  return `
+    <div class="card">
+      <div class="row" style="align-items:center;gap:12px;">
+        <div class="box-avatar" style="width:56px;height:56px;font-size:18px;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
+        <div style="flex:1;">
+          <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(me?.email||'')}</div>
+          ${renderRoleBadge()}
+        </div>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="setTab('profile')">⚙️</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>${escapeHtml(box?.name || 'Box')}</h2>
+      ${isBoxOwner() ? `<button class="btn btn-ghost" onclick="setBoxScreen('manage')">⚙️ Box verwalten</button>` : ''}
+    </div>
+    <div class="card">
+      <h2 class="small">Nächster Termin</h2>
+      ${next ? `
+        <div class="wod-card">
+          <div class="wname">${escapeHtml(next.instance.label)} <span class="wdate">${fmtDate(next.instance.date)} · ${escapeHtml(next.instance.startTime)}</span></div>
+          <span class="chip chip-reserved" style="margin-top:6px;display:inline-block;">${next.booking.status==='attended'?'EINGECHECKT':'RESERVIERT'}</span>
+        </div>
+      ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Check-in Champions</h2>
+      <div class="note">${stats.month} / ${goal} diesen Monat</div>
+      <div style="height:8px;border-radius:4px;background:var(--iron-700);margin-top:6px;overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);border-radius:4px;"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 class="small">Anwesenheit</h2>
+      <div class="box-stat-grid">
+        <div class="box-stat-tile"><div class="stat-num">${stats.week}</div><div class="stat-label">Woche</div></div>
+        <div class="box-stat-tile"><div class="stat-num">${stats.month}</div><div class="stat-label">Monat</div></div>
+        <div class="box-stat-tile"><div class="stat-num">${stats.year}</div><div class="stat-label">Jahr</div></div>
+        <div class="box-stat-tile"><div class="stat-num">${stats.allTime}</div><div class="stat-label">Gesamt</div></div>
+      </div>
+    </div>
+  `;
+}
+function renderBoxScheduleTab(){
+  const selected = state.tmp.scheduleSelectedDate || todayStr();
+  const strip = renderWeekdayStrip(selected, 'selectScheduleDate');
+  const loaded = state.box.scheduleDate===selected;
+  const instances = loaded ? state.box.classInstances : [];
+  const body = !loaded ? `<div class="note">Lädt …</div>`
+    : (!instances.length ? `<div class="note">Keine Kurse an diesem Tag.</div>` : instances.map(inst=>{
+        const st = classInstanceStatus(inst);
+        const slot = state.box.scheduleSlots.find(s=>s.id===inst.scheduleSlot);
+        const endTime = addMinutesToTime(inst.startTime, slot?.durationMin || 60);
+        const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
+        const showCheckIn = st.mine && canCheckIn(st.mine, inst);
+        const actionBtn = showCheckIn
+          ? `<button class="btn-sm btn-primary" style="width:auto;" onclick="checkIn('${st.mine.id}')">Einchecken</button>`
+          : `<button class="btn-sm btn-ghost" style="width:auto;" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':'Buchen'}</button>`;
+        return `
+          <div class="history-item" style="align-items:center;flex-wrap:wrap;gap:6px;">
+            <div>
+              <div class="val">${escapeHtml(inst.startTime)}–${endTime} · ${escapeHtml(inst.label)}</div>
+              <div class="date">${inst.coachName?escapeHtml(inst.coachName)+' · ':''}${st.pill==='VERFÜGBAR'?st.spotsLeft+' Plätze frei':st.pill}</div>
+            </div>
+            <span class="chip ${pillClass}">${st.pill}</span>
+            ${actionBtn}
+          </div>`;
+      }).join(''));
+  return `<div class="card"><div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>`;
+}
+function renderBoxWorkoutCard(w){
+  const results = state.box.workoutResults[w.id] || [];
+  const bodyHtml = w.mode==='freeform'
+    ? `<div class="note" style="white-space:pre-wrap;">${escapeHtml(w.bodyText||'')}</div>`
+    : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div><button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>`;
+  const resultsFormOpen = state.tmp.boxResultFormId===w.id;
+  return `
+    <div class="wod-card">
+      <div class="wname">${escapeHtml(w.name)||'Workout'}</div>
+      ${bodyHtml}
+      <div class="row" style="margin-top:10px;align-items:center;">
+        <span class="note" style="margin:0;">Ergebnisse (${results.length})</span>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxResultFormId='${resultsFormOpen?'':w.id}'; render();">${resultsFormOpen?'Schließen':'Ergebnis eintragen'}</button>
+      </div>
+      ${resultsFormOpen ? `
+        <div style="margin-top:8px;">
+          <div class="field"><label>Ergebnis</label><input type="text" id="resultText_${w.id}" placeholder="z.B. 18:42"></div>
+          <div class="field"><label>Skalierung</label>
+            <select id="resultScaling_${w.id}">
+              <option value="">—</option>
+              <option value="Rx">Rx</option>
+              <option value="Intermediate">Intermediate</option>
+              <option value="Beginner">Beginner</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" style="width:100%;" onclick="publishWorkoutResult('${w.id}')">Speichern</button>
+        </div>
+      ` : ''}
+      ${results.length ? `
+        <div style="margin-top:8px;">
+          ${results.map(r=>`<div class="history-item"><span class="date">${escapeHtml(r.userEmail)}</span><span class="val">${escapeHtml(r.resultText)}${r.scaling?' · '+escapeHtml(r.scaling):''}</span></div>`).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+function renderBoxWorkoutsTab(){
+  const selected = state.tmp.workoutsSelectedDate || todayStr();
+  const strip = renderWeekdayStrip(selected, 'selectWorkoutsDate');
+  const loaded = state.box.tabWorkoutsDate===selected;
+  const workouts = loaded ? state.box.tabWorkouts : [];
+  const body = !loaded ? `<div class="note">Lädt …</div>`
+    : (!workouts.length ? `<div class="note">Kein Workout an diesem Tag.</div>` : workouts.map(renderBoxWorkoutCard).join(''));
+  const ownerForm = isBoxOwner() ? `
+    <div class="card">
+      ${state.tmp.boxFreeformOpen ? `
+        <h2 class="small">Freitext-WOD veröffentlichen</h2>
+        <div class="field"><label>Titel</label><input type="text" id="freeformTitle" placeholder='z.B. "Mirror, Mirror"'></div>
+        <div class="field"><label>Beschreibung</label><textarea id="freeformBody" rows="8" placeholder="***For Time:*** ..."></textarea></div>
+        <div class="row">
+          <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=false; render();">Abbrechen</button>
+          <button class="btn btn-primary" onclick="publishFreeformBoxWorkout('${selected}')">Veröffentlichen</button>
+        </div>
+      ` : `<button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=true; render();">+ Freitext-WOD veröffentlichen</button>`}
+    </div>
+  ` : '';
+  return `<div class="card"><div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
 }
 function renderBox(){
   const b = state.box;
@@ -3694,14 +4035,17 @@ function renderBox(){
   if(isBoxOwner() && state.tmp.boxScreen==='manage'){
     return renderBoxManage(box);
   }
-  return `
-    <div class="card">
-      <h2>${escapeHtml(box?.name || 'Box')} ${renderRoleBadge()}</h2>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxScreen('manage')">⚙️ Box verwalten</button>` : ''}
+  const subNav = `
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('home')">Home</button>
+      <button class="btn ${state.tmp.boxSubTab==='schedule'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('schedule')">Kursplan</button>
+      <button class="btn ${state.tmp.boxSubTab==='workouts'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('workouts')">Workouts</button>
     </div>
-    <div class="card"><h2 class="small">Wochenplan</h2>${renderBoxSchedule(b.scheduleSlots)}</div>
-    <div class="card"><h2 class="small">Heutiges Workout</h2>${renderBoxTodaysWorkouts(b.todaysWorkouts)}</div>
   `;
+  const body = state.tmp.boxSubTab==='schedule' ? renderBoxScheduleTab()
+    : state.tmp.boxSubTab==='workouts' ? renderBoxWorkoutsTab()
+    : renderBoxHome(box);
+  return subNav + body;
 }
 function toggleHistoryCollapsed(){
   state.tmp.historyCollapsed = !state.tmp.historyCollapsed;
@@ -6450,6 +6794,11 @@ function renderProfileSettings(){
     </div>
     <div class="card">
       <h2 class="small">Konto</h2>
+      ${(()=>{ const url=boxAvatarUrl(pb.authStore.record,'100x100'); const initials=(pb.authStore.record?.email||'?').slice(0,2).toUpperCase();
+        return `<div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
+          <div class="box-avatar" style="width:56px;height:56px;font-size:18px;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
+          <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="uploadAvatar(this.files[0])"></div>
+        </div>`; })()}
       <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')} ${renderRoleBadge()}</div>
       ${pb.authStore.record && !pb.authStore.record.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
@@ -6549,7 +6898,7 @@ async function saveProfile(){
 async function resetAll(){
   stopTicking();
   await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', tmp: defaultTmp()};
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{} }, tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
