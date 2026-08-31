@@ -3443,7 +3443,7 @@ async function joinBoxByCode(){
   if(!code){ showToast('Bitte einen Code eingeben'); return; }
   try{
     const box = await pb.collection('boxes').getFirstListItem(pb.filter('inviteCode = {:code}', {code}));
-    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending' });
+    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending', userEmail: pb.authStore.record.email });
     showToast('Anfrage gesendet');
     await loadBoxData();
   }catch(e){
@@ -3631,7 +3631,7 @@ function renderBoxManage(box){
         <h2 class="small">Beitrittsanfragen</h2>
         ${pending.map(m=>`
           <div class="history-item">
-            <span class="val">${escapeHtml(m.expand?.user?.email||'Nutzer')}</span>
+            <span class="val">${escapeHtml(m.userEmail||m.expand?.user?.email||'Nutzer')}</span>
             <span>
               <button class="btn-sm btn-primary" style="width:auto;" onclick="approveMembership('${m.id}',true)">Annehmen</button>
               <button class="btn-sm btn-ghost" style="width:auto;" onclick="approveMembership('${m.id}',false)">Ablehnen</button>
