@@ -3331,20 +3331,18 @@ async function saveWodDraft(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
 
-  // Nur dieselbe Entwurfs-Zeile aktualisieren, wenn die Session bereits an einen Entwurf
-  // gebunden ist UND das Datum seitdem unverändert ist — ändert der Nutzer das Datum
-  // (z.B. um einen zweiten Entwurf für einen anderen/denselben Tag anzulegen), wird
-  // bewusst ein neuer Eintrag erzeugt, statt den bestehenden zu überschreiben. So sind
-  // mehrere Entwürfe pro Tag möglich (z.B. zwei Workouts am selben Tag).
+  // Nur aktualisieren, wenn diese Session zuvor explizit über "Fortsetzen" an einen
+  // bestehenden Entwurf gebunden wurde (loadedDraftId). Ein frisch erstellter Entwurf
+  // wird NICHT automatisch verknüpft — sonst würde ein zweites "Entwurf speichern" in
+  // derselben Sitzung (z.B. ein zweites Workout für denselben Tag) den ersten Entwurf
+  // überschreiben statt einen eigenen Eintrag anzulegen. Ein Entwurf verschwindet daher
+  // ausschließlich durch explizites Löschen ("✕") oder durch Fertigstellen des Workouts.
   const linked = state.tmp.loadedDraftId ? state.drafts.find(d=>d.id===state.tmp.loadedDraftId) : null;
-  let target = (linked && linked.date===date) ? linked : null;
-  if(target){
-    target.format = format; target.name = name; target.payload = payload;
+  if(linked){
+    linked.format = format; linked.date = date; linked.name = name; linked.payload = payload;
   } else {
-    target = { id: uid(), format, date, name, createdAt: Date.now(), payload };
-    state.drafts.push(target);
+    state.drafts.push({ id: uid(), format, date, name, createdAt: Date.now(), payload });
   }
-  state.tmp.loadedDraftId = target.id;
   await saveKey('drafts', state.drafts);
   showToast('Entwurf gespeichert 📝');
   render();
