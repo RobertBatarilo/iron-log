@@ -528,7 +528,8 @@ function defaultTmp(){
     scheduleSelectedDate:null,
     workoutsSelectedDate:null,
     boxFreeformOpen:false,
-    boxResultFormId:null
+    boxResultFormId:null,
+    avatarEdit:null
   };
 }
 
@@ -2289,6 +2290,12 @@ async function initApp(){
 }
 
 function bottomNavHtml(){
+  if(isBoxAdminView()){
+    return [
+      navBtn('box','Box', iconBuilding()),
+      navBtn('profile','Profil', iconUser())
+    ].join('');
+  }
   return [
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
@@ -3421,6 +3428,14 @@ function isBoxOwner(){
   const m = state.box.membership;
   return !!(m && m.status==='active' && m.role==='owner');
 }
+function isBoxAdminView(){
+  return isBoxOwner() && state.profile?.boxViewMode==='box';
+}
+function setBoxViewMode(mode){
+  state.profile.boxViewMode = mode;
+  saveKey('profile', state.profile);
+  setTab(mode==='box' ? 'box' : 'today');
+}
 function addMinutesToTime(hhmm, minutes){
   const parts = (hhmm||'00:00').split(':').map(Number);
   const total = parts[0]*60 + parts[1] + (parseInt(minutes)||0);
@@ -3456,6 +3471,7 @@ async function loadBoxData(){
     console.error('Box-Daten konnten nicht geladen werden', e);
   }
   state.box.loaded = true;
+  if(isBoxAdminView() && ['today','workout','progress'].includes(state.activeTab)) state.activeTab = 'box';
   render();
 }
 function setBoxScreen(screen){
@@ -3492,6 +3508,106 @@ async function uploadAvatar(file){
   }catch(e){
     showToast('Upload fehlgeschlagen');
   }
+}
+/* ---- Profilbild verschieben/zuschneiden vor dem Upload ---- */
+const AVATAR_EDIT_SIZE = 240;
+function handleAvatarFileSelect(fileInput){
+  const file = fileInput.files && fileInput.files[0];
+  if(!file) return;
+  if(state.tmp.avatarEdit?.imgSrc) URL.revokeObjectURL(state.tmp.avatarEdit.imgSrc);
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    state.tmp.avatarEdit = { imgSrc:url, naturalWidth:img.naturalWidth, naturalHeight:img.naturalHeight, panX:0, panY:0 };
+    render();
+  };
+  img.onerror = ()=>{
+    URL.revokeObjectURL(url);
+    showToast('Bild konnte nicht geladen werden');
+  };
+  img.src = url;
+}
+function cleanupAvatarEdit(){
+  if(state.tmp.avatarEdit?.imgSrc) URL.revokeObjectURL(state.tmp.avatarEdit.imgSrc);
+  state.tmp.avatarEdit = null;
+  render();
+}
+let _avatarDrag = null;
+function startAvatarDrag(event){
+  event.preventDefault();
+  const st = state.tmp.avatarEdit;
+  if(!st) return;
+  _avatarDrag = { startClientX:event.clientX, startClientY:event.clientY, startPanX:st.panX, startPanY:st.panY };
+  const el = event.currentTarget;
+  el.setPointerCapture(event.pointerId);
+  el.addEventListener('pointermove', onAvatarDragMove);
+  el.addEventListener('pointerup', endAvatarDrag);
+  el.addEventListener('pointercancel', endAvatarDrag);
+}
+function onAvatarDragMove(event){
+  if(!_avatarDrag) return;
+  const st = state.tmp.avatarEdit;
+  if(!st) return;
+  const coverScale = Math.max(AVATAR_EDIT_SIZE/st.naturalWidth, AVATAR_EDIT_SIZE/st.naturalHeight);
+  const dispW = st.naturalWidth*coverScale, dispH = st.naturalHeight*coverScale;
+  const maxPanX = Math.max(0,(dispW-AVATAR_EDIT_SIZE)/2), maxPanY = Math.max(0,(dispH-AVATAR_EDIT_SIZE)/2);
+  let panX = _avatarDrag.startPanX + (event.clientX-_avatarDrag.startClientX);
+  let panY = _avatarDrag.startPanY + (event.clientY-_avatarDrag.startClientY);
+  panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+  panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+  st.panX = panX; st.panY = panY;
+  const img = document.getElementById('avatarEditImg');
+  if(img) img.style.transform = `translate(-50%,-50%) translate(${panX}px,${panY}px)`;
+}
+function endAvatarDrag(event){
+  if(!_avatarDrag) return;
+  const el = event.currentTarget;
+  el.removeEventListener('pointermove', onAvatarDragMove);
+  el.removeEventListener('pointerup', endAvatarDrag);
+  el.removeEventListener('pointercancel', endAvatarDrag);
+  try{ el.releasePointerCapture(event.pointerId); }catch(e){}
+  _avatarDrag = null;
+}
+function confirmAvatarCrop(){
+  const st = state.tmp.avatarEdit;
+  if(!st) return;
+  const coverScale = Math.max(AVATAR_EDIT_SIZE/st.naturalWidth, AVATAR_EDIT_SIZE/st.naturalHeight);
+  const dispW = st.naturalWidth*coverScale, dispH = st.naturalHeight*coverScale;
+  const imgLeft = (AVATAR_EDIT_SIZE-dispW)/2 + st.panX;
+  const imgTop = (AVATAR_EDIT_SIZE-dispH)/2 + st.panY;
+  const srcX = -imgLeft/coverScale, srcY = -imgTop/coverScale;
+  const srcSize = AVATAR_EDIT_SIZE/coverScale;
+  const img = document.getElementById('avatarEditImg');
+  if(!img){ showToast('Bild nicht gefunden'); return; }
+  const OUTPUT = 400;
+  const canvas = document.createElement('canvas');
+  canvas.width = OUTPUT; canvas.height = OUTPUT;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, OUTPUT, OUTPUT);
+  canvas.toBlob(blob=>{
+    if(!blob){ showToast('Zuschneiden fehlgeschlagen'); return; }
+    const file = new File([blob], 'avatar.png', {type:'image/png'});
+    cleanupAvatarEdit();
+    uploadAvatar(file);
+  }, 'image/png', 0.92);
+}
+function renderAvatarEditor(){
+  const st = state.tmp.avatarEdit;
+  if(!st) return '';
+  const coverScale = Math.max(AVATAR_EDIT_SIZE/st.naturalWidth, AVATAR_EDIT_SIZE/st.naturalHeight);
+  const dispW = st.naturalWidth*coverScale, dispH = st.naturalHeight*coverScale;
+  return `
+    <div style="text-align:center;margin:10px 0;">
+      <div id="avatarEditBox" style="position:relative;width:${AVATAR_EDIT_SIZE}px;height:${AVATAR_EDIT_SIZE}px;margin:0 auto;overflow:hidden;border-radius:50%;touch-action:none;background:var(--iron-700);cursor:grab;" onpointerdown="startAvatarDrag(event)">
+        <img id="avatarEditImg" src="${st.imgSrc}" draggable="false" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) translate(${st.panX}px,${st.panY}px);width:${dispW}px;height:${dispH}px;max-width:none;pointer-events:none;">
+      </div>
+      <div class="note" style="margin-top:8px;">Bild ziehen, um den Ausschnitt zu wählen</div>
+      <div class="row" style="margin-top:10px;max-width:${AVATAR_EDIT_SIZE}px;margin-left:auto;margin-right:auto;">
+        <button class="btn btn-ghost" onclick="cleanupAvatarEdit()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="confirmAvatarCrop()">Übernehmen</button>
+      </div>
+    </div>
+  `;
 }
 /* ---- Buchungen / Anwesenheit ---- */
 async function loadMyBookings(boxId){
@@ -3691,6 +3807,16 @@ async function approveMembership(id, approve){
     showToast('Aktion fehlgeschlagen');
   }
 }
+async function regenerateInviteCode(){
+  if(!isBoxOwner()) return;
+  try{
+    await pb.collection('boxes').update(state.box.membership.box, {inviteCode: uid()});
+    showToast('Neuer Code erzeugt');
+    await loadBoxData();
+  }catch(e){
+    showToast('Fehlgeschlagen');
+  }
+}
 async function saveScheduleSlot(id){
   const weekday = parseInt(document.getElementById('slotWeekday').value);
   const startTime = document.getElementById('slotStartTime').value.trim();
@@ -3749,6 +3875,7 @@ async function publishBoxWorkout(){
   try{
     await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id });
     showToast('An Box veröffentlicht 📣');
+    if(isBoxAdminView()) setTab('box');
   }catch(e){
     showToast('Veröffentlichen fehlgeschlagen');
   }
@@ -3827,7 +3954,12 @@ function renderBoxManage(box){
   return `
     <div class="card">
       <h2 class="small" style="cursor:pointer;" onclick="setBoxScreen('home')">← Zurück</h2>
-      <div class="note">Einladungscode: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+      <div class="note" style="margin-bottom:10px;">Einladungscode: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+      <div class="row">
+        <a class="btn btn-ghost" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent('Tritt "'+(box?.name||'')+'" in WOD Ledger bei. Einladungscode: '+(box?.inviteCode||''))}">📧 Mail</a>
+        <a class="btn btn-ghost" href="https://wa.me/?text=${encodeURIComponent('Tritt "'+(box?.name||'')+'" in WOD Ledger bei. Einladungscode: '+(box?.inviteCode||''))}" target="_blank" rel="noopener">💬 WhatsApp</a>
+        <button class="btn btn-ghost" onclick="regenerateInviteCode()">🔄 Neuer Code</button>
+      </div>
     </div>
     ${pending.length ? `
       <div class="card">
@@ -3858,9 +3990,9 @@ function renderBoxManage(box){
       ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
     </div>
     <div class="card">
-      <h2 class="small">Workout veröffentlichen</h2>
-      <div class="note">Wechsle zum "Workout"-Tab, erstelle dort ein Workout wie gewohnt und nutze den Button "📣 An Box veröffentlichen", oder veröffentliche ein Freitext-WOD direkt im Workouts-Unterreiter.</div>
-      <button class="btn btn-ghost" style="margin-top:10px;" onclick="setTab('workout')">Zum Workout-Tab</button>
+      <h2 class="small">Workouts</h2>
+      <div class="note" style="margin-bottom:10px;">Strukturiertes Workout im Builder erstellen, oder ein Freitext-WOD direkt im Workouts-Unterreiter veröffentlichen.</div>
+      <button class="btn btn-primary" onclick="setTab('workout')">+ Workout erstellen</button>
     </div>
   `;
 }
@@ -3892,7 +4024,7 @@ function renderBoxHome(box){
   return `
     <div class="card">
       <div class="row" style="align-items:center;gap:12px;">
-        <div class="box-avatar" style="width:56px;height:56px;font-size:18px;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
+        <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
         <div style="flex:1;">
           <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(me?.email||'')}</div>
           ${renderRoleBadge()}
@@ -4177,6 +4309,10 @@ function renderWorkoutHistoryEntry(w){
 }
 
 function renderWorkout(){
+  const back = isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setTab('box')">← Zurück zur Box</button>` : '';
+  return back + renderWorkoutInner();
+}
+function renderWorkoutInner(){
   if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
   if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = ''; // Verlauf ist jetzt unter Fortschritt zu finden
@@ -6786,19 +6922,24 @@ function setProfileSection(s){ state.tmp.profileSection = s; render(); }
 function renderProfileSettings(){
   const p = state.profile || {};
   const theme = p.theme || 'dark';
+  const adminView = isBoxAdminView();
+  const mode = p.boxViewMode==='box' ? 'box' : 'athlete';
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${adminView ? '' : `
     <div class="card">
       <h2 class="small">Hilfe</h2>
       <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
     </div>
+    `}
     <div class="card">
       <h2 class="small">Konto</h2>
       ${(()=>{ const url=boxAvatarUrl(pb.authStore.record,'100x100'); const initials=(pb.authStore.record?.email||'?').slice(0,2).toUpperCase();
         return `<div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
-          <div class="box-avatar" style="width:56px;height:56px;font-size:18px;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
-          <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="uploadAvatar(this.files[0])"></div>
-        </div>`; })()}
+          <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
+          <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this)"></div>
+        </div>
+        ${renderAvatarEditor()}`; })()}
       <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')} ${renderRoleBadge()}</div>
       ${pb.authStore.record && !pb.authStore.record.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
@@ -6813,6 +6954,16 @@ function renderProfileSettings(){
         <button class="btn ${theme==='light'?'btn-primary':'btn-ghost'}" onclick="setTheme('light')">Hell</button>
       </div>
     </div>
+    ${isBoxOwner() ? `
+    <div class="card">
+      <h2 class="small">Ansicht</h2>
+      <div class="row">
+        <button class="btn ${mode==='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('box')">Box verwalten</button>
+        <button class="btn ${mode!=='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('athlete')">Mein Training</button>
+      </div>
+    </div>
+    ` : ''}
+    ${adminView ? '' : `
     <div class="card">
       <h2>Grunddaten</h2>
       <div class="row">
@@ -6860,6 +7011,7 @@ function renderProfileSettings(){
       <div class="note" style="margin-bottom:10px;">Wird beim Foto-Import automatisch für Gewichts-Vorgaben wie "Rx: 22,5/15kg" verwendet (in Kombination mit deinem Geschlecht unter Grunddaten). Bleibt pro Übung weiterhin überschreibbar.</div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
     </div>
+    `}
   `;
 }
 function renderProfileData(){
