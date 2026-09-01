@@ -1,0 +1,26 @@
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    volumes:
+      - pocketbase_data:/pb_data
+      - ./pb_hooks:/pb_hooks
+    networks:
+      - n8n-docker-caddy_default
+
+  push-service:
+    build: ./push-service
+    container_name: push-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - n8n-docker-caddy_default
+
+volumes:
+  pocketbase_data:
+
+networks:
+  n8n-docker-caddy_default:
+    external: true

@@ -300,6 +300,17 @@
   .chip-available{ background:transparent; border:1px solid var(--success-green); color:var(--success-green); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
   .chip-waitlist{ background:var(--chalk-yellow); color:var(--graphite-900); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
   .chip-full{ background:var(--iron-700); color:var(--iron-500); font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-left:0; }
+  .class-card{ background:var(--graphite-800); border:1px solid var(--iron-700); border-radius:14px; padding:14px; margin-bottom:12px; cursor:pointer; }
+  .class-card--mine{ border-color:var(--success-green); background:linear-gradient(0deg, rgba(107,158,99,0.10), rgba(107,158,99,0.10)), var(--graphite-800); }
+  .class-card-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .class-time{ font-family:var(--font-mono); font-size:13px; font-weight:600; }
+  .class-title{ font-family:var(--font-display); font-size:17px; font-weight:700; margin-bottom:2px; }
+  .class-sublabel{ font-size:12px; color:var(--iron-500); margin-bottom:10px; }
+  .class-card-bottom{ display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+  .class-spots{ display:flex; align-items:center; gap:4px; }
+  .class-coach{ color:var(--iron-500); }
+  .class-card-actions{ margin-top:10px; }
+  .class-card-actions .btn-sm{ width:100%; }
   .box-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
   .box-stat-tile{background:var(--graphite-900);border:1px solid var(--iron-600);border-radius:9px;padding:12px;text-align:left;}
   .box-avatar{border-radius:50%;background-size:cover;background-position:center;background-color:var(--iron-700);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;color:var(--chalk-50);flex-shrink:0;}
@@ -422,6 +433,53 @@ async function deleteKey(key){
 
 /* ---------- Cloud-Sync (PocketBase) ---------- */
 const pb = new PocketBase('https://api.formelfuchs.at');
+const VAPID_PUBLIC_KEY = 'BCmc8m4Fy3Wpc25lQJFw9yadMVleGwvce_4LgbKkalHMYTh_vvihKsDsnOktyiGi8ysXeMazXnkbSlCF2YYntZI';
+async function registerServiceWorker(){
+  if(!('serviceWorker' in navigator)) return null;
+  try{ return await navigator.serviceWorker.register('sw.js'); }
+  catch(e){ console.error('SW-Registrierung fehlgeschlagen', e); return null; }
+}
+registerServiceWorker();
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function enablePushNotifications(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    showToast('Push-Benachrichtigungen werden auf diesem Gerät nicht unterstützt');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if(perm !== 'granted'){ showToast('Berechtigung nicht erteilt'); return; }
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const j = sub.toJSON();
+    const existing = await pb.collection('push_subscriptions').getFullList({
+      filter: pb.filter('user = {:u} && endpoint = {:e}', {u: pb.authStore.record.id, e: j.endpoint}),
+      requestKey: null
+    });
+    if(!existing.length){
+      await pb.collection('push_subscriptions').create({
+        user: pb.authStore.record.id, endpoint: j.endpoint,
+        p256dh: j.keys.p256dh, auth: j.keys.auth
+      });
+    }
+    showToast('Push-Benachrichtigungen aktiviert');
+    render();
+  }catch(e){
+    console.error(e);
+    showToast('Aktivierung fehlgeschlagen');
+  }
+}
 const SYNC_KEYS = ['profile','exercises','workouts','drafts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
 function getPendingSync(){
   try{ return JSON.parse(localStorage.getItem('ironlog:_pendingSync')||'[]'); }catch(e){ return []; }
@@ -540,7 +598,8 @@ function defaultTmp(){
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
-    wodScheduleSlot:null
+    wodScheduleSlot:null,
+    classDetailInstanceId:null
   };
 }
 
@@ -2366,7 +2425,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
 }
@@ -3544,16 +3603,18 @@ async function saveDisplayName(){
     showToast('Speichern fehlgeschlagen');
   }
 }
-async function renameBox(){
+async function saveBoxSettings(){
   if(!isBoxOwner()) return;
   const name = (document.getElementById('boxNameInput')?.value || '').trim();
+  const cutoffRaw = document.getElementById('boxCutoffHoursInput')?.value;
+  const cancellationCutoffHours = cutoffRaw==='' || cutoffRaw==null ? null : Number(cutoffRaw);
   if(!name){ showToast('Bitte einen Namen eingeben'); return; }
   try{
-    await pb.collection('boxes').update(state.box.membership.box, {name});
-    showToast('Box umbenannt');
+    await pb.collection('boxes').update(state.box.membership.box, {name, cancellationCutoffHours});
+    showToast('Box-Einstellungen gespeichert');
     await loadBoxData();
   }catch(e){
-    showToast('Umbenennen fehlgeschlagen');
+    showToast('Speichern fehlgeschlagen');
   }
 }
 /* ---- Profilbild verschieben/zuschneiden vor dem Upload ---- */
@@ -3689,13 +3750,28 @@ async function ensureClassInstancesForDate(boxId, dateStr){
   state.tmp.scheduleEnsuredDates = state.tmp.scheduleEnsuredDates || new Set();
   if(state.tmp.scheduleEnsuredDates.has(key)) return;
   try{
-    const existing = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr})});
-    if(existing.length===0){
-      const weekday = new Date(dateStr+'T00:00:00').getDay();
-      const slots = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
-      await Promise.all(slots.map(s=>pb.collection('class_instances').create({
+    const weekday = new Date(dateStr+'T00:00:00').getDay();
+    const slotsForWeekday = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
+    const existing = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), requestKey:null});
+    const existingBySlot = new Map(existing.map(ci=>[ci.scheduleSlot, ci]));
+
+    const toCreate = slotsForWeekday.filter(s=>!existingBySlot.has(s.id));
+    if(toCreate.length){
+      await Promise.all(toCreate.map(s=>pb.collection('class_instances').create({
         box:boxId, scheduleSlot:s.id, date:dateStr, startTime:s.startTime, label:s.label, coachName:s.coachName||'', capacity:s.capacity
       }, {requestKey:null})));
+    }
+
+    const activeSlotIds = new Set(slotsForWeekday.map(s=>s.id));
+    const orphans = existing.filter(ci=>!activeSlotIds.has(ci.scheduleSlot));
+    if(orphans.length){
+      const bookingCounts = await Promise.all(orphans.map(ci=>
+        pb.collection('bookings').getFullList({filter: pb.filter('classInstance = {:id} && status != "cancelled"', {id:ci.id}), requestKey:null})
+      ));
+      await Promise.all(orphans.map((ci,idx)=> bookingCounts[idx].length===0
+        ? pb.collection('class_instances').delete(ci.id).catch(e=>console.error('Orphan-Termin konnte nicht gelöscht werden', e))
+        : Promise.resolve()
+      ));
     }
     state.tmp.scheduleEnsuredDates.add(key);
   }catch(e){
@@ -3705,9 +3781,26 @@ async function ensureClassInstancesForDate(boxId, dateStr){
 async function loadClassInstancesForDate(boxId, dateStr){
   try{
     const instances = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), sort:'startTime'});
-    const bookings = instances.length
+    let bookings = instances.length
       ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || ')})
       : [];
+    const myId = pb.authStore.record.id;
+    const promotions = [];
+    for(const inst of instances){
+      const instBookings = bookings.filter(b=>b.classInstance===inst.id);
+      const mine = instBookings.find(b=>b.user===myId);
+      if(!mine || mine.status!=='waitlist') continue;
+      const activeCount = instBookings.filter(b=>b.status==='reserved'||b.status==='attended').length;
+      if(activeCount >= inst.capacity) continue;
+      const waitlist = instBookings.filter(b=>b.status==='waitlist').sort((a,b)=>(a.created||'').localeCompare(b.created||''));
+      if(waitlist[0]?.id === mine.id) promotions.push(mine.id);
+    }
+    if(promotions.length){
+      await Promise.all(promotions.map(id=>pb.collection('bookings').update(id, {status:'reserved'}).catch(e=>console.error('Selbst-Nachrücken fehlgeschlagen', e))));
+      bookings = instances.length
+        ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || ')})
+        : [];
+    }
     state.box.scheduleDate = dateStr;
     state.box.classInstances = instances;
     state.box.classBookings = bookings;
@@ -3737,21 +3830,56 @@ function classInstanceStatus(instance){
   if(mine && (mine.status==='reserved'||mine.status==='attended')) pill='RESERVIERT';
   else if(mine && mine.status==='waitlist') pill='WARTELISTE';
   else pill = spotsLeft>0 ? 'VERFÜGBAR' : 'AUSGEBUCHT';
-  return {pill, mine, spotsLeft};
+  return {pill, mine, spotsLeft, activeCount};
+}
+function cancellationDeadline(instance){
+  const box = state.box.membership?.expand?.box;
+  const cutoffHours = (box && box.cancellationCutoffHours != null && box.cancellationCutoffHours !== '') ? Number(box.cancellationCutoffHours) : 3;
+  const start = new Date(instance.date+'T'+(instance.startTime||'00:00')+':00');
+  return new Date(start.getTime() - cutoffHours*3600*1000);
+}
+function canCancelBooking(instance){
+  return new Date() < cancellationDeadline(instance);
+}
+function fmtTime(d){
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+async function promoteNextWaitlisted(instanceId){
+  try{
+    const waitlisted = await pb.collection('bookings').getFullList({
+      filter: pb.filter('classInstance = {:id} && status = "waitlist"', {id: instanceId}),
+      sort: 'created', requestKey: null
+    });
+    if(waitlisted.length){
+      await pb.collection('bookings').update(waitlisted[0].id, {status:'reserved'});
+      showToast('Warteliste nachgerückt: '+(waitlisted[0].userName||'Mitglied'));
+    }
+  }catch(e){
+    console.error('Warteliste-Promotion fehlgeschlagen', e);
+  }
 }
 async function toggleBooking(instanceId){
   const instance = state.box.classInstances.find(i=>i.id===instanceId);
   if(!instance) return;
   const st = classInstanceStatus(instance);
   try{
-    if(st.mine && (st.mine.status==='reserved'||st.mine.status==='waitlist')){
+    if(st.mine && st.mine.status==='reserved'){
+      if(!canCancelBooking(instance)){
+        showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(instance))+' Uhr)');
+        return;
+      }
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Buchung storniert');
+      await promoteNextWaitlisted(instanceId);
+    } else if(st.mine && st.mine.status==='waitlist'){
+      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
+      showToast('Von Warteliste entfernt');
     } else if(st.mine){
       await pb.collection('bookings').update(st.mine.id, {status: st.spotsLeft>0?'reserved':'waitlist'});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     } else {
-      await pb.collection('bookings').create({classInstance:instanceId, user:pb.authStore.record.id, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist'});
+      const myName = pb.authStore.record.name || pb.authStore.record.email || '';
+      await pb.collection('bookings').create({classInstance:instanceId, user:pb.authStore.record.id, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist', userName: myName});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     }
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
@@ -3878,17 +4006,23 @@ async function saveScheduleSlot(id){
   const coachName = document.getElementById('slotCoachName').value.trim();
   const durationMin = parseInt(document.getElementById('slotDuration').value) || 60;
   const capacity = parseInt(document.getElementById('slotCapacity').value) || 12;
+  const minRaw = (document.getElementById('slotMinParticipants')?.value || '').trim();
+  const minParticipants = minRaw==='' ? null : parseInt(minRaw);
   if(!startTime || !label){ showToast('Bitte Uhrzeit und Bezeichnung angeben'); return; }
   const boxId = state.box.membership.box;
   try{
     if(id){
-      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity});
+      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
     } else {
-      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity});
+      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
     }
     state.tmp.boxScheduleEditId = null;
+    state.tmp.scheduleEnsuredDates = new Set();
     showToast('Kursplan gespeichert');
     await loadBoxData();
+    if(state.tmp.boxSubTab==='schedule' && state.tmp.scheduleSelectedDate){
+      await selectScheduleDate(state.tmp.scheduleSelectedDate);
+    }
   }catch(e){
     showToast('Speichern fehlgeschlagen');
   }
@@ -3896,8 +4030,12 @@ async function saveScheduleSlot(id){
 async function deleteScheduleSlot(id){
   try{
     await pb.collection('schedule_slots').delete(id);
+    state.tmp.scheduleEnsuredDates = new Set();
     showToast('Termin gelöscht');
     await loadBoxData();
+    if(state.tmp.boxSubTab==='schedule' && state.tmp.scheduleSelectedDate){
+      await selectScheduleDate(state.tmp.scheduleSelectedDate);
+    }
   }catch(e){
     showToast('Löschen fehlgeschlagen');
   }
@@ -3996,6 +4134,7 @@ function renderScheduleSlotForm(s, editId){
         <div class="field"><label>Dauer (Min.)</label><input type="number" step="1" id="slotDuration" value="${s.durationMin||60}"></div>
         <div class="field"><label>Kapazität</label><input type="number" step="1" id="slotCapacity" value="${s.capacity||12}"></div>
       </div>
+      <div class="field"><label>Mindestteilnehmer (optional)</label><input type="number" step="1" min="0" id="slotMinParticipants" value="${s.minParticipants ?? ''}"></div>
       <div class="row">
         <button class="btn btn-ghost" onclick="state.tmp.boxScheduleEditId=null; render();">Abbrechen</button>
         <button class="btn btn-primary" onclick="saveScheduleSlot('${editId==='new'?'':editId}')">Speichern</button>
@@ -4132,25 +4271,34 @@ function renderBoxScheduleTab(){
         const endTime = addMinutesToTime(inst.startTime, slot?.durationMin || 60);
         const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
         const showCheckIn = st.mine && canCheckIn(st.mine, inst);
+        const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
         const actionBtn = showCheckIn
-          ? `<button class="btn-sm btn-primary" style="width:auto;" onclick="checkIn('${st.mine.id}')">Einchecken</button>`
-          : `<button class="btn-sm btn-ghost" style="width:auto;" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':'Buchen'}</button>`;
+          ? `<button class="btn-sm btn-primary" onclick="event.stopPropagation();checkIn('${st.mine.id}')">Einchecken</button>`
+          : cancelBlocked
+            ? `<button class="btn-sm btn-ghost" style="opacity:0.5;" onclick="event.stopPropagation();showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(inst))+' Uhr)')">Stornofrist abgelaufen</button>`
+            : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Warteliste')}</button>`;
         const matched = state.box.tabWorkouts.filter(w=>w.scheduleSlot===inst.scheduleSlot && w.date===inst.date);
         const wodLabel = matched.length ? matched.map(w=>escapeHtml(w.name||'Workout')).join(' + ') : 'Kein WOD hinterlegt';
+        const minInfo = slot?.minParticipants ? ` · Mind. ${slot.minParticipants} (aktuell ${st.activeCount})` : '';
         return `
-          <div class="history-item" style="align-items:center;flex-wrap:wrap;gap:6px;">
-            <div>
-              <div class="val">${wodLabel}</div>
-              <div class="date">${escapeHtml(inst.startTime)}–${endTime} · ${escapeHtml(inst.label)}${inst.coachName?' · '+escapeHtml(inst.coachName):''} · ${st.pill==='VERFÜGBAR'?st.spotsLeft+' Plätze frei':st.pill}</div>
+          <div class="class-card ${st.mine?'class-card--mine':''}" onclick="openClassDetailModal('${inst.id}')">
+            <div class="class-card-top">
+              <span class="class-time">${escapeHtml(inst.startTime)}–${endTime}</span>
+              <span class="chip ${pillClass}">${st.pill}</span>
             </div>
-            <span class="chip ${pillClass}">${st.pill}</span>
-            ${actionBtn}
+            <div class="class-title">${wodLabel}</div>
+            <div class="class-sublabel">${escapeHtml(inst.label)}${minInfo}</div>
+            <div class="class-card-bottom">
+              <span class="class-spots">👥 ${Math.max(st.spotsLeft,0)} Plätze frei</span>
+              ${inst.coachName ? `<span class="class-coach">${escapeHtml(inst.coachName)}</span>` : ''}
+            </div>
+            <div class="class-card-actions">${actionBtn}</div>
           </div>`;
       }).join(''));
   const editorCard = isBoxAdminView() ? (()=>{
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12} : editing;
+    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null} : editing;
     return `
       <div class="card">
         <h2 class="small">Termine verwalten</h2>
@@ -4169,6 +4317,56 @@ function renderBoxScheduleTab(){
     `;
   })() : '';
   return `<div class="card"><div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>${editorCard}`;
+}
+function openClassDetailModal(instanceId){
+  state.tmp.classDetailInstanceId = instanceId;
+  render();
+}
+function closeClassDetailModal(){
+  state.tmp.classDetailInstanceId = null;
+  render();
+}
+function renderClassDetailModalRoot(){
+  const id = state.tmp.classDetailInstanceId;
+  if(!id) return '';
+  const inst = state.box.classInstances.find(i=>i.id===id);
+  if(!inst) return '';
+  const st = classInstanceStatus(inst);
+  const slot = state.box.scheduleSlots.find(s=>s.id===inst.scheduleSlot);
+  const endTime = addMinutesToTime(inst.startTime, slot?.durationMin || 60);
+  const matched = state.box.tabWorkouts.filter(w=>w.scheduleSlot===inst.scheduleSlot && w.date===inst.date);
+  const reserved = state.box.classBookings.filter(b=>b.classInstance===id && (b.status==='reserved'||b.status==='attended')).sort((a,b)=>(a.created||'').localeCompare(b.created||''));
+  const waitlist = state.box.classBookings.filter(b=>b.classInstance===id && b.status==='waitlist').sort((a,b)=>(a.created||'').localeCompare(b.created||''));
+  const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
+  const minP = slot?.minParticipants;
+  const showCheckIn = st.mine && canCheckIn(st.mine, inst);
+  const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
+  const actionBtn = showCheckIn
+    ? `<button class="btn btn-primary" onclick="checkIn('${st.mine.id}')">Einchecken</button>`
+    : cancelBlocked
+      ? `<button class="btn btn-ghost" style="opacity:0.5;" disabled>Stornofrist abgelaufen</button>`
+      : `<button class="btn ${st.mine?'btn-ghost':'btn-primary'}" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Auf Warteliste')}</button>`;
+  const deadline = (st.mine && st.mine.status==='reserved') ? cancellationDeadline(inst) : null;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closeClassDetailModal()">
+      <div class="modal-box">
+        <h2>${escapeHtml(inst.label)}</h2>
+        <div class="note" style="margin-bottom:10px;">${escapeHtml(inst.startTime)}–${endTime} · ${inst.coachName?escapeHtml(inst.coachName):'—'}</div>
+        <span class="chip ${pillClass}">${st.pill}</span>
+        <div class="note" style="margin:8px 0;">👥 ${Math.max(st.spotsLeft,0)} Plätze frei${minP?` · Mindestteilnehmer: ${minP} (aktuell ${st.activeCount})`:''}</div>
+        ${deadline ? `<div class="note">Stornierung möglich bis ${fmtTime(deadline)} Uhr</div>` : ''}
+        ${matched.length ? matched.map(renderBoxWorkoutCard).join('') : `<div class="note">Kein WOD hinterlegt.</div>`}
+        <h2 class="small" style="margin-top:14px;">Angemeldet (${reserved.length})</h2>
+        ${reserved.length ? reserved.map(b=>`<div class="history-item"><span class="val">${escapeHtml(b.userName||'Mitglied')}</span>${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}</div>`).join('') : `<div class="note">Noch niemand angemeldet.</div>`}
+        ${waitlist.length ? `
+          <h2 class="small" style="margin-top:14px;">Warteliste (${waitlist.length})</h2>
+          ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span></div>`).join('')}
+        ` : ''}
+        <div style="margin-top:14px;">${actionBtn}</div>
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="closeClassDetailModal()">Schließen</button>
+      </div>
+    </div>
+  `;
 }
 function renderBoxWorkoutCard(w){
   const results = state.box.workoutResults[w.id] || [];
@@ -4229,7 +4427,12 @@ function renderBoxWorkoutsTab(){
           <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=false; render();">Abbrechen</button>
           <button class="btn btn-primary" onclick="publishFreeformBoxWorkout('${selected}')">Veröffentlichen</button>
         </div>
-      ` : `<button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=true; render();">+ Freitext-WOD veröffentlichen</button>`}
+      ` : `
+        <div class="row" style="gap:8px;">
+          <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=true; render();">+ Freitext-WOD veröffentlichen</button>
+          <button class="btn btn-ghost" onclick="state.tmp.wodDate='${selected}'; setTab('workout');">+ Workout erstellen</button>
+        </div>
+      `}
     </div>
   ` : '';
   return `<div class="card"><div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
@@ -7057,15 +7260,22 @@ function renderProfileSettings(){
       ` : ''}
       <button class="btn btn-danger" onclick="logout()">Abmelden</button>
     </div>
+    <div class="card">
+      <h2 class="small">Benachrichtigungen</h2>
+      <div class="note" style="margin-bottom:10px;">Erhalte eine Push-Benachrichtigung, sobald du von der Warteliste nachrückst — auch wenn die App gerade geschlossen ist.</div>
+      <button class="btn btn-primary" onclick="enablePushNotifications()">🔔 Push-Benachrichtigungen aktivieren</button>
+      ${(!('serviceWorker' in navigator) || !('PushManager' in window)) ? '<div class="note" style="color:var(--plate-red);margin-top:8px;">Auf diesem Gerät/Browser nicht unterstützt.</div>' : ''}
+    </div>
     ${isBoxOwner() ? `
     <div class="card">
       <h2 class="small">Box</h2>
       <div class="field"><label>Box-Name</label>
-        <div class="row">
-          <input type="text" id="boxNameInput" value="${escapeHtml(state.box.membership?.expand?.box?.name||'')}">
-          <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;" onclick="renameBox()">Speichern</button>
-        </div>
+        <input type="text" id="boxNameInput" value="${escapeHtml(state.box.membership?.expand?.box?.name||'')}">
       </div>
+      <div class="field"><label>Stornofrist (Stunden vor Kursbeginn)</label>
+        <input type="number" step="1" min="0" id="boxCutoffHoursInput" value="${state.box.membership?.expand?.box?.cancellationCutoffHours ?? 3}">
+      </div>
+      <button class="btn btn-ghost" onclick="saveBoxSettings()">Speichern</button>
     </div>
     ` : ''}
     <div class="card">
