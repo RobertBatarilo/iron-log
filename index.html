@@ -532,7 +532,6 @@ function defaultTmp(){
     historyCollapsed:false,
     dayDetailDate:null,
     workoutMenu:'formats',
-    boxScreen:'home',
     boxScheduleEditId:null,
     boxSubTab:'home',
     scheduleSelectedDate:null,
@@ -540,7 +539,8 @@ function defaultTmp(){
     boxFreeformOpen:false,
     boxResultFormId:null,
     avatarEdit:null,
-    joinLinkError:null
+    joinLinkError:null,
+    wodScheduleSlot:null
   };
 }
 
@@ -3469,6 +3469,7 @@ function addMinutesToTime(hhmm, minutes){
 }
 async function loadBoxData(){
   if(!pb.authStore.isValid) return;
+  const startTab = state.activeTab;
   const userId = pb.authStore.record.id;
   try{
     const memberships = await pb.collection('memberships').getFullList({
@@ -3500,12 +3501,7 @@ async function loadBoxData(){
     console.error('Box-Daten konnten nicht geladen werden', e);
   }
   state.box.loaded = true;
-  if(isBoxAdminView() && ['today','workout','progress'].includes(state.activeTab)) state.activeTab = 'box';
-  render();
-}
-function setBoxScreen(screen){
-  state.tmp.boxScreen = screen;
-  state.tmp.boxScheduleEditId = null;
+  if(isBoxAdminView() && state.activeTab===startTab && ['today','workout','progress'].includes(state.activeTab)) state.activeTab = 'box';
   render();
 }
 function setBoxSubTab(tab){
@@ -3536,6 +3532,28 @@ async function uploadAvatar(file){
     render();
   }catch(e){
     showToast('Upload fehlgeschlagen');
+  }
+}
+async function saveDisplayName(){
+  const name = (document.getElementById('displayNameInput')?.value || '').trim();
+  try{
+    await pb.collection('users').update(pb.authStore.record.id, {name});
+    showToast('Name gespeichert');
+    render();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+async function renameBox(){
+  if(!isBoxOwner()) return;
+  const name = (document.getElementById('boxNameInput')?.value || '').trim();
+  if(!name){ showToast('Bitte einen Namen eingeben'); return; }
+  try{
+    await pb.collection('boxes').update(state.box.membership.box, {name});
+    showToast('Box umbenannt');
+    await loadBoxData();
+  }catch(e){
+    showToast('Umbenennen fehlgeschlagen');
   }
 }
 /* ---- Profilbild verschieben/zuschneiden vor dem Upload ---- */
@@ -3705,7 +3723,10 @@ async function selectScheduleDate(d){
   render();
   const boxId = state.box.membership.box;
   await ensureClassInstancesForDate(boxId, d);
-  await loadClassInstancesForDate(boxId, d);
+  await Promise.all([
+    loadClassInstancesForDate(boxId, d),
+    loadWorkoutsForDate(boxId, d)
+  ]);
 }
 function classInstanceStatus(instance){
   const myId = pb.authStore.record.id;
@@ -3780,7 +3801,7 @@ async function publishWorkoutResult(workoutId){
   const scaling = document.getElementById('resultScaling_'+workoutId)?.value || '';
   if(!resultText){ showToast('Bitte ein Ergebnis eingeben'); return; }
   try{
-    await pb.collection('box_workout_results').create({ boxWorkout:workoutId, user:pb.authStore.record.id, userEmail:pb.authStore.record.email, resultText, scaling: scaling||undefined });
+    await pb.collection('box_workout_results').create({ boxWorkout:workoutId, user:pb.authStore.record.id, userEmail: pb.authStore.record.name || pb.authStore.record.email, resultText, scaling: scaling||undefined });
     state.tmp.boxResultFormId = null;
     showToast('Ergebnis gespeichert');
     state.box.workoutResults[workoutId] = await pb.collection('box_workout_results').getFullList({filter: pb.filter('boxWorkout = {:w}', {w:workoutId}), sort:'-created'});
@@ -3794,8 +3815,9 @@ async function publishFreeformBoxWorkout(date){
   const title = (document.getElementById('freeformTitle')?.value||'').trim();
   const body = (document.getElementById('freeformBody')?.value||'').trim();
   if(!title || !body){ showToast('Bitte Titel und Beschreibung eingeben'); return; }
+  const scheduleSlot = document.getElementById('freeformSlot')?.value || null;
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id });
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id, scheduleSlot });
     state.tmp.boxFreeformOpen = false;
     showToast('An Box veröffentlicht 📣');
     await loadWorkoutsForDate(state.box.membership.box, date);
@@ -3808,7 +3830,7 @@ async function joinBoxByCode(codeArg){
   if(!code){ showToast('Bitte einen Code eingeben'); return; }
   try{
     const box = await pb.collection('boxes').getFirstListItem(pb.filter('inviteCode = {:code}', {code}));
-    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending', userEmail: pb.authStore.record.email });
+    await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending', userEmail: pb.authStore.record.name || pb.authStore.record.email });
     showToast('Anfrage gesendet');
     state.tmp.joinLinkError = null;
     await loadBoxData();
@@ -3905,8 +3927,9 @@ async function publishBoxWorkout(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id });
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id, scheduleSlot: state.tmp.wodScheduleSlot || null });
     showToast('An Box veröffentlicht 📣');
+    state.tmp.wodScheduleSlot = null;
     if(isBoxAdminView()) setTab('box');
   }catch(e){
     showToast('Veröffentlichen fehlgeschlagen');
@@ -3937,6 +3960,7 @@ function importBoxWorkout(id){
   state.tmp.wodDate = todayStr();
   state.tmp.wodName = w.name;
   state.tmp.loadedDraftId = null; // NICHT verknüpfen — box_workouts bleibt unangetastet, "Entwurf speichern" legt einen eigenen neuen Entwurf an
+  state.tmp.wodScheduleSlot = null;
   state.tmp.workoutMenu = null;
   setTab('workout');
 }
@@ -3979,17 +4003,53 @@ function renderScheduleSlotForm(s, editId){
     </div>
   `;
 }
-function renderBoxManage(box){
-  const pending = state.box.pendingMemberships;
-  const editId = state.tmp.boxScheduleEditId;
-  const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-  const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12} : editing;
-  const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
-  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
+function renderRoleBadge(){
+  const m = state.box.membership;
+  if(!m || m.status!=='active') return '';
+  return m.role==='owner'
+    ? `<span class="chip chip-owner">Coach</span>`
+    : `<span class="chip">Mitglied</span>`;
+}
+function renderWeekdayStrip(selected, onSelectFnName){
+  return weekDates().map(d=>{
+    const isSel = d===selected;
+    return `<div style="text-align:center;flex:1;cursor:pointer;" onclick="${onSelectFnName}('${d}')">
+      <div class="stat-label">${WEEKDAY_NAMES[new Date(d+'T00:00:00').getDay()]}</div>
+      <div style="width:34px;height:34px;margin:4px auto 0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:600;${isSel?'background:var(--chalk-yellow);color:var(--graphite-900);':'border:1px solid var(--iron-700);color:var(--iron-500);'}">${d.slice(8,10)}</div>
+    </div>`;
+  }).join('');
+}
+function renderBoxHomeHeader(){
+  const me = pb.authStore.record;
+  const avatarUrl = boxAvatarUrl(me, '100x100');
+  const displayName = me?.name || me?.email || '';
+  const initials = (me?.name || me?.email || '?').slice(0,2).toUpperCase();
   return `
     <div class="card">
-      <h2 class="small" style="cursor:pointer;" onclick="setBoxScreen('home')">← Zurück</h2>
-      <div class="note" style="margin-bottom:10px;">Einladungslink teilen — neue Mitglieder treten nach einem Klick automatisch bei.</div>
+      <div class="row" style="align-items:center;gap:12px;">
+        <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
+        <div style="flex:1;">
+          <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(displayName)}</div>
+          ${renderRoleBadge()}
+        </div>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="setTab('profile')">⚙️</button>
+      </div>
+    </div>
+  `;
+}
+function renderBoxHomeAdmin(box){
+  const pending = state.box.pendingMemberships;
+  const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
+  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
+  const stats = attendanceStats(state.box.myBookings);
+  const goal = box?.checkinGoal || 8;
+  const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
+  return `
+    ${renderBoxHomeHeader()}
+    <div class="card"><h2>${escapeHtml(box?.name || 'Box')}</h2></div>
+    <div class="card">
+      <h2 class="small">Einladungslink teilen</h2>
+      <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
       <div class="row" style="gap:10px;">
         <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
         <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">💬</a>
@@ -4012,66 +4072,23 @@ function renderBoxManage(box){
       </div>
     ` : ''}
     <div class="card">
-      <h2 class="small">Kursplan</h2>
-      ${state.box.scheduleSlots.map(s=>`
-        <div class="history-item">
-          <span class="date">${WEEKDAY_NAMES[s.weekday]} ${escapeHtml(s.startTime)}</span>
-          <span class="val">${escapeHtml(s.label)}</span>
-          <span>
-            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
-            <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
-          </span>
-        </div>
-      `).join('')}
-      ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
-    </div>
-    <div class="card">
-      <h2 class="small">Workouts</h2>
-      <div class="note" style="margin-bottom:10px;">Strukturiertes Workout im Builder erstellen, oder ein Freitext-WOD direkt im Workouts-Unterreiter veröffentlichen.</div>
-      <button class="btn btn-primary" onclick="setTab('workout')">+ Workout erstellen</button>
+      <h2 class="small">Hall of Fame</h2>
+      <div class="note">${stats.month} / ${goal} diesen Monat</div>
+      <div style="height:8px;border-radius:4px;background:var(--iron-700);margin-top:6px;overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);border-radius:4px;"></div>
+      </div>
     </div>
   `;
 }
-function renderRoleBadge(){
-  const m = state.box.membership;
-  if(!m || m.status!=='active') return '';
-  return m.role==='owner'
-    ? `<span class="chip chip-owner">Coach</span>`
-    : `<span class="chip">Mitglied</span>`;
-}
-function renderWeekdayStrip(selected, onSelectFnName){
-  return weekDates().map(d=>{
-    const isSel = d===selected;
-    return `<div style="text-align:center;flex:1;cursor:pointer;" onclick="${onSelectFnName}('${d}')">
-      <div class="stat-label">${WEEKDAY_NAMES[new Date(d+'T00:00:00').getDay()]}</div>
-      <div style="width:34px;height:34px;margin:4px auto 0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:600;${isSel?'background:var(--chalk-yellow);color:var(--graphite-900);':'border:1px solid var(--iron-700);color:var(--iron-500);'}">${d.slice(8,10)}</div>
-    </div>`;
-  }).join('');
-}
-function renderBoxHome(box){
+function renderBoxHomeMember(box){
   const bookings = state.box.myBookings;
   const stats = attendanceStats(bookings);
   const goal = box?.checkinGoal || 8;
   const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
   const next = getNextUpcomingBooking(bookings);
-  const me = pb.authStore.record;
-  const avatarUrl = boxAvatarUrl(me, '100x100');
-  const initials = (me?.email||'?').slice(0,2).toUpperCase();
   return `
-    <div class="card">
-      <div class="row" style="align-items:center;gap:12px;">
-        <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
-        <div style="flex:1;">
-          <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(me?.email||'')}</div>
-          ${renderRoleBadge()}
-        </div>
-        <button class="btn-sm btn-ghost" style="width:auto;" onclick="setTab('profile')">⚙️</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>${escapeHtml(box?.name || 'Box')}</h2>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" onclick="setBoxScreen('manage')">⚙️ Box verwalten</button>` : ''}
-    </div>
+    ${renderBoxHomeHeader()}
+    <div class="card"><h2>${escapeHtml(box?.name || 'Box')}</h2></div>
     <div class="card">
       <h2 class="small">Nächster Termin</h2>
       ${next ? `
@@ -4083,7 +4100,7 @@ function renderBoxHome(box){
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
     <div class="card">
-      <h2 class="small">Check-in Champions</h2>
+      <h2 class="small">Hall of Fame</h2>
       <div class="note">${stats.month} / ${goal} diesen Monat</div>
       <div style="height:8px;border-radius:4px;background:var(--iron-700);margin-top:6px;overflow:hidden;">
         <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);border-radius:4px;"></div>
@@ -4100,10 +4117,13 @@ function renderBoxHome(box){
     </div>
   `;
 }
+function renderBoxHome(box){
+  return isBoxAdminView() ? renderBoxHomeAdmin(box) : renderBoxHomeMember(box);
+}
 function renderBoxScheduleTab(){
   const selected = state.tmp.scheduleSelectedDate || todayStr();
   const strip = renderWeekdayStrip(selected, 'selectScheduleDate');
-  const loaded = state.box.scheduleDate===selected;
+  const loaded = state.box.scheduleDate===selected && state.box.tabWorkoutsDate===selected;
   const instances = loaded ? state.box.classInstances : [];
   const body = !loaded ? `<div class="note">Lädt …</div>`
     : (!instances.length ? `<div class="note">Keine Kurse an diesem Tag.</div>` : instances.map(inst=>{
@@ -4115,17 +4135,40 @@ function renderBoxScheduleTab(){
         const actionBtn = showCheckIn
           ? `<button class="btn-sm btn-primary" style="width:auto;" onclick="checkIn('${st.mine.id}')">Einchecken</button>`
           : `<button class="btn-sm btn-ghost" style="width:auto;" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':'Buchen'}</button>`;
+        const matched = state.box.tabWorkouts.filter(w=>w.scheduleSlot===inst.scheduleSlot && w.date===inst.date);
+        const wodLabel = matched.length ? matched.map(w=>escapeHtml(w.name||'Workout')).join(' + ') : 'Kein WOD hinterlegt';
         return `
           <div class="history-item" style="align-items:center;flex-wrap:wrap;gap:6px;">
             <div>
-              <div class="val">${escapeHtml(inst.startTime)}–${endTime} · ${escapeHtml(inst.label)}</div>
-              <div class="date">${inst.coachName?escapeHtml(inst.coachName)+' · ':''}${st.pill==='VERFÜGBAR'?st.spotsLeft+' Plätze frei':st.pill}</div>
+              <div class="val">${wodLabel}</div>
+              <div class="date">${escapeHtml(inst.startTime)}–${endTime} · ${escapeHtml(inst.label)}${inst.coachName?' · '+escapeHtml(inst.coachName):''} · ${st.pill==='VERFÜGBAR'?st.spotsLeft+' Plätze frei':st.pill}</div>
             </div>
             <span class="chip ${pillClass}">${st.pill}</span>
             ${actionBtn}
           </div>`;
       }).join(''));
-  return `<div class="card"><div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>`;
+  const editorCard = isBoxAdminView() ? (()=>{
+    const editId = state.tmp.boxScheduleEditId;
+    const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
+    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12} : editing;
+    return `
+      <div class="card">
+        <h2 class="small">Termine verwalten</h2>
+        ${state.box.scheduleSlots.map(s=>`
+          <div class="history-item">
+            <span class="date">${WEEKDAY_NAMES[s.weekday]} ${escapeHtml(s.startTime)}</span>
+            <span class="val">${escapeHtml(s.label)}</span>
+            <span>
+              <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
+              <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
+            </span>
+          </div>
+        `).join('')}
+        ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
+      </div>
+    `;
+  })() : '';
+  return `<div class="card"><div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>${editorCard}`;
 }
 function renderBoxWorkoutCard(w){
   const results = state.box.workoutResults[w.id] || [];
@@ -4176,6 +4219,12 @@ function renderBoxWorkoutsTab(){
         <h2 class="small">Freitext-WOD veröffentlichen</h2>
         <div class="field"><label>Titel</label><input type="text" id="freeformTitle" placeholder='z.B. "Mirror, Mirror"'></div>
         <div class="field"><label>Beschreibung</label><textarea id="freeformBody" rows="8" placeholder="***For Time:*** ..."></textarea></div>
+        <div class="field"><label>Kurs-Slot (optional)</label>
+          <select id="freeformSlot">
+            <option value="">— Kein Slot —</option>
+            ${state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>`<option value="${s.id}">${escapeHtml(s.startTime)} ${escapeHtml(s.label)}</option>`).join('')}
+          </select>
+        </div>
         <div class="row">
           <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=false; render();">Abbrechen</button>
           <button class="btn btn-primary" onclick="publishFreeformBoxWorkout('${selected}')">Veröffentlichen</button>
@@ -4200,9 +4249,6 @@ function renderBox(){
     `;
   }
   const box = b.membership.expand?.box;
-  if(isBoxOwner() && state.tmp.boxScreen==='manage'){
-    return renderBoxManage(box);
-  }
   const subNav = `
     <div class="row" style="margin-bottom:14px;">
       <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('home')">Home</button>
@@ -4441,14 +4487,26 @@ function buildHeaderFields(uniqueNames){
   const disabledAttr = isWodInProgress() ? 'disabled' : '';
   return `
     <div class="row">
-      <div class="field"><label>Datum</label><input type="date" id="wodDate" value="${state.tmp.wodDate||todayStr()}" ${disabledAttr} onchange="state.tmp.wodDate=this.value"></div>
+      <div class="field"><label>Datum</label><input type="date" id="wodDate" value="${state.tmp.wodDate||todayStr()}" ${disabledAttr} onchange="state.tmp.wodDate=this.value; render();"></div>
       <div class="field">
         <label>Name</label>
         <input type="text" id="wodName" list="wodNameList" value="${escapeHtml(state.tmp.wodName||'')}" ${disabledAttr} onchange="onWodNameChange(this.value)" placeholder="z.B. Fran">
         <datalist id="wodNameList">${uniqueNames.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
       </div>
     </div>
+    ${isBoxAdminView() ? renderBoxSlotPicker() : ''}
   `;
+}
+function renderBoxSlotPicker(){
+  const date = state.tmp.wodDate || todayStr();
+  const weekday = new Date(date+'T00:00:00').getDay();
+  const daySlots = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
+  return `<div class="field"><label>Kurs-Slot (optional)</label>
+    <select onchange="state.tmp.wodScheduleSlot=this.value">
+      <option value="">— Kein Slot —</option>
+      ${daySlots.map(s=>`<option value="${s.id}" ${state.tmp.wodScheduleSlot===s.id?'selected':''}>${escapeHtml(s.startTime)} ${escapeHtml(s.label)}</option>`).join('')}
+    </select>
+  </div>`;
 }
 
 function getEmomIntervalSec(){
@@ -6946,7 +7004,17 @@ function renderProfile(){
   return renderProfileMenu();
 }
 function renderProfileMenu(){
+  const mode = state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
   return `
+    ${isBoxOwner() ? `
+    <div class="card">
+      <h2 class="small">Rolle</h2>
+      <div class="row">
+        <button class="btn ${mode==='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('box')">Coach</button>
+        <button class="btn ${mode!=='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('athlete')">Athlet</button>
+      </div>
+    </div>
+    ` : ''}
     <div class="card">
       <h2>Profil</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('settings')">⚙️ Einstellungen</button>
@@ -6959,7 +7027,7 @@ function renderProfileSettings(){
   const p = state.profile || {};
   const theme = p.theme || 'dark';
   const adminView = isBoxAdminView();
-  const mode = p.boxViewMode==='box' ? 'box' : 'athlete';
+  const me = pb.authStore.record;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
     ${adminView ? '' : `
@@ -6970,19 +7038,36 @@ function renderProfileSettings(){
     `}
     <div class="card">
       <h2 class="small">Konto</h2>
-      ${(()=>{ const url=boxAvatarUrl(pb.authStore.record,'100x100'); const initials=(pb.authStore.record?.email||'?').slice(0,2).toUpperCase();
+      ${(()=>{ const url=boxAvatarUrl(me,'100x100'); const initials=(me?.name || me?.email || '?').slice(0,2).toUpperCase();
         return `<div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
           <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
           <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this)"></div>
         </div>
         ${renderAvatarEditor()}`; })()}
-      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((pb.authStore.record&&pb.authStore.record.email)||'—')} ${renderRoleBadge()}</div>
-      ${pb.authStore.record && !pb.authStore.record.verified ? `
+      <div class="field"><label>Name</label>
+        <div class="row">
+          <input type="text" id="displayNameInput" value="${escapeHtml(me?.name||'')}" placeholder="Wie sollen dich andere sehen?">
+          <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;" onclick="saveDisplayName()">Speichern</button>
+        </div>
+      </div>
+      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((me&&(me.name||me.email))||'—')} ${renderRoleBadge()}</div>
+      ${me && !me.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
         <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="resendVerification()">Bestätigungs-Mail erneut senden</button>
       ` : ''}
       <button class="btn btn-danger" onclick="logout()">Abmelden</button>
     </div>
+    ${isBoxOwner() ? `
+    <div class="card">
+      <h2 class="small">Box</h2>
+      <div class="field"><label>Box-Name</label>
+        <div class="row">
+          <input type="text" id="boxNameInput" value="${escapeHtml(state.box.membership?.expand?.box?.name||'')}">
+          <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;" onclick="renameBox()">Speichern</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
     <div class="card">
       <h2>Darstellung</h2>
       <div class="row">
@@ -6990,15 +7075,6 @@ function renderProfileSettings(){
         <button class="btn ${theme==='light'?'btn-primary':'btn-ghost'}" onclick="setTheme('light')">Hell</button>
       </div>
     </div>
-    ${isBoxOwner() ? `
-    <div class="card">
-      <h2 class="small">Ansicht</h2>
-      <div class="row">
-        <button class="btn ${mode==='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('box')">Box verwalten</button>
-        <button class="btn ${mode!=='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('athlete')">Mein Training</button>
-      </div>
-    </div>
-    ` : ''}
     ${adminView ? '' : `
     <div class="card">
       <h2>Grunddaten</h2>
