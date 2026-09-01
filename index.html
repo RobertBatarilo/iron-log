@@ -303,6 +303,16 @@
   .box-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
   .box-stat-tile{background:var(--graphite-900);border:1px solid var(--iron-600);border-radius:9px;padding:12px;text-align:left;}
   .box-avatar{border-radius:50%;background-size:cover;background-position:center;background-color:var(--iron-700);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;color:var(--chalk-50);flex-shrink:0;}
+  .icon-btn{
+    width:44px;height:44px;flex:0 0 auto;
+    border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;
+    background:var(--iron-700);
+    border:none;text-decoration:none;
+    cursor:pointer;
+  }
+  .icon-btn:active{background:var(--iron-600);}
   nav.bottom{
     position:fixed;
     bottom:0;left:0;right:0;
@@ -529,7 +539,8 @@ function defaultTmp(){
     workoutsSelectedDate:null,
     boxFreeformOpen:false,
     boxResultFormId:null,
-    avatarEdit:null
+    avatarEdit:null,
+    joinLinkError:null
   };
 }
 
@@ -1992,7 +2003,13 @@ function decodeJwtPayload(token){
     return null;
   }
 }
+let pendingJoinCode = null;
 function boot(){
+  const joinCode = new URLSearchParams(location.search).get('join');
+  if(joinCode){
+    pendingJoinCode = joinCode;
+    history.replaceState(null, '', location.pathname);
+  }
   const token = new URLSearchParams(location.search).get('token');
   if(token){
     history.replaceState(null, '', location.pathname);
@@ -2008,7 +2025,7 @@ function boot(){
   if(pb.authStore.isValid){
     initApp();
   } else {
-    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null};
+    state.tmp.auth = {screen: pendingJoinCode?'register':'login', email:'', password:'', passwordConfirm:'', error:'', info:'', loading:false, resetToken:null};
     renderBoot();
   }
 }
@@ -2152,6 +2169,7 @@ function renderAuthScreen(){
           <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
         </div>
         <h2>${isRegister?'Konto erstellen':'Anmelden'}</h2>
+        ${pendingJoinCode ? `<div class="note" style="margin-bottom:10px;">Du hast einen Einladungslink geöffnet — nach der Anmeldung wird deine Beitrittsanfrage automatisch gesendet.</div>` : ''}
         ${a.info ? `<div class="note" style="color:var(--success-green);margin-bottom:10px;">${escapeHtml(a.info)}</div>` : ''}
         ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
         <div class="field"><label>E-Mail</label><input type="email" value="${escapeHtml(a.email)}" oninput="state.tmp.auth.email=this.value" autocomplete="username"></div>
@@ -2287,6 +2305,13 @@ async function initApp(){
   document.getElementById('app').innerHTML = appShell();
   render();
   loadBoxData(); // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist
+  if(pendingJoinCode){
+    const code = pendingJoinCode;
+    pendingJoinCode = null;
+    state.activeTab = 'box';
+    render();
+    joinBoxByCode(code);
+  }
 }
 
 function bottomNavHtml(){
@@ -3448,9 +3473,13 @@ async function loadBoxData(){
   try{
     const memberships = await pb.collection('memberships').getFullList({
       filter: pb.filter('user = {:user}', {user:userId}),
-      expand:'box'
+      expand:'box',
+      requestKey:null
     });
-    const mine = memberships.find(m=>m.status==='active') || memberships.find(m=>m.status==='pending') || null;
+    const mine = memberships.find(m=>m.status==='active' && m.role==='owner')
+      || memberships.find(m=>m.status==='active')
+      || memberships.find(m=>m.status==='pending')
+      || null;
     state.box.membership = mine;
     if(mine && mine.status==='active'){
       const boxId = mine.box;
@@ -3774,16 +3803,19 @@ async function publishFreeformBoxWorkout(date){
     showToast('Veröffentlichen fehlgeschlagen');
   }
 }
-async function joinBoxByCode(){
-  const code = (document.getElementById('boxJoinCode')?.value || '').trim();
+async function joinBoxByCode(codeArg){
+  const code = (codeArg || document.getElementById('boxJoinCode')?.value || '').trim();
   if(!code){ showToast('Bitte einen Code eingeben'); return; }
   try{
     const box = await pb.collection('boxes').getFirstListItem(pb.filter('inviteCode = {:code}', {code}));
     await pb.collection('memberships').create({ box: box.id, user: pb.authStore.record.id, role:'member', status:'pending', userEmail: pb.authStore.record.email });
     showToast('Anfrage gesendet');
+    state.tmp.joinLinkError = null;
     await loadBoxData();
   }catch(e){
     showToast('Code ungültig oder Anfrage existiert bereits');
+    state.tmp.joinLinkError = 'Dein Einladungslink war ungültig oder abgelaufen — bitte einen neuen Code/Link anfordern.';
+    render();
   }
 }
 async function createBoxFlow(){
@@ -3912,6 +3944,7 @@ function renderBoxJoinOrCreate(){
   return `
     <div class="card">
       <h2>Box beitreten</h2>
+      ${state.tmp.joinLinkError ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(state.tmp.joinLinkError)}</div>` : ''}
       <div class="field"><label>Einladungscode</label><input type="text" id="boxJoinCode" placeholder="Code von deiner Box"></div>
       <button class="btn btn-primary" onclick="joinBoxByCode()">Beitreten</button>
     </div>
@@ -3951,15 +3984,18 @@ function renderBoxManage(box){
   const editId = state.tmp.boxScheduleEditId;
   const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
   const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12} : editing;
+  const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
+  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
   return `
     <div class="card">
       <h2 class="small" style="cursor:pointer;" onclick="setBoxScreen('home')">← Zurück</h2>
-      <div class="note" style="margin-bottom:10px;">Einladungscode: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
-      <div class="row">
-        <a class="btn btn-ghost" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent('Tritt "'+(box?.name||'')+'" in WOD Ledger bei. Einladungscode: '+(box?.inviteCode||''))}">📧 Mail</a>
-        <a class="btn btn-ghost" href="https://wa.me/?text=${encodeURIComponent('Tritt "'+(box?.name||'')+'" in WOD Ledger bei. Einladungscode: '+(box?.inviteCode||''))}" target="_blank" rel="noopener">💬 WhatsApp</a>
-        <button class="btn btn-ghost" onclick="regenerateInviteCode()">🔄 Neuer Code</button>
+      <div class="note" style="margin-bottom:10px;">Einladungslink teilen — neue Mitglieder treten nach einem Klick automatisch bei.</div>
+      <div class="row" style="gap:10px;">
+        <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
+        <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">💬</a>
+        <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
       </div>
+      <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
     </div>
     ${pending.length ? `
       <div class="card">
