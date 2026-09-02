@@ -600,7 +600,8 @@ function defaultTmp(){
     avatarEdit:null,
     joinLinkError:null,
     wodCategory:null,
-    classDetailInstanceId:null
+    classDetailInstanceId:null,
+    editingBoxWorkoutId:null
   };
 }
 
@@ -3425,6 +3426,7 @@ function setWodFormat(fmt){
   state.tmp.forLoadBuilder = null;
   state.tmp.gps = null;
   state.tmp.loadedDraftId = null;
+  state.tmp.editingBoxWorkoutId = null;
   render();
 }
 async function saveWodDraft(){
@@ -3804,6 +3806,12 @@ async function loadClassInstancesForDate(boxId, dateStr){
         ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || '), requestKey: null})
         : [];
     }
+    if(state.box.tabWorkoutsDate===dateStr){
+      for(const inst of instances){
+        const mine = bookings.find(b=>b.classInstance===inst.id && b.user===myId && (b.status==='reserved'||b.status==='attended'));
+        if(mine) await ensureDraftsForBooking(inst);
+      }
+    }
     state.box.scheduleDate = dateStr;
     state.box.classInstances = instances;
     state.box.classBookings = bookings;
@@ -3891,17 +3899,15 @@ async function createDraftFromBoxWorkout(w, date){
   });
   await saveKey('drafts', state.drafts);
 }
+async function ensureDraftsForBooking(instance){
+  const slot = state.box.scheduleSlots.find(s=>s.id===instance.scheduleSlot);
+  const matched = state.box.tabWorkouts.filter(w=>w.mode==='structured' && w.category===slot?.label && w.date===instance.date);
+  for(const w of matched) await createDraftFromBoxWorkout(w, instance.date);
+}
 async function checkIn(bookingId){
   try{
     await pb.collection('bookings').update(bookingId, {status:'attended'});
     showToast('Eingecheckt ✅');
-    const booking = state.box.classBookings.find(b=>b.id===bookingId);
-    const inst = booking ? state.box.classInstances.find(i=>i.id===booking.classInstance) : null;
-    if(inst){
-      const slot = state.box.scheduleSlots.find(s=>s.id===inst.scheduleSlot);
-      const matched = state.box.tabWorkouts.filter(w=>w.mode==='structured' && w.category===slot?.label && w.date===inst.date);
-      for(const w of matched) await createDraftFromBoxWorkout(w, inst.date);
-    }
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
     await loadMyBookings(state.box.membership.box);
   }catch(e){
@@ -3951,13 +3957,20 @@ async function publishFreeformBoxWorkout(date){
   const body = (document.getElementById('freeformBody')?.value||'').trim();
   if(!title || !body){ showToast('Bitte Titel und Beschreibung eingeben'); return; }
   const category = document.getElementById('freeformCategory')?.value || null;
+  const editId = state.tmp.editingBoxWorkoutId;
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id, category });
+    if(editId){
+      await pb.collection('box_workouts').update(editId, { date, name:title, bodyText:body, category });
+      showToast('Workout aktualisiert');
+    } else {
+      await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id, category });
+      showToast('An Box veröffentlicht 📣');
+    }
     state.tmp.boxFreeformOpen = false;
-    showToast('An Box veröffentlicht 📣');
+    state.tmp.editingBoxWorkoutId = null;
     await loadWorkoutsForDate(state.box.membership.box, date);
   }catch(e){
-    showToast('Veröffentlichen fehlgeschlagen');
+    showToast(editId?'Speichern fehlgeschlagen':'Veröffentlichen fehlgeschlagen');
   }
 }
 async function joinBoxByCode(codeArg){
@@ -4072,9 +4085,15 @@ async function publishBoxWorkout(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id, category: state.tmp.wodCategory || null });
-    showToast('An Box veröffentlicht 📣');
+    if(state.tmp.editingBoxWorkoutId){
+      await pb.collection('box_workouts').update(state.tmp.editingBoxWorkoutId, { date, format, name, payload, category: state.tmp.wodCategory || null });
+      showToast('Workout aktualisiert');
+    } else {
+      await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id, category: state.tmp.wodCategory || null });
+      showToast('An Box veröffentlicht 📣');
+    }
     state.tmp.wodCategory = null;
+    state.tmp.editingBoxWorkoutId = null;
     if(isBoxAdminView()) setTab('box');
   }catch(e){
     showToast('Veröffentlichen fehlgeschlagen');
@@ -4106,8 +4125,52 @@ function importBoxWorkout(id){
   state.tmp.wodName = w.name;
   state.tmp.loadedDraftId = null; // NICHT verknüpfen — box_workouts bleibt unangetastet, "Entwurf speichern" legt einen eigenen neuen Entwurf an
   state.tmp.wodCategory = null;
+  state.tmp.editingBoxWorkoutId = null; // Import ins eigene Log ist keine Bearbeitung des Original-Datensatzes
   state.tmp.workoutMenu = null;
   setTab('workout');
+}
+function editBoxWorkout(id){
+  const w = state.box.tabWorkouts.find(x=>x.id===id);
+  if(!w){ showToast('Workout nicht gefunden'); return; }
+  if(w.mode==='freeform'){
+    state.tmp.editingBoxWorkoutId = id;
+    state.tmp.boxFreeformOpen = true;
+    render();
+    return;
+  }
+  state.tmp.wodFormat = w.format;
+  state.tmp.wodTemplate = null; state.tmp.wodMoves = null; state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null; state.tmp.amrapBuilder = null; state.tmp.forLoadBuilder = null; state.tmp.gps = null;
+  const p = w.payload;
+  if(w.format==='for-time'){
+    ensureForTimeBuilder();
+    Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
+  } else if(w.format==='amrap'){
+    ensureAmrapBuilder();
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+  } else if(w.format==='for-load'){
+    ensureForLoadBuilder();
+    Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
+  } else {
+    state.tmp.wodTemplate = JSON.parse(JSON.stringify(p.wodTemplate));
+    state.tmp.emomMin = p.emomMin; state.tmp.emomSec = p.emomSec; state.tmp.emomRounds = p.emomRounds; state.tmp.emomAlternateCycles = p.emomAlternateCycles;
+  }
+  state.tmp.wodDate = w.date;
+  state.tmp.wodName = w.name;
+  state.tmp.wodCategory = w.category || null;
+  state.tmp.loadedDraftId = null;
+  state.tmp.editingBoxWorkoutId = id;
+  state.tmp.workoutMenu = null;
+  setTab('workout');
+}
+async function deleteBoxWorkout(id){
+  try{
+    await pb.collection('box_workouts').delete(id);
+    showToast('Workout gelöscht');
+    await loadWorkoutsForDate(state.box.membership.box, state.box.tabWorkoutsDate);
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
 }
 function renderBoxJoinOrCreate(){
   return `
@@ -4363,7 +4426,7 @@ function renderClassDetailModalRoot(){
         <div class="note" style="margin:8px 0;">👥 ${Math.max(st.spotsLeft,0)} Plätze frei${minP?` · Mindestteilnehmer: ${minP} (aktuell ${st.activeCount})`:''}</div>
         ${deadline ? `<div class="note">Stornierung möglich bis ${fmtTime(deadline)} Uhr</div>` : ''}
         <h2 class="small" style="margin-top:14px;">WOD</h2>
-        ${matched.length ? matched.map(renderBoxWorkoutCard).join('') : `<div class="note">Kein WOD hinterlegt.</div>`}
+        ${matched.length ? matched.map(w=>renderBoxWorkoutCard(w, {showManage:false})).join('') : `<div class="note">Kein WOD hinterlegt.</div>`}
         <h2 class="small" style="margin-top:14px;">Angemeldet (${reserved.length})</h2>
         ${reserved.length ? reserved.map(b=>`
           <div class="history-item">
@@ -4383,38 +4446,51 @@ function renderClassDetailModalRoot(){
     </div>
   `;
 }
-function renderBoxWorkoutCard(w){
+function renderBoxWorkoutCard(w, opts){
+  opts = opts || {};
+  const showManage = opts.showManage !== false;
   const results = state.box.workoutResults[w.id] || [];
   const bodyHtml = w.mode==='freeform'
     ? `<div class="note" style="white-space:pre-wrap;">${escapeHtml(w.bodyText||'')}</div>`
-    : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div><button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>`;
+    : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div>
+       <div class="note" style="margin-top:4px;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>
+       <button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>`;
   const resultsFormOpen = state.tmp.boxResultFormId===w.id;
+  const manageHtml = (showManage && isBoxAdminView()) ? `
+    <div class="row" style="gap:8px;margin-top:8px;">
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="editBoxWorkout('${w.id}')">✎ Bearbeiten</button>
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteBoxWorkout('${w.id}')">✕ Löschen</button>
+    </div>
+  ` : '';
   return `
     <div class="wod-card">
       <div class="wname">${escapeHtml(w.name)||'Workout'}</div>
       ${bodyHtml}
-      <div class="row" style="margin-top:10px;align-items:center;">
-        <span class="note" style="margin:0;">Ergebnisse (${results.length})</span>
-        <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxResultFormId='${resultsFormOpen?'':w.id}'; render();">${resultsFormOpen?'Schließen':'Ergebnis eintragen'}</button>
-      </div>
-      ${resultsFormOpen ? `
-        <div style="margin-top:8px;">
-          <div class="field"><label>Ergebnis</label><input type="text" id="resultText_${w.id}" placeholder="z.B. 18:42"></div>
-          <div class="field"><label>Skalierung</label>
-            <select id="resultScaling_${w.id}">
-              <option value="">—</option>
-              <option value="Rx">Rx</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Beginner">Beginner</option>
-            </select>
+      ${manageHtml}
+      ${showManage ? `
+        <div class="row" style="margin-top:10px;align-items:center;">
+          <span class="note" style="margin:0;">Ergebnisse (${results.length})</span>
+          <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxResultFormId='${resultsFormOpen?'':w.id}'; render();">${resultsFormOpen?'Schließen':'Ergebnis eintragen'}</button>
+        </div>
+        ${resultsFormOpen ? `
+          <div style="margin-top:8px;">
+            <div class="field"><label>Ergebnis</label><input type="text" id="resultText_${w.id}" placeholder="z.B. 18:42"></div>
+            <div class="field"><label>Skalierung</label>
+              <select id="resultScaling_${w.id}">
+                <option value="">—</option>
+                <option value="Rx">Rx</option>
+                <option value="Intermediate">Intermediate</option>
+                <option value="Beginner">Beginner</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="publishWorkoutResult('${w.id}')">Speichern</button>
           </div>
-          <button class="btn btn-primary" style="width:100%;" onclick="publishWorkoutResult('${w.id}')">Speichern</button>
-        </div>
-      ` : ''}
-      ${results.length ? `
-        <div style="margin-top:8px;">
-          ${results.map(r=>`<div class="history-item"><span class="date">${escapeHtml(r.userEmail)}</span><span class="val">${escapeHtml(r.resultText)}${r.scaling?' · '+escapeHtml(r.scaling):''}</span></div>`).join('')}
-        </div>
+        ` : ''}
+        ${results.length ? `
+          <div style="margin-top:8px;">
+            ${results.map(r=>`<div class="history-item"><span class="date">${escapeHtml(r.userEmail)}</span><span class="val">${escapeHtml(r.resultText)}${r.scaling?' · '+escapeHtml(r.scaling):''}</span></div>`).join('')}
+          </div>
+        ` : ''}
       ` : ''}
     </div>
   `;
@@ -4428,21 +4504,23 @@ function renderBoxWorkoutsTab(){
     : (!workouts.length ? `<div class="note">Kein Workout an diesem Tag.</div>` : workouts.map(renderBoxWorkoutCard).join(''));
   const ownerForm = isBoxAdminView() ? `
     <div class="card">
-      ${state.tmp.boxFreeformOpen ? `
-        <h2 class="small">Freitext-WOD veröffentlichen</h2>
-        <div class="field"><label>Titel</label><input type="text" id="freeformTitle" placeholder='z.B. "Mirror, Mirror"'></div>
-        <div class="field"><label>Beschreibung</label><textarea id="freeformBody" rows="8" placeholder="***For Time:*** ..."></textarea></div>
+      ${state.tmp.boxFreeformOpen ? (()=>{
+        const editing = state.tmp.editingBoxWorkoutId ? state.box.tabWorkouts.find(w=>w.id===state.tmp.editingBoxWorkoutId) : null;
+        return `
+        <h2 class="small">${editing?'Freitext-WOD bearbeiten':'Freitext-WOD veröffentlichen'}</h2>
+        <div class="field"><label>Titel</label><input type="text" id="freeformTitle" value="${escapeHtml(editing?.name||'')}" placeholder='z.B. "Mirror, Mirror"'></div>
+        <div class="field"><label>Beschreibung</label><textarea id="freeformBody" rows="8" placeholder="***For Time:*** ...">${escapeHtml(editing?.bodyText||'')}</textarea></div>
         <div class="field"><label>Workout-Art (optional)</label>
           <select id="freeformCategory">
             <option value="">— Keine Zuordnung —</option>
-            ${[...new Set(state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>s.label))].map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+            ${[...new Set(state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>s.label))].map(c=>`<option value="${escapeHtml(c)}" ${editing?.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div class="row">
-          <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=false; render();">Abbrechen</button>
-          <button class="btn btn-primary" onclick="publishFreeformBoxWorkout('${selected}')">Veröffentlichen</button>
+          <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=false; state.tmp.editingBoxWorkoutId=null; render();">Abbrechen</button>
+          <button class="btn btn-primary" onclick="publishFreeformBoxWorkout('${selected}')">${editing?'Speichern':'Veröffentlichen'}</button>
         </div>
-      ` : `
+      `;})() : `
         <div class="row" style="gap:8px;">
           <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=true; render();">+ Freitext-WOD veröffentlichen</button>
           <button class="btn btn-ghost" onclick="state.tmp.wodDate='${selected}'; setTab('workout');">+ Workout erstellen</button>
@@ -4525,6 +4603,30 @@ function formatMovementLine(m){
     line += ` - ${fmtWeight(m.weight)}`;
   }
   return line;
+}
+function formatBoxWorkoutPreview(w){
+  const p = w.payload || {};
+  if(w.format==='for-time'){
+    const moves = (p.movements||[]).map(formatMovementLine).join(', ');
+    const rounds = p.rounds && p.rounds!=='1' ? `${p.rounds} Runden: ` : '';
+    const cap = (p.timeCapMin||p.timeCapSec) ? ` (Cap ${p.timeCapMin||0}:${String(p.timeCapSec||0).padStart(2,'0')})` : '';
+    return `${p.repScheme?p.repScheme+' — ':''}${rounds}${moves}${cap}`;
+  }
+  if(w.format==='amrap'){
+    const moves = (p.movements||[]).map(formatMovementLine).join(', ');
+    return `AMRAP ${p.durationMin||0}:${String(p.durationSec||0).padStart(2,'0')} — ${moves}`;
+  }
+  if(w.format==='for-load'){
+    const ex = state.exercises.find(e=>e.id===p.exerciseId);
+    const cap = (p.timeCapMin||p.timeCapSec) ? ` (Cap ${p.timeCapMin||0}:${String(p.timeCapSec||0).padStart(2,'0')})` : '';
+    return `${p.targetReps||''}x ${ex?ex.name:'—'}${cap}`;
+  }
+  const lines = (p.wodTemplate||[]).map(m=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    return `${m.setsCount||''}x${m.repsTarget||''} ${ex?ex.name:'—'}`.trim();
+  });
+  const emomLabel = w.format==='emom' ? `EMOM ${p.emomMin||0}:${String(p.emomSec||0).padStart(2,'0')} × ${p.emomRounds||1} — ` : '';
+  return emomLabel + lines.join(', ');
 }
 function renderWorkoutHistoryEntry(w){
   const format = w.format || 'strength';
