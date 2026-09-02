@@ -279,6 +279,7 @@
   .wod-card .wdate{font-family:var(--font-mono);font-size:11px;color:var(--iron-500);}
   .wod-card .moves{margin-top:6px;font-size:13px;}
   .wod-card .moves div{display:flex;justify-content:space-between;padding:3px 0;}
+  .wod-card--box{ border-left-color:var(--accent-emom); background:linear-gradient(90deg, rgba(91,141,239,0.08), rgba(91,141,239,0.08)), var(--graphite-800); }
   .chip{
     display:inline-block;
     font-size:10px;
@@ -598,7 +599,7 @@ function defaultTmp(){
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
-    wodScheduleSlot:null,
+    wodCategory:null,
     classDetailInstanceId:null
   };
 }
@@ -2480,8 +2481,8 @@ function renderDayDetailModalRoot(){
   const draftsBody = dayDrafts.length ? `
     <h2 class="small" style="margin-top:${dayWorkouts.length?'14px':'0'};">Entwürfe</h2>
     ${dayDrafts.map(dr=>`
-      <div class="wod-card">
-        <div class="wname">${escapeHtml(dr.name)||'Workout'} <span class="wdate">${WOD_FORMAT_LABELS[dr.format]||dr.format}</span></div>
+      <div class="wod-card ${dr.sourceBoxWorkoutId?'wod-card--box':''}">
+        <div class="wname">${escapeHtml(dr.name)||'Workout'} <span class="wdate">${WOD_FORMAT_LABELS[dr.format]||dr.format}${dr.sourceBoxWorkoutId?' · 📣 Box-WOD':''}</span></div>
         <div class="row" style="gap:8px;margin-top:8px;">
           <button class="btn-sm btn-primary" onclick="closeDayDetailModal();loadDraftIntoBuilder('${dr.id}')">Fortsetzen</button>
           <button class="btn-sm btn-ghost" style="flex:0 0 auto;width:auto;" onclick="deleteDraft('${dr.id}')">✕</button>
@@ -2563,10 +2564,11 @@ function renderDraftsCard(){
   const todayD = todayStr();
   const items = sorted.map(d=>{
     const isToday = d.date===todayD;
+    const fromBox = !!d.sourceBoxWorkoutId;
     return `
-      <div class="wod-card">
+      <div class="wod-card ${fromBox?'wod-card--box':''}">
         <div class="wname">${escapeHtml(d.name)||'Workout'} <span class="wdate">${fmtDate(d.date)}${isToday ? ' · HEUTE' : ''}</span></div>
-        <div class="note" style="margin:2px 0 8px;">${WOD_FORMAT_LABELS[d.format]||d.format}</div>
+        <div class="note" style="margin:2px 0 8px;">${WOD_FORMAT_LABELS[d.format]||d.format}${fromBox?' · 📣 Box-WOD':''}</div>
         <div class="row" style="gap:8px;">
           <button class="btn-sm btn-primary" onclick="loadDraftIntoBuilder('${d.id}')">Fortsetzen</button>
           <button class="btn-sm btn-ghost" style="flex:0 0 auto;width:auto;" onclick="deleteDraft('${d.id}')">✕</button>
@@ -3723,7 +3725,8 @@ async function loadMyBookings(boxId){
     state.box.myBookings = await pb.collection('bookings').getFullList({
       filter: pb.filter('box = {:box} && user = {:user}', {box:boxId, user:pb.authStore.record.id}),
       expand:'classInstance',
-      sort:'-created'
+      sort:'-created',
+      requestKey: null
     });
   }catch(e){
     state.box.myBookings = [];
@@ -3782,7 +3785,7 @@ async function loadClassInstancesForDate(boxId, dateStr){
   try{
     const instances = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), sort:'startTime'});
     let bookings = instances.length
-      ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || ')})
+      ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || '), requestKey: null})
       : [];
     const myId = pb.authStore.record.id;
     const promotions = [];
@@ -3798,7 +3801,7 @@ async function loadClassInstancesForDate(boxId, dateStr){
     if(promotions.length){
       await Promise.all(promotions.map(id=>pb.collection('bookings').update(id, {status:'reserved'}).catch(e=>console.error('Selbst-Nachrücken fehlgeschlagen', e))));
       bookings = instances.length
-        ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || ')})
+        ? await pb.collection('bookings').getFullList({filter: instances.map(i=>pb.filter('classInstance = {:id}',{id:i.id})).join(' || '), requestKey: null})
         : [];
     }
     state.box.scheduleDate = dateStr;
@@ -3823,7 +3826,7 @@ async function selectScheduleDate(d){
 }
 function classInstanceStatus(instance){
   const myId = pb.authStore.record.id;
-  const mine = state.box.classBookings.find(b=>b.classInstance===instance.id && b.user===myId) || null;
+  const mine = state.box.classBookings.find(b=>b.classInstance===instance.id && b.user===myId && b.status!=='cancelled') || null;
   const activeCount = state.box.classBookings.filter(b=>b.classInstance===instance.id && (b.status==='reserved'||b.status==='attended')).length;
   const spotsLeft = instance.capacity - activeCount;
   let pill;
@@ -3844,24 +3847,12 @@ function canCancelBooking(instance){
 function fmtTime(d){
   return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 }
-async function promoteNextWaitlisted(instanceId){
-  try{
-    const waitlisted = await pb.collection('bookings').getFullList({
-      filter: pb.filter('classInstance = {:id} && status = "waitlist"', {id: instanceId}),
-      sort: 'created', requestKey: null
-    });
-    if(waitlisted.length){
-      await pb.collection('bookings').update(waitlisted[0].id, {status:'reserved'});
-      showToast('Warteliste nachgerückt: '+(waitlisted[0].userName||'Mitglied'));
-    }
-  }catch(e){
-    console.error('Warteliste-Promotion fehlgeschlagen', e);
-  }
-}
 async function toggleBooking(instanceId){
   const instance = state.box.classInstances.find(i=>i.id===instanceId);
   if(!instance) return;
   const st = classInstanceStatus(instance);
+  const myId = pb.authStore.record.id;
+  const myRow = state.box.classBookings.find(b=>b.classInstance===instanceId && b.user===myId) || null;
   try{
     if(st.mine && st.mine.status==='reserved'){
       if(!canCancelBooking(instance)){
@@ -3870,16 +3861,15 @@ async function toggleBooking(instanceId){
       }
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Buchung storniert');
-      await promoteNextWaitlisted(instanceId);
     } else if(st.mine && st.mine.status==='waitlist'){
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Von Warteliste entfernt');
-    } else if(st.mine){
-      await pb.collection('bookings').update(st.mine.id, {status: st.spotsLeft>0?'reserved':'waitlist'});
+    } else if(myRow){
+      await pb.collection('bookings').update(myRow.id, {status: st.spotsLeft>0?'reserved':'waitlist'});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     } else {
       const myName = pb.authStore.record.name || pb.authStore.record.email || '';
-      await pb.collection('bookings').create({classInstance:instanceId, user:pb.authStore.record.id, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist', userName: myName});
+      await pb.collection('bookings').create({classInstance:instanceId, user:myId, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist', userName: myName});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     }
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
@@ -3891,10 +3881,27 @@ async function toggleBooking(instanceId){
 function canCheckIn(bookingRow, instance){
   return bookingRow.status==='reserved' && instance.date<=todayStr();
 }
+async function createDraftFromBoxWorkout(w, date){
+  const already = state.drafts.some(d=>d.sourceBoxWorkoutId===w.id && d.date===date);
+  if(already) return;
+  state.drafts.push({
+    id: uid(), format: w.format, date, name: w.name,
+    createdAt: Date.now(), payload: JSON.parse(JSON.stringify(w.payload)),
+    sourceBoxWorkoutId: w.id
+  });
+  await saveKey('drafts', state.drafts);
+}
 async function checkIn(bookingId){
   try{
     await pb.collection('bookings').update(bookingId, {status:'attended'});
     showToast('Eingecheckt ✅');
+    const booking = state.box.classBookings.find(b=>b.id===bookingId);
+    const inst = booking ? state.box.classInstances.find(i=>i.id===booking.classInstance) : null;
+    if(inst){
+      const slot = state.box.scheduleSlots.find(s=>s.id===inst.scheduleSlot);
+      const matched = state.box.tabWorkouts.filter(w=>w.mode==='structured' && w.category===slot?.label && w.date===inst.date);
+      for(const w of matched) await createDraftFromBoxWorkout(w, inst.date);
+    }
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
     await loadMyBookings(state.box.membership.box);
   }catch(e){
@@ -3943,9 +3950,9 @@ async function publishFreeformBoxWorkout(date){
   const title = (document.getElementById('freeformTitle')?.value||'').trim();
   const body = (document.getElementById('freeformBody')?.value||'').trim();
   if(!title || !body){ showToast('Bitte Titel und Beschreibung eingeben'); return; }
-  const scheduleSlot = document.getElementById('freeformSlot')?.value || null;
+  const category = document.getElementById('freeformCategory')?.value || null;
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id, scheduleSlot });
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format: state.tmp.wodFormat||'strength', mode:'freeform', name:title, bodyText:body, payload:{freeform:true}, publishedBy: pb.authStore.record.id, category });
     state.tmp.boxFreeformOpen = false;
     showToast('An Box veröffentlicht 📣');
     await loadWorkoutsForDate(state.box.membership.box, date);
@@ -4065,9 +4072,9 @@ async function publishBoxWorkout(){
     payload = { wodTemplate: JSON.parse(JSON.stringify(state.tmp.wodTemplate)), emomMin:state.tmp.emomMin, emomSec:state.tmp.emomSec, emomRounds:state.tmp.emomRounds, emomAlternateCycles:state.tmp.emomAlternateCycles };
   }
   try{
-    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id, scheduleSlot: state.tmp.wodScheduleSlot || null });
+    await pb.collection('box_workouts').create({ box: state.box.membership.box, date, format, name, payload, mode:'structured', publishedBy: pb.authStore.record.id, category: state.tmp.wodCategory || null });
     showToast('An Box veröffentlicht 📣');
-    state.tmp.wodScheduleSlot = null;
+    state.tmp.wodCategory = null;
     if(isBoxAdminView()) setTab('box');
   }catch(e){
     showToast('Veröffentlichen fehlgeschlagen');
@@ -4098,7 +4105,7 @@ function importBoxWorkout(id){
   state.tmp.wodDate = todayStr();
   state.tmp.wodName = w.name;
   state.tmp.loadedDraftId = null; // NICHT verknüpfen — box_workouts bleibt unangetastet, "Entwurf speichern" legt einen eigenen neuen Entwurf an
-  state.tmp.wodScheduleSlot = null;
+  state.tmp.wodCategory = null;
   state.tmp.workoutMenu = null;
   setTab('workout');
 }
@@ -4277,7 +4284,7 @@ function renderBoxScheduleTab(){
           : cancelBlocked
             ? `<button class="btn-sm btn-ghost" style="opacity:0.5;" onclick="event.stopPropagation();showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(inst))+' Uhr)')">Stornofrist abgelaufen</button>`
             : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Warteliste')}</button>`;
-        const matched = state.box.tabWorkouts.filter(w=>w.scheduleSlot===inst.scheduleSlot && w.date===inst.date);
+        const matched = state.box.tabWorkouts.filter(w=>w.category===slot?.label && w.date===inst.date);
         const wodLabel = matched.length ? matched.map(w=>escapeHtml(w.name||'Workout')).join(' + ') : 'Kein WOD hinterlegt';
         const minInfo = slot?.minParticipants ? ` · Mind. ${slot.minParticipants} (aktuell ${st.activeCount})` : '';
         return `
@@ -4334,7 +4341,7 @@ function renderClassDetailModalRoot(){
   const st = classInstanceStatus(inst);
   const slot = state.box.scheduleSlots.find(s=>s.id===inst.scheduleSlot);
   const endTime = addMinutesToTime(inst.startTime, slot?.durationMin || 60);
-  const matched = state.box.tabWorkouts.filter(w=>w.scheduleSlot===inst.scheduleSlot && w.date===inst.date);
+  const matched = state.box.tabWorkouts.filter(w=>w.category===slot?.label && w.date===inst.date);
   const reserved = state.box.classBookings.filter(b=>b.classInstance===id && (b.status==='reserved'||b.status==='attended')).sort((a,b)=>(a.created||'').localeCompare(b.created||''));
   const waitlist = state.box.classBookings.filter(b=>b.classInstance===id && b.status==='waitlist').sort((a,b)=>(a.created||'').localeCompare(b.created||''));
   const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
@@ -4355,9 +4362,17 @@ function renderClassDetailModalRoot(){
         <span class="chip ${pillClass}">${st.pill}</span>
         <div class="note" style="margin:8px 0;">👥 ${Math.max(st.spotsLeft,0)} Plätze frei${minP?` · Mindestteilnehmer: ${minP} (aktuell ${st.activeCount})`:''}</div>
         ${deadline ? `<div class="note">Stornierung möglich bis ${fmtTime(deadline)} Uhr</div>` : ''}
+        <h2 class="small" style="margin-top:14px;">WOD</h2>
         ${matched.length ? matched.map(renderBoxWorkoutCard).join('') : `<div class="note">Kein WOD hinterlegt.</div>`}
         <h2 class="small" style="margin-top:14px;">Angemeldet (${reserved.length})</h2>
-        ${reserved.length ? reserved.map(b=>`<div class="history-item"><span class="val">${escapeHtml(b.userName||'Mitglied')}</span>${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}</div>`).join('') : `<div class="note">Noch niemand angemeldet.</div>`}
+        ${reserved.length ? reserved.map(b=>`
+          <div class="history-item">
+            <span class="row" style="align-items:center;gap:8px;">
+              <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((b.userName||'?').slice(0,2).toUpperCase())}</span>
+              <span class="val">${escapeHtml(b.userName||'Mitglied')}</span>
+            </span>
+            ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}
+          </div>`).join('') : `<div class="note">Noch niemand angemeldet.</div>`}
         ${waitlist.length ? `
           <h2 class="small" style="margin-top:14px;">Warteliste (${waitlist.length})</h2>
           ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span></div>`).join('')}
@@ -4411,16 +4426,16 @@ function renderBoxWorkoutsTab(){
   const workouts = loaded ? state.box.tabWorkouts : [];
   const body = !loaded ? `<div class="note">Lädt …</div>`
     : (!workouts.length ? `<div class="note">Kein Workout an diesem Tag.</div>` : workouts.map(renderBoxWorkoutCard).join(''));
-  const ownerForm = isBoxOwner() ? `
+  const ownerForm = isBoxAdminView() ? `
     <div class="card">
       ${state.tmp.boxFreeformOpen ? `
         <h2 class="small">Freitext-WOD veröffentlichen</h2>
         <div class="field"><label>Titel</label><input type="text" id="freeformTitle" placeholder='z.B. "Mirror, Mirror"'></div>
         <div class="field"><label>Beschreibung</label><textarea id="freeformBody" rows="8" placeholder="***For Time:*** ..."></textarea></div>
-        <div class="field"><label>Kurs-Slot (optional)</label>
-          <select id="freeformSlot">
-            <option value="">— Kein Slot —</option>
-            ${state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>`<option value="${s.id}">${escapeHtml(s.startTime)} ${escapeHtml(s.label)}</option>`).join('')}
+        <div class="field"><label>Workout-Art (optional)</label>
+          <select id="freeformCategory">
+            <option value="">— Keine Zuordnung —</option>
+            ${[...new Set(state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>s.label))].map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div class="row">
@@ -4697,17 +4712,17 @@ function buildHeaderFields(uniqueNames){
         <datalist id="wodNameList">${uniqueNames.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
       </div>
     </div>
-    ${isBoxAdminView() ? renderBoxSlotPicker() : ''}
+    ${isBoxAdminView() ? renderBoxCategoryPicker() : ''}
   `;
 }
-function renderBoxSlotPicker(){
+function renderBoxCategoryPicker(){
   const date = state.tmp.wodDate || todayStr();
   const weekday = new Date(date+'T00:00:00').getDay();
-  const daySlots = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
-  return `<div class="field"><label>Kurs-Slot (optional)</label>
-    <select onchange="state.tmp.wodScheduleSlot=this.value">
-      <option value="">— Kein Slot —</option>
-      ${daySlots.map(s=>`<option value="${s.id}" ${state.tmp.wodScheduleSlot===s.id?'selected':''}>${escapeHtml(s.startTime)} ${escapeHtml(s.label)}</option>`).join('')}
+  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.weekday===weekday).map(s=>s.label))];
+  return `<div class="field"><label>Workout-Art (optional)</label>
+    <select onchange="state.tmp.wodCategory=this.value">
+      <option value="">— Keine Zuordnung —</option>
+      ${categories.map(c=>`<option value="${escapeHtml(c)}" ${state.tmp.wodCategory===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
     </select>
   </div>`;
 }
@@ -4803,7 +4818,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
       </div>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
+      ${isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -5251,7 +5266,7 @@ function renderForTimeFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
       </div>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
+      ${isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -5609,7 +5624,7 @@ function renderAmrapFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
       </div>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
+      ${isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -5852,7 +5867,7 @@ function renderForLoadFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startForLoadWod()">Start</button>
       </div>
-      ${isBoxOwner() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
+      ${isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
   `;
@@ -7266,7 +7281,7 @@ function renderProfileSettings(){
       <button class="btn btn-primary" onclick="enablePushNotifications()">🔔 Push-Benachrichtigungen aktivieren</button>
       ${(!('serviceWorker' in navigator) || !('PushManager' in window)) ? '<div class="note" style="color:var(--plate-red);margin-top:8px;">Auf diesem Gerät/Browser nicht unterstützt.</div>' : ''}
     </div>
-    ${isBoxOwner() ? `
+    ${isBoxAdminView() ? `
     <div class="card">
       <h2 class="small">Box</h2>
       <div class="field"><label>Box-Name</label>
