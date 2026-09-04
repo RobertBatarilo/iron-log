@@ -573,7 +573,7 @@ function defaultTmp(){
   return {
     wodFormat:'strength',
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
-    adminUsers:null,
+    adminUsers:null, showNachbuchenPicker:false, bookableAthletes:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
@@ -3998,6 +3998,12 @@ function cancellationDeadline(instance){
 function canCancelBooking(instance){
   return new Date() < cancellationDeadline(instance);
 }
+function instanceStart(instance){
+  return new Date(instance.date+'T'+(instance.startTime||'00:00')+':00');
+}
+function instanceHasStarted(instance){
+  return new Date() >= instanceStart(instance);
+}
 function fmtTime(d){
   return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 }
@@ -4007,6 +4013,11 @@ async function toggleBooking(instanceId){
   const st = classInstanceStatus(instance);
   const myId = pb.authStore.record.id;
   const myRow = state.box.classBookings.find(b=>b.classInstance===instanceId && b.user===myId) || null;
+  const isBookingAction = !(st.mine && (st.mine.status==='reserved'||st.mine.status==='attended'||st.mine.status==='waitlist'));
+  if(isBookingAction && !isBoxOwner() && instanceHasStarted(instance)){
+    showToast('Buchung nach Trainingsbeginn nicht mehr möglich');
+    return;
+  }
   try{
     if(st.mine && (st.mine.status==='reserved' || st.mine.status==='attended')){
       if(!canCancelBooking(instance)){
@@ -4033,7 +4044,7 @@ async function toggleBooking(instanceId){
   }
 }
 function canCheckIn(bookingRow, instance){
-  return bookingRow.status==='reserved' && instance.date<=todayStr();
+  return bookingRow.status==='reserved' && (!instanceHasStarted(instance) || isBoxOwner());
 }
 async function createDraftFromBoxWorkout(w, date){
   const already = state.drafts.some(d=>d.sourceBoxWorkoutId===w.id && d.date===date);
@@ -4058,6 +4069,38 @@ async function checkIn(bookingId){
     await loadMyBookings(state.box.membership.box);
   }catch(e){
     showToast('Check-in fehlgeschlagen');
+  }
+}
+async function openNachbuchenPicker(instanceId){
+  state.tmp.showNachbuchenPicker = true;
+  state.tmp.bookableAthletes = null;
+  render();
+  try{
+    const boxId = state.box.membership.box;
+    const memberships = await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "active"', {box:boxId}), expand:'user'});
+    const alreadyIds = new Set(state.box.classBookings.filter(b=>b.classInstance===instanceId && b.status!=='cancelled').map(b=>b.user));
+    state.tmp.bookableAthletes = memberships.filter(m=>!alreadyIds.has(m.user)).map(m=>({
+      userId: m.user, name: m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied'
+    }));
+  }catch(e){
+    state.tmp.bookableAthletes = [];
+    showToast('Mitgliederliste konnte nicht geladen werden');
+  }
+  render();
+}
+async function adminBookAthlete(instanceId){
+  if(!isBoxOwner()) return;
+  const userId = document.getElementById('nachbuchenSelect')?.value;
+  if(!userId){ showToast('Bitte einen Athleten wählen'); return; }
+  const athlete = (state.tmp.bookableAthletes||[]).find(a=>a.userId===userId);
+  try{
+    await pb.collection('bookings').create({classInstance:instanceId, user:userId, box:state.box.membership.box, status:'reserved', userName: athlete?.name||'Mitglied'});
+    showToast('Athlet nachgebucht');
+    state.tmp.showNachbuchenPicker = false;
+    state.tmp.bookableAthletes = null;
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+  }catch(e){
+    showToast('Nachbuchen fehlgeschlagen');
   }
 }
 /* ---- Box-Workouts (Ergebnisse) ---- */
@@ -4541,6 +4584,8 @@ function openClassDetailModal(instanceId){
 }
 function closeClassDetailModal(){
   state.tmp.classDetailInstanceId = null;
+  state.tmp.showNachbuchenPicker = false;
+  state.tmp.bookableAthletes = null;
   render();
 }
 function renderClassDetailModalRoot(){
@@ -4582,11 +4627,26 @@ function renderClassDetailModalRoot(){
               <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((b.userName||'?').slice(0,2).toUpperCase())}</span>
               <span class="val">${escapeHtml(b.userName||'Mitglied')}</span>
             </span>
-            ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}
+            ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':(isBoxOwner()?`<button class="btn-sm btn-ghost" style="width:auto;" onclick="checkIn('${b.id}')">Einchecken</button>`:'')}
           </div>`).join('') : `<div class="note">Noch niemand angemeldet.</div>`}
         ${waitlist.length ? `
           <h2 class="small" style="margin-top:14px;">Warteliste (${waitlist.length})</h2>
           ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span></div>`).join('')}
+        ` : ''}
+        ${isBoxOwner() ? `
+          <div style="margin-top:10px;">
+            ${state.tmp.showNachbuchenPicker ? `
+              <div class="field"><label>Athlet nachbuchen</label>
+                <select id="nachbuchenSelect">
+                  ${state.tmp.bookableAthletes===null ? '<option>Lädt …</option>' : (state.tmp.bookableAthletes.length ? state.tmp.bookableAthletes.map(a=>`<option value="${a.userId}">${escapeHtml(a.name)}</option>`).join('') : '<option value="">Keine Athleten verfügbar</option>')}
+                </select>
+              </div>
+              <div class="row">
+                <button class="btn btn-ghost" onclick="state.tmp.showNachbuchenPicker=false; render();">Abbrechen</button>
+                <button class="btn btn-primary" onclick="adminBookAthlete('${id}')">Buchen</button>
+              </div>
+            ` : `<button class="btn-sm btn-ghost" onclick="openNachbuchenPicker('${id}')">+ Athlet nachbuchen</button>`}
+          </div>
         ` : ''}
         <div style="margin-top:14px;">${actionBtn}</div>
         <button class="btn btn-ghost" style="margin-top:10px;" onclick="closeClassDetailModal()">Schließen</button>
