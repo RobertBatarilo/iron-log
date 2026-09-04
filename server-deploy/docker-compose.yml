@@ -18,6 +18,15 @@ services:
     networks:
       - n8n-docker-caddy_default
 
+  ai-photo-service:
+    build: ./ai-photo-service
+    container_name: ai-photo-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - n8n-docker-caddy_default
+
 volumes:
   pocketbase_data:
 

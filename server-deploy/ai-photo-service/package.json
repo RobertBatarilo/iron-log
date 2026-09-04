@@ -1,0 +1,6 @@
+{
+  "name": "wod-ledger-ai-photo-service",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js"
+}

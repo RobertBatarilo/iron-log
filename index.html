@@ -569,7 +569,8 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
+    adminUsers:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
@@ -1148,6 +1149,7 @@ const EXERCISE_LIBRARY = [
     {id:"parallel-range", label:"Parallel Range", details:null, type:"mobility"},
     {id:"reduced-range", label:"Reduced Range", details:null, type:"mobility"},
     {id:"to-parallel", label:"To Parallel", details:null, type:"mobility"},
+    {id:"on-medball", label:"On Medball", details:null},
     {id:"weighted", label:"Weighted", details:[{key:"weight_add", label:"Zusatzgewicht (kg)", placeholder:"z.B. 10", numeric:true}], type:"weighted"}
   ]},
   { id:"glute-bridge", name:"Glute Bridge", type:"bodyweight", variants:[
@@ -1862,8 +1864,16 @@ function buildTemplateFromProgression(prog){
   }];
 }
 /* ---------- Exercise-Modal (ersetzt window.prompt, das in der Hosting-Umgebung blockiert ist) ---------- */
-function openExerciseModal(onSelect){
-  state.tmp.exerciseModal = { open:true, onSelect, mode:'library', baseId:'', variantId:'', variantDetail:{}, customName:'', customType:'weighted' };
+function openExerciseModal(onSelect, editId){
+  const editingEx = editId ? state.exercises.find(e=>e.id===editId) : null;
+  if(editingEx){
+    const match = matchLibraryVariant(editingEx);
+    state.tmp.exerciseModal = match
+      ? { open:true, onSelect, editId, mode:'library', baseId:match.base.id, variantId:match.variant.id, variantDetail:{}, customName:'', customType:editingEx.type||'weighted' }
+      : { open:true, onSelect, editId, mode:'custom', baseId:'', variantId:'', variantDetail:{}, customName:editingEx.name, customType:editingEx.type||'weighted' };
+  } else {
+    state.tmp.exerciseModal = { open:true, onSelect, editId:null, mode:'library', baseId:'', variantId:'', variantDetail:{}, customName:'', customType:'weighted' };
+  }
   render();
 }
 function closeExerciseModal(){
@@ -1929,7 +1939,18 @@ function confirmExerciseModal(){
     name = composeVariantName(base, variant, m.variantDetail);
     type = variant.type || base.type || 'weighted';
   }
-  const exId = findOrCreateExerciseId(name, type);
+  let exId;
+  if(m.editId){
+    const ex = state.exercises.find(e=>e.id===m.editId);
+    if(!ex){ showToast('Übung nicht gefunden'); state.tmp.exerciseModal = null; render(); return; }
+    ex.name = name;
+    ex.type = type;
+    saveKey('exercises', state.exercises);
+    exId = ex.id;
+    showToast('Übung aktualisiert');
+  } else {
+    exId = findOrCreateExerciseId(name, type);
+  }
   const cb = m.onSelect;
   state.tmp.exerciseModal = null;
   if(cb) cb(exId);
@@ -1976,7 +1997,7 @@ function renderExerciseModalRoot(){
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closeExerciseModal()">
       <div class="modal-box">
-        <h2>Übung hinzufügen</h2>
+        <h2>${m.editId ? 'Übung bearbeiten' : 'Übung hinzufügen'}</h2>
         <div class="row" style="margin-bottom:14px;">
           <button class="btn ${m.mode==='library'?'btn-primary':'btn-ghost'}" onclick="setExerciseModalMode('library')">Bibliothek</button>
           <button class="btn ${m.mode==='custom'?'btn-primary':'btn-ghost'}" onclick="setExerciseModalMode('custom')">Eigener Name</button>
@@ -1984,7 +2005,7 @@ function renderExerciseModalRoot(){
         ${m.mode==='library' ? libraryBody : customBody}
         <div class="row" style="margin-top:14px;">
           <button class="btn btn-ghost" onclick="closeExerciseModal()">Abbrechen</button>
-          <button class="btn btn-primary" onclick="confirmExerciseModal()">Übernehmen</button>
+          <button class="btn btn-primary" onclick="confirmExerciseModal()">${m.editId ? 'Speichern' : 'Übernehmen'}</button>
         </div>
       </div>
     </div>
@@ -2053,6 +2074,20 @@ function migrateStaleExerciseTypes(){
       ex.type = correctType;
       changed = true;
     }
+  });
+  return changed;
+}
+function migrateMovementsForPR(){
+  let changed = false;
+  state.workouts.forEach(w=>{
+    if(w.movements && w.movements.length) return;
+    let flat = null;
+    if(w.format==='for-time' && w.forTime) flat = w.forTime.movements;
+    else if(w.format==='amrap' && w.amrap) flat = w.amrap.movements;
+    else if(w.format==='for-load' && w.forLoad) flat = [{exerciseId:w.forLoad.exerciseId, reps:w.forLoad.targetReps, weight:w.forLoad.achievedWeight}];
+    if(!flat) return;
+    const built = buildPrMovementsFromFlat(flat);
+    if(built.length){ w.movements = built; changed = true; }
   });
   return changed;
 }
@@ -2327,6 +2362,7 @@ function renderMigrationScreen(){
 }
 async function initApp(){
   flushPendingSync();
+  if(pb.authStore.isValid) pb.collection('users').authRefresh().catch(()=>{});
   const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan, drafts] = await Promise.all([
     loadKey('profile', null),
     loadKey('exercises', null),
@@ -2357,6 +2393,7 @@ async function initApp(){
     state.workouts = migrateToWorkouts(oldTrainingLogs, oldWods);
     await saveKey('workouts', state.workouts);
   }
+  if(migrateMovementsForPR()) await saveKey('workouts', state.workouts);
   state.nutritionLogs = nutritionLogs;
   state.measurements = measurements;
   state.prEntries = prEntries;
@@ -2628,6 +2665,48 @@ function computedBest(exId){
   const logs = exerciseLogs(exId);
   return logs.length ? logs.reduce((max,e)=>Math.max(max, sessionE1RM(e)), 0) : null;
 }
+function bestByRepScheme(exId){
+  const byReps = {};
+  exerciseLogs(exId).forEach(entry=>{
+    entry.sets.forEach(s=>{
+      const reps = parseInt(s.reps), weight = parseFloat(s.weight);
+      if(!reps || !weight) return;
+      if(!byReps[reps] || weight > byReps[reps].weight) byReps[reps] = { reps, weight, date: entry.date };
+    });
+  });
+  return Object.values(byReps).sort((a,b)=>a.reps-b.reps);
+}
+function buildPrMovementsFromFlat(list){
+  return (list||[]).map(mv=>{
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    if(!ex || getExerciseType(ex)!=='weighted') return null;
+    const reps = parseFloat(mv.reps), weight = parseFloat(mv.weight);
+    if(!reps || !weight) return null;
+    return { exerciseId: mv.exerciseId, sets:[{reps: mv.reps, weight: mv.weight, pct:null}] };
+  }).filter(Boolean);
+}
+function detectNewPRs(movements){
+  const prs = [];
+  (movements||[]).forEach(mv=>{
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    if(!ex) return;
+    const priorBest = {};
+    bestByRepScheme(mv.exerciseId).forEach(b=>{ priorBest[b.reps] = b.weight; });
+    (mv.sets||[]).forEach(s=>{
+      const reps = parseInt(s.reps), weight = parseFloat(s.weight);
+      if(!reps || !weight) return;
+      if(!priorBest[reps] || weight > priorBest[reps]){
+        prs.push({ name: ex.name, reps, weight });
+        priorBest[reps] = weight;
+      }
+    });
+  });
+  return prs;
+}
+function showPRToastIfAny(movements){
+  const prs = detectNewPRs(movements);
+  if(prs.length) showToast('🏆 Neuer Rekord: ' + prs.map(p=>`${p.reps} WH ${p.name} @ ${p.weight}kg`).join(', '));
+}
 function prEntriesFor(exId){
   return state.prEntries.filter(p=>p.exerciseId===exId).sort((a,b)=> b.value-a.value || b.date.localeCompare(a.date));
 }
@@ -2769,7 +2848,8 @@ function openPhotoImportModal(){
     open:true, stage:'pick', rawText:'', error:'', loading:false,
     imgSrc:'', sourceFile:null,
     naturalWidth:0, naturalHeight:0,
-    cropTop:0, cropBottom:1
+    cropTop:0, cropBottom:1,
+    aiMode:false
   };
   render();
 }
@@ -2846,18 +2926,54 @@ async function runOcrOnSource(source){
 }
 function confirmCropAndRunOcr(){
   const pi = state.tmp.photoImport;
+  const run = pi.aiMode ? runAiParseOnSource : runOcrOnSource;
   const img = document.querySelector('#cropContainer img');
-  if(!img){ runOcrOnSource(pi.sourceFile); return; }
+  if(!img){ run(pi.sourceFile); return; }
   const sw = pi.naturalWidth;
   const sy = Math.round(pi.cropTop * pi.naturalHeight);
   const sh = Math.max(1, Math.round((pi.cropBottom - pi.cropTop) * pi.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = sw; canvas.height = sh;
   canvas.getContext('2d').drawImage(img, 0, sy, sw, sh, 0, 0, sw, sh);
-  runOcrOnSource(canvas);
+  run(canvas);
 }
 function skipCropAndRunOcr(){
-  runOcrOnSource(state.tmp.photoImport.sourceFile);
+  const pi = state.tmp.photoImport;
+  (pi.aiMode ? runAiParseOnSource : runOcrOnSource)(pi.sourceFile);
+}
+function sourceToBase64(source){
+  return new Promise((resolve, reject)=>{
+    if(source instanceof HTMLCanvasElement){
+      const dataUrl = source.toDataURL('image/png');
+      resolve({ mimeType:'image/png', base64: dataUrl.split(',')[1] });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const dataUrl = reader.result;
+      const mimeType = (dataUrl.match(/^data:([^;]+);/)||[])[1] || 'image/jpeg';
+      resolve({ mimeType, base64: dataUrl.split(',')[1] });
+    };
+    reader.onerror = ()=>reject(new Error('Bild konnte nicht gelesen werden'));
+    reader.readAsDataURL(source);
+  });
+}
+async function runAiParseOnSource(source){
+  const pi = state.tmp.photoImport;
+  cleanupPhotoImportImage();
+  pi.loading = true; pi.error = '';
+  render();
+  try{
+    const { mimeType, base64 } = await sourceToBase64(source);
+    const result = await pb.send('/ai-photo-parse', { method:'POST', body:{ imageBase64: base64, mimeType } });
+    if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Erkennung fehlgeschlagen');
+    applyParsedWorkout(result);
+  } catch(err){
+    pi.error = (err && err.message) ? err.message : 'KI-Erkennung fehlgeschlagen — bitte Text unten manuell eingeben.';
+    pi.stage = 'review';
+    pi.loading = false;
+    render();
+  }
 }
 let _cropDrag = null;
 const CROP_MIN_GAP = 0.05;
@@ -2948,14 +3064,22 @@ function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
   if(!pi || !pi.open) return '';
   const pickBody = `
-    <div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Bild wird nirgends hochgeladen.</div>
+    ${state.profile?.hasPro ? `
+    <div class="row" style="margin-bottom:10px;">
+      <button type="button" class="btn ${!pi.aiMode?'btn-primary':'btn-ghost'}" onclick="state.tmp.photoImport.aiMode=false; render();">📄 Texterkennung</button>
+      <button type="button" class="btn ${pi.aiMode?'btn-primary':'btn-ghost'}" onclick="state.tmp.photoImport.aiMode=true; render();">✨ KI-Erkennung</button>
+    </div>
+    ` : `<div class="note" style="margin-bottom:10px;">✨ KI-Erkennung versteht auch handschriftliche/komplexe Workouts — Pro-Feature.</div>`}
+    ${pi.aiMode
+      ? `<div class="note" style="margin-bottom:14px;">Dein Foto wird zur Analyse an einen Server gesendet (Claude KI) — anders als bei der Texterkennung bleibt es dabei nicht nur auf deinem Gerät.</div>`
+      : `<div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Bild wird nirgends hochgeladen.</div>`}
     <div class="field"><label>Screenshot/Bild hochladen</label>
       <input type="file" accept="image/*" onchange="handlePhotoImportFile(this)">
     </div>
     <div class="field"><label>Oder Foto aufnehmen</label>
       <input type="file" accept="image/*" capture="environment" onchange="handlePhotoImportFile(this)">
     </div>
-    ${pi.loading ? `<div class="note" style="margin-top:10px;">Texterkennung läuft …</div>` : ''}
+    ${pi.loading ? `<div class="note" style="margin-top:10px;">${pi.aiMode?'KI analysiert dein Foto …':'Texterkennung läuft …'}</div>` : ''}
     <button type="button" class="btn btn-ghost" style="margin-top:14px;" onclick="state.tmp.photoImport.stage='review'; render();">✏️ Stattdessen Text eingeben</button>
   `;
   const reviewBody = `
@@ -3068,9 +3192,9 @@ function matchRoundsCount(line){
 }
 function parseMovementLine(line){
   if(!line) return null;
-  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(m|km|cal|kcal)\b\s+(.+)$/i);
+  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(kcal|calories?|cal|km|m)\b\s+(.+)$/i);
   if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2].toLowerCase() };
-  m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(?:\d+(?:[.,]\d+)?)\s*(m|km|cal|kcal)?\b\s+(.+)$/i);
+  m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(?:\d+(?:[.,]\d+)?)\s*(kcal|calories?|cal|km|m)?\b\s+(.+)$/i);
   if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2] ? m[2].toLowerCase() : undefined };
   m = line.match(/^(\d+)\s+(.+)$/);
   if(m) return { reps: m[1], name: m[2].trim() };
@@ -3289,13 +3413,26 @@ function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
     repsTarget = '';
     extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
   }
-  return { exerciseId, timing:'', setsCount, pctList:'', weight:'', unit, qty, repsTarget, groupWithNext };
+  return { exerciseId, timing:'', setsCount, pctList:'', weight: mv.weight||'', unit, qty, repsTarget, groupWithNext };
 }
-function applyParsedWorkout(text){
-  const format = detectWorkoutFormat(text);
-  const allLines = ocrTextLines(text);
-  const nameInfo = extractWorkoutName(allLines);
-  const scalingInfo = parseScalingLines(nameInfo.remainingLines);
+function missing1RMWarnings(moves){
+  if(!moves || !moves.length) return [];
+  const names = [];
+  moves.forEach(mv=>{
+    if(!parsePctList(mv.pctList||'').length) return;
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    if(ex && bestE1RM(ex.id)==null) names.push(ex.name);
+  });
+  return [...new Set(names)];
+}
+function applyParsedWorkout(input){
+  const existingExerciseIds = new Set(state.exercises.map(e=>e.id));
+  const structured = input && typeof input === 'object';
+  const format = structured ? (input.format || 'for-time') : detectWorkoutFormat(input);
+  const text = structured ? '' : input;
+  const allLines = structured ? [] : ocrTextLines(text);
+  const nameInfo = structured ? { name: input.name || null, remainingLines: [] } : extractWorkoutName(allLines);
+  const scalingInfo = structured ? { tiers: {}, remainingLines: [] } : parseScalingLines(nameInfo.remainingLines);
   const parseLines = scalingInfo.remainingLines;
 
   state.tmp.wodTemplate = null;
@@ -3312,7 +3449,7 @@ function applyParsedWorkout(text){
   let leftoverLines = [];
 
   if(format==='emom'){
-    const p = parseEmomText(parseLines);
+    const p = structured ? { intervalMin: input.intervalMin||'1', intervalSec: input.intervalSec||'0', rounds: input.rounds||'10', movements: input.movements||[], leftover: [], minuteBlockCount: 0, blockMovementGroups: [], cyclesCount: 0 } : parseEmomText(parseLines);
     state.tmp.wodFormat = 'emom';
     state.tmp.emomMin = p.intervalMin;
     state.tmp.emomSec = p.intervalSec;
@@ -3343,23 +3480,23 @@ function applyParsedWorkout(text){
     }
     activeMovements = state.tmp.wodTemplate;
   } else if(format==='amrap'){
-    const p = parseAmrapText(parseLines);
+    const p = structured ? { movements: input.movements||[], durationMin: input.durationMin||'20', durationSec: input.durationSec||'0', leftover: [] } : parseAmrapText(parseLines);
     state.tmp.wodFormat = 'amrap';
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
     b.durationMin = p.durationMin; b.durationSec = p.durationSec;
-    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight: mv.weight||'', unit:'reps'}));
     activeMovements = b.movements;
     leftoverLines = p.leftover;
   } else if(format==='for-load'){
-    const p = parseForLoadText(text);
+    const p = structured ? { name: input.name||'', timeCapMin: input.timeCapMin||'10', timeCapSec: input.timeCapSec||'0' } : parseForLoadText(text);
     state.tmp.wodFormat = 'for-load';
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
     if(p.name) b.exerciseId = resolveExerciseIdFromName(p.name) || b.exerciseId;
     b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
   } else if(format==='strength'){
-    const p = parseStrengthText(text);
+    const p = structured ? { moves: input.moves||[] } : parseStrengthText(text);
     state.tmp.wodFormat = 'strength';
     if(p.moves.length){
       state.tmp.wodTemplate = p.moves.map(mv=>({
@@ -3367,12 +3504,12 @@ function applyParsedWorkout(text){
       }));
     } else ensureWodTemplate();
   } else {
-    const p = parseForTimeText(parseLines);
+    const p = structured ? { movements: input.movements||[], rounds: input.rounds||'1', repScheme: input.repScheme||'', timeCapMin: input.timeCapMin||'', timeCapSec: input.timeCapSec||'', leftover: [] } : parseForTimeText(parseLines);
     state.tmp.wodFormat = 'for-time';
     ensureForTimeBuilder();
     const b = state.tmp.forTimeBuilder;
     b.rounds = p.rounds; b.repScheme = p.repScheme; b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
-    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight:'', unit:'reps'}));
+    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight: mv.weight||'', unit:'reps'}));
     activeMovements = b.movements;
     leftoverLines = p.leftover;
   }
@@ -3395,6 +3532,11 @@ function applyParsedWorkout(text){
   applyTargetingRepsFromLeftover(leftoverLines, state.tmp.wodTemplate);
 
   if(leftoverLines.length) state.tmp.wodNote = leftoverLines.join('\n');
+
+  const warn = missing1RMWarnings(state.tmp.wodTemplate);
+  state.tmp.missing1RMWarning = warn.length ? warn : null;
+
+  state.tmp.newlyCreatedExerciseIds = state.exercises.filter(e=>!existingExerciseIds.has(e.id)).map(e=>e.id);
 
   state.tmp.photoImport = null;
   showToast('Aus Foto übernommen — bitte kurz prüfen 👀');
@@ -3545,6 +3687,7 @@ async function loadBoxData(){
       || memberships.find(m=>m.status==='pending')
       || null;
     state.box.membership = mine;
+    state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isProStandalone || memberships.some(m=>m.status==='active'));
     if(mine && mine.status==='active'){
       const boxId = mine.box;
       const [slots] = await Promise.all([
@@ -4837,6 +4980,11 @@ function renderWodTemplatePhase(headerFields, historyHtml){
   const refNote = state.tmp.wodNameMatch
     ? `<div class="note" style="margin-bottom:10px;">Vorlage aus "${escapeHtml(state.tmp.wodNameMatch.name)}" vom ${fmtDate(state.tmp.wodNameMatch.date)} übernommen — passt gerne an.</div>`
     : '';
+  const pr1rmBanner = state.tmp.missing1RMWarning ? `
+    <div class="note" style="color:var(--plate-red);margin-bottom:10px;">
+      ${state.tmp.missing1RMWarning.map(n=>`Du hast noch kein ${escapeHtml(n)} 1RM erfasst`).join('<br>')}
+      <button type="button" class="btn-sm btn-ghost" style="margin-top:6px;" onclick="state.tmp.missing1RMWarning=null; render();">Verstanden</button>
+    </div>` : '';
 
   const emomFields = isEmom ? `
     <div class="row">
@@ -4856,10 +5004,10 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const isDistanceWeighted = isWeighted && isDistanceWeightedExercise(ex);
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
-      <div class="field"><label>Variante</label>
+      <div class="field"><label>Variante wechseln</label>
         <select onchange="updateTemplateFieldVariant(${mi},this.value)">
           ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
-            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.id===variantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
         </select>
       </div>` : '';
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
@@ -4894,6 +5042,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateTemplateField(${mi},'exerciseId',exId))">➕</button>
         ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
       </div>
+      ${state.tmp.newlyCreatedExerciseIds?.includes(t.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
       ${variantSelector}
       ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
       <div class="row">
@@ -4914,6 +5063,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       ${headerFields}
       ${emomFields}
       ${refNote}
+      ${pr1rmBanner}
       ${moveBlocks}
       <button class="add-move-btn" onclick="addTemplateMove()">+ Bewegung hinzufügen</button>
       <div class="row">
@@ -5024,7 +5174,7 @@ function renderLiveGroupBlocks(group){
         ${prescriptionBits.length ? `<div class="note" style="margin-bottom:8px;">Vorgabe: ${escapeHtml(prescriptionBits.join(' · '))}</div>` : ''}
         <div class="row">
           <div class="field"><label>${qtyLabel}</label><input type="number" step="1" id="liveReps_${mi}" value="${qtyValue}" placeholder="z.B. 5"></div>
-          ${(isCardio || isMobility) ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
+          ${type!=='weighted' ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
         </div>
         ${gpsButton}
       </div>`;
@@ -5320,10 +5470,10 @@ function renderForTimeFlow(historyHtml){
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'for-time',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
-      <div class="field"><label>Variante</label>
+      <div class="field"><label>Variante wechseln</label>
         <select onchange="updateForTimeMoveVariant(${mi},this.value)">
           ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
-            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.id===variantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
         </select>
       </div>` : '';
     return `
@@ -5335,6 +5485,7 @@ function renderForTimeFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForTimeMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeForTimeMove(${mi})">✕</button>` : ''}
       </div>
+      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
       ${variantSelector}
       ${unitToggle}
       <div class="row">
@@ -5567,10 +5718,12 @@ async function saveForTimeWorkout(){
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const prMovements = buildPrMovementsFromFlat(movements);
   const workout = {
-    id: uid(), date, name, note, format:'for-time', movements: [],
+    id: uid(), date, name, note, format:'for-time', movements: prMovements,
     forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0, roundsLog: b.roundsLog||[] }
   };
+  showPRToastIfAny(prMovements);
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
   if(name && document.getElementById('forTimeSaveAsBest')?.checked && b.finalElapsedSec!=null){
@@ -5683,10 +5836,10 @@ function renderAmrapFlow(historyHtml){
     const gpsButton = isRunExercise(ex) && m.unit==='m' ? `<div style="text-align:center;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'amrap',mi:${mi}})">📍 Lauf starten</button></div>` : '';
     const variantMatch = matchLibraryVariant(ex);
     const variantSelector = variantMatch ? `
-      <div class="field"><label>Variante</label>
+      <div class="field"><label>Variante wechseln</label>
         <select onchange="updateAmrapMoveVariant(${mi},this.value)">
           ${variantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===variantMatch.variant.id)
-            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+            .map(v=>`<option value="${v.id}" ${v.id===variantMatch.variant.id?'selected':''}>${v.id===variantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
         </select>
       </div>` : '';
     return `
@@ -5698,6 +5851,7 @@ function renderAmrapFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateAmrapMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeAmrapMove(${mi})">✕</button>` : ''}
       </div>
+      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
       ${variantSelector}
       ${unitToggle}
       <div class="row">
@@ -5891,10 +6045,12 @@ async function saveAmrapWorkout(){
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const prMovements = buildPrMovementsFromFlat(movements);
   const workout = {
-    id: uid(), date, name, note, format:'amrap', movements: [],
+    id: uid(), date, name, note, format:'amrap', movements: prMovements,
     amrap: { movements, durationSec: Math.round(b.durationMs/1000), roundsCompleted: b.roundsCompleted, extraReps: parseInt(b.extraReps)||0 }
   };
+  showPRToastIfAny(prMovements);
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
   if(state.tmp.loadedDraftId){
@@ -5924,10 +6080,10 @@ function renderForLoadFlow(historyHtml){
   const forLoadEx = state.exercises.find(e=>e.id===b.exerciseId);
   const forLoadVariantMatch = matchLibraryVariant(forLoadEx);
   const forLoadVariantSelector = forLoadVariantMatch ? `
-    <div class="field"><label>Variante</label>
+    <div class="field"><label>Variante wechseln</label>
       <select onchange="updateForLoadFieldVariant(this.value)">
         ${forLoadVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===forLoadVariantMatch.variant.id)
-          .map(v=>`<option value="${v.id}" ${v.id===forLoadVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+          .map(v=>`<option value="${v.id}" ${v.id===forLoadVariantMatch.variant.id?'selected':''}>${v.id===forLoadVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
       </select>
     </div>` : '';
   const forLoadIsCardio = getExerciseType(forLoadEx)==='cardio';
@@ -5957,6 +6113,7 @@ function renderForLoadFlow(historyHtml){
           </select>
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
+        ${state.tmp.newlyCreatedExerciseIds?.includes(b.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
         ${forLoadVariantSelector}
         ${forLoadUnitToggle}
         ${forLoadTargetField}
@@ -6135,10 +6292,12 @@ async function saveForLoadWorkout(){
   const note = state.tmp.wodNote || '';
   const weight = parseFloat(b.achievedWeight)||0;
   const reps = parseInt(b.targetReps)||1;
+  const prMovements = isQtyBased ? [] : buildPrMovementsFromFlat([{exerciseId: b.exerciseId, reps, weight}]);
   const workout = {
-    id: uid(), date, name, note, format:'for-load', movements: [],
+    id: uid(), date, name, note, format:'for-load', movements: prMovements,
     forLoad: { exerciseId: b.exerciseId, targetReps: isQtyBased ? null : reps, timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, achievedWeight: weight, unit: isQtyBased ? b.unit : null }
   };
+  showPRToastIfAny(prMovements);
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
   if(!isQtyBased && weight && document.getElementById('forLoadSaveAsPr')?.checked){
@@ -6407,6 +6566,7 @@ async function saveWod(){
     return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isQtyBased ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
+  showPRToastIfAny(movements);
   state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements});
   await saveKey('workouts', state.workouts);
   if(state.tmp.loadedDraftId){
@@ -6837,10 +6997,10 @@ function renderPrCards(){
   const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
   const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
   const prVariantSelector = prVariantMatch ? `
-    <div class="field"><label>Variante</label>
+    <div class="field"><label>Variante wechseln</label>
       <select onchange="updatePrExerciseVariant(this.value)">
         ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
-          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.label}</option>`).join('')}
+          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.id===prVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
       </select>
     </div>` : '';
 
@@ -6848,11 +7008,21 @@ function renderPrCards(){
     const computed = computedBest(e.id);
     const entries = prEntriesFor(e.id);
     const official = bestE1RM(e.id);
+    const repSchemeBests = bestByRepScheme(e.id);
     return `
     <div class="wod-move-row">
       <div class="wname" style="font-size:16px;margin-bottom:4px;">${e.name}</div>
       <div class="stat-num accent" style="margin-bottom:8px;">${Math.round(official)}kg</div>
       ${computed!=null ? `<div class="note" style="margin-bottom:8px;">aus Training errechnet: ${Math.round(computed)}kg</div>` : ''}
+      ${repSchemeBests.length ? `
+        <div class="note" style="margin-bottom:4px;">Bestleistung je Wiederholungszahl:</div>
+        ${repSchemeBests.map(b=>`
+          <div class="history-item">
+            <span class="date">${b.reps} WH</span>
+            <span class="val">${b.weight}kg</span>
+            <span class="date">${fmtDate(b.date)}</span>
+          </div>`).join('')}
+      ` : ''}
       ${entries.length ? entries.map(p=>`
         <div class="history-item">
           <span class="date">${fmtDate(p.date)}</span>
@@ -6885,7 +7055,7 @@ function renderPrCards(){
       <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
     </div>
     <div class="card">
-      <h2 class="small">Deine 1RM-Werte</h2>
+      <h2 class="small">🏆 Hall of Fame</h2>
       ${listHtml}
     </div>
   `;
@@ -7129,7 +7299,7 @@ function renderProgressMenu(){
   return `
     <div class="card">
       <h2>Fortschritt</h2>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏋️ 1RM</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Hall of Fame</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
@@ -7321,6 +7491,7 @@ function renderProfile(){
   const section = state.tmp.profileSection;
   if(section==='settings') return renderProfileSettings();
   if(section==='data') return renderProfileData();
+  if(section==='admin') return renderAdminUsersScreen();
   return renderProfileMenu();
 }
 function renderProfileMenu(){
@@ -7339,10 +7510,59 @@ function renderProfileMenu(){
       <h2>Profil</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('settings')">⚙️ Einstellungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
+      ${pb.authStore.record?.isAppAdmin ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-top:10px;" onclick="setProfileSection('admin')">🛡️ App-Administration</button>` : ''}
     </div>
   `;
 }
-function setProfileSection(s){ state.tmp.profileSection = s; render(); }
+function setProfileSection(s){
+  state.tmp.profileSection = s;
+  if(s==='admin') loadAdminUsers();
+  render();
+}
+async function loadAdminUsers(){
+  try{
+    state.tmp.adminUsers = await pb.collection('users').getFullList({sort:'email'});
+  }catch(e){
+    state.tmp.adminUsers = [];
+    showToast('Nutzerliste konnte nicht geladen werden');
+  }
+  render();
+}
+async function saveAdminUserFlags(userId){
+  const isAppAdmin = !!document.getElementById(`adminFlag_${userId}`)?.checked;
+  const isProStandalone = !!document.getElementById(`proFlag_${userId}`)?.checked;
+  const title = document.getElementById(`titleField_${userId}`)?.value || '';
+  try{
+    await pb.collection('users').update(userId, { isAppAdmin, isProStandalone, title });
+    showToast('Gespeichert');
+    await loadAdminUsers();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+function renderAdminUsersScreen(){
+  const users = state.tmp.adminUsers;
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <div class="card">
+      <h2 class="small">App-Administration</h2>
+      <div class="note" style="margin-bottom:10px;">Alle registrierten Nutzer. Admin-Rechte und Pro-Zugang können hier vergeben werden — Box-Mitglieder haben unabhängig davon automatisch Pro-Zugang.</div>
+      ${users===undefined || users===null ? '<div class="note">Lädt …</div>' : users.map(u=>`
+        <div style="padding:10px 0;border-top:1px solid var(--iron-700);">
+          <div class="note" style="margin-bottom:6px;">${escapeHtml(u.name||'')} ${escapeHtml(u.email||'')}</div>
+          <div class="row" style="align-items:center;gap:14px;margin-bottom:6px;">
+            <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
+            <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isProStandalone?'checked':''}> Pro (ohne Box)</label>
+          </div>
+          <div class="row" style="gap:8px;">
+            <input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="Titel, z.B. Coach" style="flex:1;">
+            <button class="btn-sm btn-primary" style="width:auto;" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
 function renderProfileSettings(){
   const p = state.profile || {};
   const theme = p.theme || 'dark';
@@ -7395,6 +7615,17 @@ function renderProfileSettings(){
       <button class="btn btn-ghost" onclick="saveBoxSettings()">Speichern</button>
     </div>
     ` : ''}
+    <div class="card">
+      <h2 class="small">Meine Übungen</h2>
+      <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
+      ${sortedExercises().map(e=>`
+        <div class="row" style="align-items:center;margin-bottom:6px;">
+          <span style="flex:1;">${escapeHtml(e.name)}</span>
+          <span class="note" style="margin:0 8px;">${({weighted:'Gewicht', bodyweight:'Bodyweight', cardio:'Cardio', mobility:'Mobility'})[e.type] || e.type}</span>
+          <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(()=>{}, '${e.id}')">✎</button>
+        </div>
+      `).join('')}
+    </div>
     <div class="card">
       <h2>Darstellung</h2>
       <div class="row">
