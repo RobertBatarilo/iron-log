@@ -23,7 +23,7 @@ EMOM:
 {"format":"emom","name":"<Name oder null>","movements":[{"name":"<Uebungsname>","reps":"<Zahl als String>","unit":"<'m'|'km'|'cal'|null>","weight":"<kg als String oder leer, nur falls im Bild ein Gewicht zu dieser Bewegung steht>"}],"intervalMin":"<Zahl als String>","intervalSec":"<Zahl als String>","rounds":"<Anzahl Minuten/Intervalle als String>"}
 
 Strength (Sets x Reps, ggf. mit Gewicht/Prozent):
-{"format":"strength","name":"<Name oder null>","moves":[{"name":"<Uebungsname>","setsCount":"<Zahl als String>","repsTarget":"<Zahl als String>","pctList":"<z.B. '70' oder '70,75,80' oder leer>","weight":"<kg als String oder leer>"}]}
+{"format":"strength","name":"<Name oder null>","moves":[{"name":"<Uebungsname>","setsCount":"<Zahl als String>","repsTarget":"<Reps als String, z.B. '5' bei gleicher Wiederholungszahl in jedem Satz, ODER kommagetrennt z.B. '7,5,3,5,3' wenn jeder Satz eine ANDERE Wiederholungszahl hat - IMMER in derselben Reihenfolge und mit derselben Anzahl an Werten wie pctList>","pctList":"<z.B. '70' oder '70,75,80,75,80' oder leer>","weight":"<kg als String oder leer>"}]}
 
 For Load (1RM-Testtag, z.B. "Find your 1RM Back Squat"):
 {"format":"for-load","name":"<Uebungsname>","timeCapMin":"<Zahl oder '10'>","timeCapSec":"<Zahl oder '0'>"}
@@ -33,6 +33,7 @@ Regeln:
 - Erkennst du "16/12 Calorie Air Bike" o.ae. (Maenner/Frauen-Kalorienangabe), nimm die erste (Maenner-)Zahl als reps und "cal" als unit.
 - Erkennst du bei Gewichtsangaben ein Maenner/Frauen-Splitformat wie "61/43 kg" oder "61/43kg", nimm NUR die erste (Maenner-)Zahl als weight (also "61", nicht "61/43") - weight muss immer eine einzelne reine Zahl als String sein, niemals ein Bruch/Slash.
 - Wenn eine Angabe nicht im Bild steht, verwende einen sinnvollen Default (rounds:"1", timeCapMin/Sec:"", etc.) statt das Feld wegzulassen.
+- Bei "strength": steht dort z.B. "Set 1: 7 Reps @ 70%, Set 2: 5 Reps @ 75%, Set 3: 3 Reps @ 80%" (unterschiedliche Reps pro Satz), dann NICHT nur die erste Zahl fuer repsTarget nehmen, sondern ALLE Wiederholungszahlen kommagetrennt in der Reihenfolge der Saetze auflisten (hier also "7,5,3"), passend zur ebenfalls kommagetrennten pctList ("70,75,80").
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare oder Codeblock-Markierungen.`;
 
 function readBody(req) {

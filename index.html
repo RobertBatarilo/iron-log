@@ -573,7 +573,7 @@ function defaultTmp(){
   return {
     wodFormat:'strength',
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
-    adminUsers:null, showNachbuchenPicker:false, bookableAthletes:null,
+    adminUsers:null, adminSearch:'', adminSelectedUserId:null, showNachbuchenPicker:false, bookableAthletes:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
@@ -4103,6 +4103,16 @@ async function adminBookAthlete(instanceId){
     showToast('Nachbuchen fehlgeschlagen');
   }
 }
+async function adminRemoveBooking(bookingId){
+  if(!isBoxOwner()) return;
+  try{
+    await pb.collection('bookings').update(bookingId, {status:'cancelled'});
+    showToast('Teilnehmer entfernt');
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+  }catch(e){
+    showToast('Entfernen fehlgeschlagen');
+  }
+}
 /* ---- Box-Workouts (Ergebnisse) ---- */
 async function selectWorkoutsDate(d){
   state.tmp.workoutsSelectedDate = d;
@@ -4627,11 +4637,17 @@ function renderClassDetailModalRoot(){
               <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((b.userName||'?').slice(0,2).toUpperCase())}</span>
               <span class="val">${escapeHtml(b.userName||'Mitglied')}</span>
             </span>
-            ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':(isBoxOwner()?`<button class="btn-sm btn-ghost" style="width:auto;" onclick="checkIn('${b.id}')">Einchecken</button>`:'')}
+            <span class="row" style="width:auto;align-items:center;gap:6px;flex:0 0 auto;">
+              ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}
+              ${isBoxOwner() ? `
+                ${b.status!=='attended' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="checkIn('${b.id}')">Einchecken</button>` : ''}
+                <button class="btn-sm btn-ghost" style="width:auto;" onclick="adminRemoveBooking('${b.id}')">Entfernen</button>
+              ` : ''}
+            </span>
           </div>`).join('') : `<div class="note">Noch niemand angemeldet.</div>`}
         ${waitlist.length ? `
           <h2 class="small" style="margin-top:14px;">Warteliste (${waitlist.length})</h2>
-          ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span></div>`).join('')}
+          ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span>${isBoxOwner()?`<button class="btn-sm btn-ghost" style="width:auto;" onclick="adminRemoveBooking('${b.id}')">Entfernen</button>`:''}</div>`).join('')}
         ` : ''}
         ${isBoxOwner() ? `
           <div style="margin-top:10px;">
@@ -5076,7 +5092,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         </select>
       </div>` : '';
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
-    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH</label><input type="number" step="1" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1"></div>` : '';
+    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH${isWeighted?' (pro Satz, z.B. 7,5,3)':''}</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
     const pctField = isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
     const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alt. zu %"></div>${isDistanceWeighted ? distanceField : repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
@@ -6525,6 +6541,7 @@ function generateWodRows(){
     const isCardio = type==='cardio' || type==='mobility';
     const isDistanceWeighted = type==='weighted' && t.unit==='m';
     const pctArr = parsePctList(t.pctList);
+    const repsArr = parseRepScheme(t.repsTarget);
     const setsCount = effectiveSetsCount[ti];
     const known1rm = bestE1RM(t.exerciseId);
     const sets = [];
@@ -6535,6 +6552,7 @@ function generateWodRows(){
         sets.push({reps: t.qty || '', weight: t.weight||'', pct:null, autoFilled: !!t.weight});
       } else {
         const pct = pctForIndex(pctArr, si);
+        const reps = repsArr.length>1 ? String(pctForIndex(repsArr, si)) : (t.repsTarget || '');
         let weight='', autoFilled=false;
         if(pct && known1rm){
           weight = roundToIncrement(known1rm*pct/100);
@@ -6543,7 +6561,7 @@ function generateWodRows(){
           weight = t.weight;
           autoFilled = true;
         }
-        sets.push({reps: t.repsTarget || '', weight, pct: pct||null, autoFilled});
+        sets.push({reps, weight, pct: pct||null, autoFilled});
       }
     }
     const timing = isEmom ? `Every ${state.tmp.emomMin}:${String(state.tmp.emomSec).padStart(2,'0')}` : t.timing;
@@ -7581,16 +7599,28 @@ function renderProfileMenu(){
 }
 function setProfileSection(s){
   state.tmp.profileSection = s;
-  if(s==='admin') loadAdminUsers();
+  if(s==='admin'){
+    state.tmp.adminSearch = '';
+    state.tmp.adminSelectedUserId = null;
+    loadAdminUsers();
+  }
   render();
 }
 async function loadAdminUsers(){
   try{
-    state.tmp.adminUsers = await pb.collection('users').getFullList({sort:'email'});
+    state.tmp.adminUsers = await pb.collection('users').getFullList({sort:'name'});
   }catch(e){
     state.tmp.adminUsers = [];
     showToast('Nutzerliste konnte nicht geladen werden');
   }
+  render();
+}
+function openAdminUserDetail(userId){
+  state.tmp.adminSelectedUserId = userId;
+  render();
+}
+function closeAdminUserDetail(){
+  state.tmp.adminSelectedUserId = null;
   render();
 }
 async function saveAdminUserFlags(userId){
@@ -7606,25 +7636,56 @@ async function saveAdminUserFlags(userId){
   }
 }
 function renderAdminUsersScreen(){
+  if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   const users = state.tmp.adminUsers;
+  const q = (state.tmp.adminSearch||'').toLowerCase().trim();
+  const filtered = users==null ? null : (q ? users.filter(u=>(u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)) : users);
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
     <div class="card">
       <h2 class="small">App-Administration</h2>
-      <div class="note" style="margin-bottom:10px;">Alle registrierten Nutzer. Admin-Rechte und Pro-Zugang können hier vergeben werden — Box-Mitglieder haben unabhängig davon automatisch Pro-Zugang.</div>
-      ${users===undefined || users===null ? '<div class="note">Lädt …</div>' : users.map(u=>`
-        <div style="padding:10px 0;border-top:1px solid var(--iron-700);">
-          <div class="note" style="margin-bottom:6px;">${escapeHtml(u.name||'')} ${escapeHtml(u.email||'')}</div>
-          <div class="row" style="align-items:center;gap:14px;margin-bottom:6px;">
-            <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
-            <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isProStandalone?'checked':''}> Pro (ohne Box)</label>
-          </div>
-          <div class="row" style="gap:8px;">
-            <input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="Titel, z.B. Coach" style="flex:1;">
-            <button class="btn-sm btn-primary" style="width:auto;" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
-          </div>
+      <div class="field"><label>Suche</label>
+        <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; render();" placeholder="Name oder E-Mail suchen …">
+      </div>
+      ${users==null ? '<div class="note">Lädt …</div>' : (filtered.length ? filtered.map(u=>`
+        <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
+          <span class="row" style="align-items:center;gap:10px;width:auto;flex:1;">
+            <span class="box-avatar" style="width:32px;height:32px;font-size:12px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
+            <span style="display:flex;flex-direction:column;overflow:hidden;">
+              <span class="val">${escapeHtml(u.name||'—')}</span>
+              <span class="note" style="margin:0;">${escapeHtml(u.email||'')}</span>
+            </span>
+          </span>
+          <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
+            ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
+            ${u.isProStandalone?'<span class="chip">Pro</span>':''}
+          </span>
         </div>
-      `).join('')}
+      `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
+    </div>
+  `;
+}
+function renderAdminUserDetail(){
+  const u = (state.tmp.adminUsers||[]).find(x=>x.id===state.tmp.adminSelectedUserId);
+  if(!u){
+    return `<button class="btn btn-ghost" onclick="closeAdminUserDetail()">← Zurück</button><div class="note">Nutzer nicht gefunden.</div>`;
+  }
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeAdminUserDetail()">← Zurück</button>
+    <div class="card">
+      <div class="row" style="align-items:center;gap:12px;margin-bottom:14px;">
+        <span class="box-avatar" style="width:48px;height:48px;font-size:16px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
+        <div>
+          <div class="wname" style="font-size:16px;">${escapeHtml(u.name||'—')}</div>
+          <div class="note" style="margin:0;">${escapeHtml(u.email||'')}</div>
+        </div>
+      </div>
+      <div class="row" style="align-items:center;gap:14px;margin-bottom:10px;">
+        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
+        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isProStandalone?'checked':''}> Pro (ohne Box)</label>
+      </div>
+      <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
+      <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
     </div>
   `;
 }
