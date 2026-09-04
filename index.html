@@ -560,7 +560,10 @@ function sortedExercises(){ return state.exercises.slice().sort((a,b)=>a.name.lo
 
 function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')+ '-' + Math.random().toString(36).slice(2,6);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
-function todayStr(){return new Date().toISOString().slice(0,10);}
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function fmtDate(d){
   const dt = new Date(d+'T00:00:00');
   return dt.toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit',year:'2-digit'});
@@ -4012,6 +4015,9 @@ async function toggleBooking(instanceId){
       }
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Buchung storniert');
+    } else if(st.mine && st.mine.status==='attended'){
+      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
+      showToast('Buchung storniert');
     } else if(st.mine && st.mine.status==='waitlist'){
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Von Warteliste entfernt');
@@ -4485,11 +4491,12 @@ function renderBoxScheduleTab(){
         const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
         const showCheckIn = st.mine && canCheckIn(st.mine, inst);
         const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
+        const cancelBtn = cancelBlocked
+          ? `<button class="btn-sm btn-ghost" style="opacity:0.5;" onclick="event.stopPropagation();showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(inst))+' Uhr)')">Stornofrist abgelaufen</button>`
+          : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Warteliste')}</button>`;
         const actionBtn = showCheckIn
-          ? `<button class="btn-sm btn-primary" onclick="event.stopPropagation();checkIn('${st.mine.id}')">Einchecken</button>`
-          : cancelBlocked
-            ? `<button class="btn-sm btn-ghost" style="opacity:0.5;" onclick="event.stopPropagation();showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(inst))+' Uhr)')">Stornofrist abgelaufen</button>`
-            : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Warteliste')}</button>`;
+          ? `<button class="btn-sm btn-primary" onclick="event.stopPropagation();checkIn('${st.mine.id}')">Einchecken</button> ${cancelBtn}`
+          : cancelBtn;
         const matched = state.box.tabWorkouts.filter(w=>w.category===slot?.label && w.date===inst.date);
         const wodLabel = matched.length ? matched.map(w=>escapeHtml(w.name||'Workout')).join(' + ') : 'Kein WOD hinterlegt';
         const minInfo = slot?.minParticipants ? ` · Mind. ${slot.minParticipants} (aktuell ${st.activeCount})` : '';
@@ -4554,11 +4561,12 @@ function renderClassDetailModalRoot(){
   const minP = slot?.minParticipants;
   const showCheckIn = st.mine && canCheckIn(st.mine, inst);
   const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
+  const cancelBtn = cancelBlocked
+    ? `<button class="btn btn-ghost" style="opacity:0.5;" disabled>Stornofrist abgelaufen</button>`
+    : `<button class="btn ${st.mine?'btn-ghost':'btn-primary'}" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Auf Warteliste')}</button>`;
   const actionBtn = showCheckIn
-    ? `<button class="btn btn-primary" onclick="checkIn('${st.mine.id}')">Einchecken</button>`
-    : cancelBlocked
-      ? `<button class="btn btn-ghost" style="opacity:0.5;" disabled>Stornofrist abgelaufen</button>`
-      : `<button class="btn ${st.mine?'btn-ghost':'btn-primary'}" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Auf Warteliste')}</button>`;
+    ? `<div class="row"><button class="btn btn-primary" onclick="checkIn('${st.mine.id}')">Einchecken</button>${cancelBtn}</div>`
+    : cancelBtn;
   const deadline = (st.mine && st.mine.status==='reserved') ? cancellationDeadline(inst) : null;
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closeClassDetailModal()">
