@@ -4008,14 +4008,11 @@ async function toggleBooking(instanceId){
   const myId = pb.authStore.record.id;
   const myRow = state.box.classBookings.find(b=>b.classInstance===instanceId && b.user===myId) || null;
   try{
-    if(st.mine && st.mine.status==='reserved'){
+    if(st.mine && (st.mine.status==='reserved' || st.mine.status==='attended')){
       if(!canCancelBooking(instance)){
         showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(instance))+' Uhr)');
         return;
       }
-      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
-      showToast('Buchung storniert');
-    } else if(st.mine && st.mine.status==='attended'){
       await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
       showToast('Buchung storniert');
     } else if(st.mine && st.mine.status==='waitlist'){
@@ -4490,7 +4487,7 @@ function renderBoxScheduleTab(){
         const endTime = addMinutesToTime(inst.startTime, slot?.durationMin || 60);
         const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
         const showCheckIn = st.mine && canCheckIn(st.mine, inst);
-        const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
+        const cancelBlocked = st.mine && (st.mine.status==='reserved'||st.mine.status==='attended') && !canCancelBooking(inst);
         const cancelBtn = cancelBlocked
           ? `<button class="btn-sm btn-ghost" style="opacity:0.5;" onclick="event.stopPropagation();showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(inst))+' Uhr)')">Stornofrist abgelaufen</button>`
           : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Warteliste')}</button>`;
@@ -4560,14 +4557,14 @@ function renderClassDetailModalRoot(){
   const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
   const minP = slot?.minParticipants;
   const showCheckIn = st.mine && canCheckIn(st.mine, inst);
-  const cancelBlocked = st.mine && st.mine.status==='reserved' && !canCancelBooking(inst);
+  const cancelBlocked = st.mine && (st.mine.status==='reserved'||st.mine.status==='attended') && !canCancelBooking(inst);
   const cancelBtn = cancelBlocked
     ? `<button class="btn btn-ghost" style="opacity:0.5;" disabled>Stornofrist abgelaufen</button>`
     : `<button class="btn ${st.mine?'btn-ghost':'btn-primary'}" onclick="toggleBooking('${inst.id}')">${st.mine?'Stornieren':(st.spotsLeft>0?'Buchen':'Auf Warteliste')}</button>`;
   const actionBtn = showCheckIn
     ? `<div class="row"><button class="btn btn-primary" onclick="checkIn('${st.mine.id}')">Einchecken</button>${cancelBtn}</div>`
     : cancelBtn;
-  const deadline = (st.mine && st.mine.status==='reserved') ? cancellationDeadline(inst) : null;
+  const deadline = (st.mine && (st.mine.status==='reserved'||st.mine.status==='attended')) ? cancellationDeadline(inst) : null;
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closeClassDetailModal()">
       <div class="modal-box">
