@@ -560,9 +560,11 @@ function sortedExercises(){ return state.exercises.slice().sort((a,b)=>a.name.lo
 
 function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')+ '-' + Math.random().toString(36).slice(2,6);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
-function todayStr(){
-  const d = new Date();
+function localDateStr(d){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function todayStr(){
+  return localDateStr(new Date());
 }
 function fmtDate(d){
   const dt = new Date(d+'T00:00:00');
@@ -574,6 +576,7 @@ function defaultTmp(){
     wodFormat:'strength',
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, showNachbuchenPicker:false, bookableAthletes:null,
+    hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
     emomMin:1, emomSec:30, emomRounds:10, emomAlternateCycles:0,
@@ -597,7 +600,7 @@ function defaultTmp(){
     workoutMenu:'formats',
     boxScheduleEditId:null,
     boxSubTab:'home',
-    scheduleSelectedDate:null,
+    scheduleSelectedDate:null, scheduleWeekOffset:0,
     workoutsSelectedDate:null,
     boxFreeformOpen:false,
     boxResultFormId:null,
@@ -2486,14 +2489,15 @@ function iconForLoad(){return `<svg viewBox="0 0 24 24" fill="none" stroke="curr
 function iconBuilding(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1"/><line x1="8" y1="7" x2="8" y2="7.01"/><line x1="12" y1="7" x2="12" y2="7.01"/><line x1="16" y1="7" x2="16" y2="7.01"/><line x1="8" y1="11" x2="8" y2="11.01"/><line x1="12" y1="11" x2="12" y2="11.01"/><line x1="16" y1="11" x2="16" y2="11.01"/><line x1="8" y1="15" x2="8" y2="15.01"/><line x1="16" y1="15" x2="16" y2="15.01"/><rect x="10" y="15" width="4" height="6"/></svg>`;}
 
 /* ---------- TODAY TAB ---------- */
-function weekDates(){
+function weekDates(offsetWeeks){
+  offsetWeeks = offsetWeeks||0;
   const today = new Date();
   const dayIdx = (today.getDay()+6)%7; // 0=Mo
-  const monday = new Date(today); monday.setDate(today.getDate()-dayIdx);
+  const monday = new Date(today); monday.setDate(today.getDate()-dayIdx+offsetWeeks*7);
   const days = [];
   for(let i=0;i<7;i++){
     const d = new Date(monday); d.setDate(monday.getDate()+i);
-    days.push(d.toISOString().slice(0,10));
+    days.push(localDateStr(d));
   }
   return days;
 }
@@ -4418,8 +4422,8 @@ function renderRoleBadge(){
     ? `<span class="chip chip-owner">Coach</span>`
     : `<span class="chip">Mitglied</span>`;
 }
-function renderWeekdayStrip(selected, onSelectFnName){
-  return weekDates().map(d=>{
+function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
+  return weekDates(offsetWeeks).map(d=>{
     const isSel = d===selected;
     return `<div style="text-align:center;flex:1;cursor:pointer;" onclick="${onSelectFnName}('${d}')">
       <div class="stat-label">${WEEKDAY_NAMES[new Date(d+'T00:00:00').getDay()]}</div>
@@ -4528,9 +4532,25 @@ function renderBoxHomeMember(box){
 function renderBoxHome(box){
   return isBoxAdminView() ? renderBoxHomeAdmin(box) : renderBoxHomeMember(box);
 }
+function shiftScheduleWeek(delta){
+  state.tmp.scheduleWeekOffset = (state.tmp.scheduleWeekOffset||0) + delta;
+  selectScheduleDate(weekDates(state.tmp.scheduleWeekOffset)[0]);
+}
+function resetScheduleWeek(){
+  state.tmp.scheduleWeekOffset = 0;
+  selectScheduleDate(todayStr());
+}
 function renderBoxScheduleTab(){
+  const weekOffset = state.tmp.scheduleWeekOffset||0;
   const selected = state.tmp.scheduleSelectedDate || todayStr();
-  const strip = renderWeekdayStrip(selected, 'selectScheduleDate');
+  const weekLabel = weekOffset===0 ? 'Diese Woche' : (weekOffset>0 ? `+${weekOffset} Woche${weekOffset>1?'n':''}` : `${weekOffset} Woche${weekOffset<-1?'n':''}`);
+  const weekNav = `
+    <div class="row" style="align-items:center;gap:6px;margin-bottom:8px;">
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftScheduleWeek(-1)">‹</button>
+      <span class="note" style="flex:1;text-align:center;margin:0;">${weekLabel}${weekOffset!==0 ? ` <a href="#" onclick="event.preventDefault();resetScheduleWeek();" style="color:var(--chalk-yellow);">Heute</a>` : ''}</span>
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftScheduleWeek(1)">›</button>
+    </div>`;
+  const strip = renderWeekdayStrip(selected, 'selectScheduleDate', weekOffset);
   const loaded = state.box.scheduleDate===selected && state.box.tabWorkoutsDate===selected;
   const instances = loaded ? state.box.classInstances : [];
   const body = !loaded ? `<div class="note">Lädt …</div>`
@@ -4586,7 +4606,7 @@ function renderBoxScheduleTab(){
       </div>
     `;
   })() : '';
-  return `<div class="card"><div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>${editorCard}`;
+  return `<div class="card">${weekNav}<div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>${editorCard}`;
 }
 function openClassDetailModal(instanceId){
   state.tmp.classDetailInstanceId = instanceId;
@@ -7074,27 +7094,14 @@ function renderIntervalUI(t){
 }
 
 /* ---------- ERFOLGE (1RM-Rekorde & Bestzeiten, jetzt Unterseiten des Fortschritt-Tabs) ---------- */
-function renderPrCards(){
-  const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
-  const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
-  const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
-  const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
-  const prVariantSelector = prVariantMatch ? `
-    <div class="field"><label>Variante wechseln</label>
-      <select onchange="updatePrExerciseVariant(this.value)">
-        ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
-          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.id===prVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
-      </select>
-    </div>` : '';
-
-  const listHtml = exercisesWithData.length ? exercisesWithData.map(e=>{
-    const computed = computedBest(e.id);
-    const entries = prEntriesFor(e.id);
-    const official = bestE1RM(e.id);
-    const repSchemeBests = bestByRepScheme(e.id);
-    return `
+function renderHallOfFameEntry(e){
+  const computed = computedBest(e.id);
+  const entries = prEntriesFor(e.id);
+  const official = bestE1RM(e.id);
+  const repSchemeBests = bestByRepScheme(e.id);
+  return `
     <div class="wod-move-row">
-      <div class="wname" style="font-size:16px;margin-bottom:4px;">${e.name}</div>
+      <div class="wname" style="font-size:16px;margin-bottom:4px;">${escapeHtml(e.name)}</div>
       <div class="stat-num accent" style="margin-bottom:8px;">${Math.round(official)}kg</div>
       ${computed!=null ? `<div class="note" style="margin-bottom:8px;">aus Training errechnet: ${Math.round(computed)}kg</div>` : ''}
       ${repSchemeBests.length ? `
@@ -7114,7 +7121,35 @@ function renderPrCards(){
           <button class="remove-row" onclick="deletePrEntry('${p.id}')">✕</button>
         </div>`).join('') : ''}
     </div>`;
-  }).join('') : `<div class="note">Noch keine 1RM-Werte vorhanden.</div>`;
+}
+function renderPrCards(){
+  const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
+  const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
+  const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
+  const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
+  const prVariantSelector = prVariantMatch ? `
+    <div class="field"><label>Variante wechseln</label>
+      <select onchange="updatePrExerciseVariant(this.value)">
+        ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
+          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.id===prVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
+      </select>
+    </div>` : '';
+
+  const hofSearch = (state.tmp.hallOfFameSearch||'').toLowerCase().trim();
+  const hofFiltered = hofSearch ? exercisesWithData.filter(e=>e.name.toLowerCase().includes(hofSearch)) : exercisesWithData;
+  const hofSelectedId = (state.tmp.hallOfFameExercise && hofFiltered.some(e=>e.id===state.tmp.hallOfFameExercise))
+    ? state.tmp.hallOfFameExercise
+    : (hofFiltered[0] && hofFiltered[0].id);
+  const hofSelectedEx = hofSelectedId ? exercisesWithData.find(e=>e.id===hofSelectedId) : null;
+  const hofOptions = hofFiltered.map(e=>`<option value="${e.id}" ${e.id===hofSelectedId?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
+
+  const listHtml = !exercisesWithData.length ? `<div class="note">Noch keine 1RM-Werte vorhanden.</div>` : `
+    <div class="field"><label>Suche</label><input type="text" value="${escapeHtml(state.tmp.hallOfFameSearch||'')}" oninput="state.tmp.hallOfFameSearch=this.value; render();" placeholder="Übung suchen …"></div>
+    ${hofFiltered.length ? `
+      <div class="field"><select onchange="state.tmp.hallOfFameExercise=this.value; render();">${hofOptions}</select></div>
+      ${hofSelectedEx ? renderHallOfFameEntry(hofSelectedEx) : ''}
+    ` : `<div class="note">Keine Treffer${hofSearch?` für "${escapeHtml(state.tmp.hallOfFameSearch)}"`:''}.</div>`}
+  `;
 
   return `
     <div class="card">
@@ -7575,7 +7610,24 @@ function renderProfile(){
   if(section==='settings') return renderProfileSettings();
   if(section==='data') return renderProfileData();
   if(section==='admin') return renderAdminUsersScreen();
+  if(section==='exercises') return renderMyExercisesScreen();
   return renderProfileMenu();
+}
+function renderMyExercisesScreen(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection('settings')">← Zurück</button>
+    <div class="card">
+      <h2 class="small">Meine Übungen</h2>
+      <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
+      ${sortedExercises().map(e=>`
+        <div class="row" style="align-items:center;margin-bottom:6px;">
+          <span style="flex:1;">${escapeHtml(e.name)}</span>
+          <span class="note" style="margin:0 8px;">${({weighted:'Gewicht', bodyweight:'Bodyweight', cardio:'Cardio', mobility:'Mobility'})[e.type] || e.type}</span>
+          <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(()=>{}, '${e.id}')">✎</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 function renderProfileMenu(){
   const mode = state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
@@ -7742,15 +7794,7 @@ function renderProfileSettings(){
     </div>
     ` : ''}
     <div class="card">
-      <h2 class="small">Meine Übungen</h2>
-      <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
-      ${sortedExercises().map(e=>`
-        <div class="row" style="align-items:center;margin-bottom:6px;">
-          <span style="flex:1;">${escapeHtml(e.name)}</span>
-          <span class="note" style="margin:0 8px;">${({weighted:'Gewicht', bodyweight:'Bodyweight', cardio:'Cardio', mobility:'Mobility'})[e.type] || e.type}</span>
-          <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(()=>{}, '${e.id}')">✎</button>
-        </div>
-      `).join('')}
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
     </div>
     <div class="card">
       <h2>Darstellung</h2>
