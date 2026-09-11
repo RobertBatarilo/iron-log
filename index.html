@@ -2462,6 +2462,7 @@ function setTab(tab){
   render();
 }
 function render(){
+  const scrollY = window.scrollY;
   document.getElementById('bottomNav').innerHTML = bottomNavHtml();
   const content = document.getElementById('content');
   if(state.activeTab==='today') content.innerHTML = renderToday();
@@ -2473,6 +2474,7 @@ function render(){
   document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
+  window.scrollTo(0, scrollY);
 }
 
 /* ---------- Icons (minimal inline svg) ---------- */
@@ -5690,12 +5692,15 @@ function startForTimeWod(){
   window.scrollTo(0,0);
 }
 function buildForTimeRoundsLog(b){
-  const roundsCount = Math.max(1, parseInt(b.rounds)||1);
   const schemeArr = parseRepScheme(b.repScheme);
+  const hasPerMovementReps = b.movements.some(m=>m.reps);
+  const roundsCount = hasPerMovementReps
+    ? Math.max(1, parseInt(b.rounds)||1)
+    : Math.max(1, parseInt(b.rounds)||1, schemeArr.length);
   const roundsLog = [];
   for(let ri=0; ri<roundsCount; ri++){
     roundsLog.push(b.movements.map(m=>{
-      const target = String(schemeArr.length ? pctForIndex(schemeArr, ri) : (m.reps||''));
+      const target = String(m.reps || (schemeArr.length ? pctForIndex(schemeArr, ri) : ''));
       return { target, reps: target, done:false };
     }));
   }
@@ -5748,8 +5753,10 @@ function toggleForTimeRoundDone(ri, mi){
   const b = state.tmp.forTimeBuilder;
   const item = b.roundsLog[ri][mi];
   item.done = !item.done;
-  if(item.done) item.reps = item.target;
+  const scrollTop = document.getElementById('ftChecklist')?.scrollTop;
   render();
+  const el = document.getElementById('ftChecklist');
+  if(el && scrollTop!=null) el.scrollTop = scrollTop;
 }
 function updateForTimeRoundValue(ri, mi, val){
   const b = state.tmp.forTimeBuilder;
@@ -5791,7 +5798,7 @@ function renderForTimeRunning(b){
     <div class="card" style="text-align:center;">
       <div class="stat-label">${b.timeCapMs>0?'Verbleibend (Time Cap)':'Zeit läuft'}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
-      <div style="text-align:left;max-height:360px;overflow-y:auto;margin-bottom:14px;">
+      <div id="ftChecklist" style="text-align:left;max-height:360px;overflow-y:auto;margin-bottom:14px;">
         ${checklistHtml}
       </div>
       <div class="row">
