@@ -601,14 +601,17 @@ function defaultTmp(){
     boxScheduleEditId:null,
     boxSubTab:'home',
     scheduleSelectedDate:null, scheduleWeekOffset:0,
-    workoutsSelectedDate:null,
+    workoutsSelectedDate:null, workoutsWeekOffset:0,
     boxFreeformOpen:false,
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
     wodCategory:null,
     classDetailInstanceId:null,
-    editingBoxWorkoutId:null
+    editingBoxWorkoutId:null,
+    socialComposerOpen:false, socialComposerText:'', socialComposerImages:[],
+    socialPollDraft:null,
+    socialOpenCommentsPostId:null, socialCommentDraft:{}
   };
 }
 
@@ -623,7 +626,7 @@ let state = {
   timeRecords:[],
   trainingPlan:null,
   activeTab:'today',
-  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{} },
+  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{} },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -3726,6 +3729,8 @@ function setBoxSubTab(tab){
     selectScheduleDate(state.tmp.scheduleSelectedDate || todayStr());
   } else if(tab==='workouts'){
     selectWorkoutsDate(state.tmp.workoutsSelectedDate || todayStr());
+  } else if(tab==='social' && !state.box.socialLoaded){
+    loadSocialFeed(state.box.membership.box);
   }
 }
 /* ---- Profilbild ---- */
@@ -3737,6 +3742,14 @@ function boxAvatarUrl(record, size){
   }catch(e){}
   return null;
 }
+function boxLogoUrl(box, size){
+  if(!box || !box.logo) return null;
+  try{
+    if(pb.files && typeof pb.files.getURL==='function') return pb.files.getURL(box, box.logo, size?{thumb:size}:undefined);
+    if(typeof pb.getFileUrl==='function') return pb.getFileUrl(box, box.logo);
+  }catch(e){}
+  return null;
+}
 async function uploadAvatar(file){
   if(!file) return;
   const formData = new FormData();
@@ -3745,6 +3758,18 @@ async function uploadAvatar(file){
     await pb.collection('users').update(pb.authStore.record.id, formData);
     showToast('Profilbild aktualisiert');
     render();
+  }catch(e){
+    showToast('Upload fehlgeschlagen');
+  }
+}
+async function uploadBoxLogo(file){
+  if(!file || !isBoxOwner()) return;
+  const formData = new FormData();
+  formData.append('logo', file);
+  try{
+    await pb.collection('boxes').update(state.box.membership.box, formData);
+    showToast('Box-Logo aktualisiert');
+    await loadBoxData();
   }catch(e){
     showToast('Upload fehlgeschlagen');
   }
@@ -3775,14 +3800,14 @@ async function saveBoxSettings(){
 }
 /* ---- Profilbild verschieben/zuschneiden vor dem Upload ---- */
 const AVATAR_EDIT_SIZE = 240;
-function handleAvatarFileSelect(fileInput){
+function handleAvatarFileSelect(fileInput, kind){
   const file = fileInput.files && fileInput.files[0];
   if(!file) return;
   if(state.tmp.avatarEdit?.imgSrc) URL.revokeObjectURL(state.tmp.avatarEdit.imgSrc);
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = ()=>{
-    state.tmp.avatarEdit = { imgSrc:url, naturalWidth:img.naturalWidth, naturalHeight:img.naturalHeight, panX:0, panY:0 };
+    state.tmp.avatarEdit = { kind: kind||'avatar', imgSrc:url, naturalWidth:img.naturalWidth, naturalHeight:img.naturalHeight, panX:0, panY:0 };
     render();
   };
   img.onerror = ()=>{
@@ -3850,9 +3875,10 @@ function confirmAvatarCrop(){
   ctx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, OUTPUT, OUTPUT);
   canvas.toBlob(blob=>{
     if(!blob){ showToast('Zuschneiden fehlgeschlagen'); return; }
-    const file = new File([blob], 'avatar.png', {type:'image/png'});
+    const kind = st.kind||'avatar';
+    const file = new File([blob], kind+'.png', {type:'image/png'});
     cleanupAvatarEdit();
-    uploadAvatar(file);
+    if(kind==='boxLogo') uploadBoxLogo(file); else uploadAvatar(file);
   }, 'image/png', 0.92);
 }
 function renderAvatarEditor(){
@@ -3872,6 +3898,393 @@ function renderAvatarEditor(){
       </div>
     </div>
   `;
+}
+/* ---- Social ---- */
+const SOCIAL_REACTION_EMOJIS = ['👍','❤️','💪','🔥','😂','👏','🎉','😮'];
+function pbFilterIn(field, ids){
+  return ids.map((id,i)=>pb.filter(`${field} = {:v${i}}`, {['v'+i]: id})).join(' || ');
+}
+function fmtSocialTime(created){
+  if(!created) return '';
+  const dt = new Date(created);
+  return dt.toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit',year:'2-digit'}) + ' · ' + dt.toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'});
+}
+async function loadSocialFeed(boxId, opts){
+  if(!boxId) return;
+  const more = opts?.more;
+  const page = more ? (state.box.socialPage+1) : 1;
+  try{
+    const res = await pb.collection('social_posts').getList(page, 20, {
+      filter: pb.filter('box = {:box}', {box:boxId}),
+      sort: '-created',
+      expand: 'author'
+    });
+    state.box.socialPosts = more ? state.box.socialPosts.concat(res.items) : res.items;
+    state.box.socialPage = page;
+    state.box.socialHasMore = page < res.totalPages;
+    await loadSocialExtrasForVisiblePosts(res.items);
+  }catch(e){
+    console.error('Social-Feed konnte nicht geladen werden', e);
+  }
+  state.box.socialLoaded = true;
+  render();
+}
+async function loadSocialExtrasForVisiblePosts(posts){
+  const ids = posts.map(p=>p.id);
+  if(!ids.length) return;
+  const userId = pb.authStore.record?.id;
+  ids.forEach(id=>{
+    state.box.socialReactionsByPost[id] = {counts:{}, mine:null};
+    state.box.socialPollTallyByPost[id] = {counts:{}, totalVoters:0};
+  });
+  try{
+    const [reactions, votes] = await Promise.all([
+      pb.collection('social_reactions').getFullList({filter: pbFilterIn('post', ids)}),
+      pb.collection('social_poll_votes').getFullList({filter: pbFilterIn('post', ids)})
+    ]);
+    reactions.forEach(r=>{
+      const bucket = state.box.socialReactionsByPost[r.post];
+      if(!bucket) return;
+      bucket.counts[r.emoji] = (bucket.counts[r.emoji]||0) + 1;
+      if(r.user===userId) bucket.mine = r;
+    });
+    votes.forEach(v=>{
+      const tally = state.box.socialPollTallyByPost[v.post];
+      if(!tally) return;
+      tally.totalVoters += 1;
+      (v.optionIds||[]).forEach(oid=>{ tally.counts[oid] = (tally.counts[oid]||0) + 1; });
+      if(v.user===userId) state.box.socialMyVoteByPost[v.post] = v;
+    });
+  }catch(e){
+    console.error('Social-Zusatzdaten konnten nicht geladen werden', e);
+  }
+}
+function cancelSocialComposer(){
+  (state.tmp.socialComposerImages||[]).forEach(img=>URL.revokeObjectURL(img.previewUrl));
+  state.tmp.socialComposerOpen = false;
+  state.tmp.socialComposerText = '';
+  state.tmp.socialComposerImages = [];
+  state.tmp.socialPollDraft = null;
+  render();
+}
+function startSocialPollDraft(){
+  state.tmp.socialComposerOpen = true;
+  state.tmp.socialPollDraft = {question:'', options:['',''], multiple:false, closesAt:''};
+  render();
+}
+function addSocialPollOption(){
+  state.tmp.socialPollDraft.options.push('');
+  render();
+}
+function removeSocialPollOption(i){
+  state.tmp.socialPollDraft.options.splice(i,1);
+  render();
+}
+function insertSocialEmoji(emoji){
+  state.tmp.socialComposerText = (state.tmp.socialComposerText||'') + emoji;
+  render();
+}
+function handleSocialImagesSelect(input){
+  const remaining = Math.max(0, 4-state.tmp.socialComposerImages.length);
+  const files = Array.from(input.files||[]).slice(0, remaining);
+  files.forEach(file=>{
+    state.tmp.socialComposerImages.push({file, previewUrl:URL.createObjectURL(file)});
+  });
+  render();
+}
+function removeSocialComposerImage(i){
+  const img = state.tmp.socialComposerImages[i];
+  if(img) URL.revokeObjectURL(img.previewUrl);
+  state.tmp.socialComposerImages.splice(i,1);
+  render();
+}
+async function submitSocialPost(){
+  const text = (state.tmp.socialComposerText||'').trim();
+  const images = state.tmp.socialComposerImages;
+  if(!text && !images.length){ showToast('Bitte Text oder Foto hinzufügen'); return; }
+  const boxId = state.box.membership.box;
+  const formData = new FormData();
+  formData.append('box', boxId);
+  formData.append('author', pb.authStore.record.id);
+  formData.append('text', text);
+  images.forEach(img=>formData.append('images', img.file));
+  try{
+    await pb.collection('social_posts').create(formData);
+    cancelSocialComposer();
+    await loadSocialFeed(boxId);
+    showToast('Beitrag veröffentlicht');
+  }catch(e){
+    showToast('Veröffentlichen fehlgeschlagen');
+  }
+}
+async function submitSocialPoll(){
+  const draft = state.tmp.socialPollDraft;
+  if(!draft) return;
+  const question = (draft.question||'').trim();
+  const options = draft.options.map(o=>(o||'').trim()).filter(Boolean);
+  if(!question || options.length<2){ showToast('Frage + mind. 2 Optionen nötig'); return; }
+  const boxId = state.box.membership.box;
+  const pollOptions = options.map(label=>({id:uid(), label}));
+  try{
+    await pb.collection('social_posts').create({
+      box: boxId,
+      author: pb.authStore.record.id,
+      text: question,
+      pollOptions,
+      pollMultiple: !!draft.multiple,
+      pollClosesAt: draft.closesAt ? new Date(draft.closesAt).toISOString() : null
+    });
+    cancelSocialComposer();
+    await loadSocialFeed(boxId);
+    showToast('Umfrage veröffentlicht');
+  }catch(e){
+    showToast('Veröffentlichen fehlgeschlagen');
+  }
+}
+async function toggleSocialReaction(postId, emoji){
+  const userId = pb.authStore.record.id;
+  const bucket = state.box.socialReactionsByPost[postId] || {counts:{}, mine:null};
+  try{
+    if(bucket.mine && bucket.mine.emoji===emoji){
+      await pb.collection('social_reactions').delete(bucket.mine.id);
+    }else if(bucket.mine){
+      await pb.collection('social_reactions').update(bucket.mine.id, {emoji});
+    }else{
+      await pb.collection('social_reactions').create({post:postId, user:userId, emoji});
+    }
+    await loadSocialExtrasForVisiblePosts(state.box.socialPosts);
+    render();
+  }catch(e){
+    showToast('Reaktion fehlgeschlagen');
+  }
+}
+async function submitSocialPollVote(postId){
+  const inputs = document.querySelectorAll(`input[name="pollOpt_${postId}"]:checked`);
+  const optionIds = Array.from(inputs).map(el=>el.value);
+  if(!optionIds.length){ showToast('Bitte eine Option wählen'); return; }
+  await voteSocialPoll(postId, optionIds);
+}
+async function voteSocialPoll(postId, optionIds){
+  const userId = pb.authStore.record.id;
+  const existing = state.box.socialMyVoteByPost[postId];
+  try{
+    if(existing){
+      await pb.collection('social_poll_votes').update(existing.id, {optionIds});
+    }else{
+      await pb.collection('social_poll_votes').create({post:postId, user:userId, optionIds});
+    }
+    await loadSocialExtrasForVisiblePosts(state.box.socialPosts);
+    render();
+  }catch(e){
+    showToast('Abstimmen fehlgeschlagen');
+  }
+}
+function toggleSocialComments(postId){
+  const opening = state.tmp.socialOpenCommentsPostId !== postId;
+  state.tmp.socialOpenCommentsPostId = opening ? postId : null;
+  render();
+  if(opening) loadSocialComments(postId);
+}
+async function loadSocialComments(postId){
+  try{
+    const comments = await pb.collection('social_comments').getFullList({
+      filter: pb.filter('post = {:post}', {post:postId}),
+      sort: 'created',
+      expand: 'author'
+    });
+    const post = state.box.socialPosts.find(p=>p.id===postId);
+    if(post) post._comments = comments;
+    render();
+  }catch(e){
+    console.error('Kommentare konnten nicht geladen werden', e);
+  }
+}
+async function submitSocialComment(postId){
+  const text = (state.tmp.socialCommentDraft[postId]||'').trim();
+  if(!text) return;
+  try{
+    await pb.collection('social_comments').create({post:postId, author:pb.authStore.record.id, text});
+    state.tmp.socialCommentDraft[postId] = '';
+    await loadSocialComments(postId);
+  }catch(e){
+    showToast('Kommentar fehlgeschlagen');
+  }
+}
+async function deleteSocialComment(commentId, postId){
+  try{
+    await pb.collection('social_comments').delete(commentId);
+    await loadSocialComments(postId);
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
+}
+async function deleteSocialPost(postId){
+  try{
+    await pb.collection('social_posts').delete(postId);
+    state.box.socialPosts = state.box.socialPosts.filter(p=>p.id!==postId);
+    render();
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
+}
+function renderSocialComposer(){
+  const open = state.tmp.socialComposerOpen;
+  const poll = state.tmp.socialPollDraft;
+  if(!open){
+    return `
+      <div class="card">
+        <div class="row" style="gap:8px;">
+          <button class="btn btn-ghost" style="flex:1;" onclick="state.tmp.socialComposerOpen=true; render();">+ Beitrag erstellen</button>
+          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1;" onclick="startSocialPollDraft()">+ Umfrage erstellen</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  if(poll){
+    return `
+      <div class="card">
+        <h2 class="small">Umfrage erstellen</h2>
+        <div class="field"><label>Frage</label><input type="text" value="${escapeHtml(poll.question||'')}" oninput="state.tmp.socialPollDraft.question=this.value" placeholder="Was möchtest du fragen?"></div>
+        ${poll.options.map((opt,i)=>`
+          <div class="field"><label>Option ${i+1}</label>
+            <div class="row">
+              <input type="text" value="${escapeHtml(opt)}" oninput="state.tmp.socialPollDraft.options[${i}]=this.value">
+              ${poll.options.length>2 ? `<button class="icon-btn" style="flex:0 0 auto;" onclick="removeSocialPollOption(${i})">✕</button>` : ''}
+            </div>
+          </div>
+        `).join('')}
+        <button class="btn btn-ghost" onclick="addSocialPollOption()">+ Option hinzufügen</button>
+        <div class="field" style="margin-top:10px;">
+          <label><input type="checkbox" ${poll.multiple?'checked':''} onchange="state.tmp.socialPollDraft.multiple=this.checked"> Mehrfachauswahl erlauben</label>
+        </div>
+        <div class="field"><label>Endet am (optional)</label><input type="datetime-local" value="${poll.closesAt||''}" oninput="state.tmp.socialPollDraft.closesAt=this.value"></div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn btn-ghost" onclick="cancelSocialComposer()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="submitSocialPoll()">Umfrage veröffentlichen</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="card">
+      <h2 class="small">Beitrag erstellen</h2>
+      <div class="field"><textarea rows="4" placeholder="Was gibt's Neues?" oninput="state.tmp.socialComposerText=this.value">${escapeHtml(state.tmp.socialComposerText||'')}</textarea></div>
+      <div class="row" style="gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+        ${SOCIAL_REACTION_EMOJIS.map(e=>`<button class="icon-btn" style="flex:0 0 auto;" onclick="insertSocialEmoji('${e}')">${e}</button>`).join('')}
+      </div>
+      <div class="field"><label>Fotos (optional, max. 4)</label><input type="file" accept="image/*" multiple onchange="handleSocialImagesSelect(this)"></div>
+      ${state.tmp.socialComposerImages.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px;">${state.tmp.socialComposerImages.map((img,i)=>`<div style="position:relative;"><img src="${img.previewUrl}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;"><button class="icon-btn" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;font-size:10px;" onclick="removeSocialComposerImage(${i})">✕</button></div>`).join('')}</div>` : ''}
+      <div class="row">
+        <button class="btn btn-ghost" onclick="cancelSocialComposer()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="submitSocialPost()">Veröffentlichen</button>
+      </div>
+    </div>
+  `;
+}
+function renderSocialPoll(post){
+  const myVote = state.box.socialMyVoteByPost[post.id];
+  const tally = state.box.socialPollTallyByPost[post.id] || {counts:{}, totalVoters:0};
+  const closed = post.pollClosesAt && new Date(post.pollClosesAt) < new Date();
+  const showResults = !!myVote || closed;
+  const total = tally.totalVoters || 0;
+  const inputType = post.pollMultiple ? 'checkbox' : 'radio';
+  const optionsHtml = post.pollOptions.map(opt=>{
+    const count = tally.counts[opt.id]||0;
+    const pct = total ? Math.round((count/total)*100) : 0;
+    const checked = myVote?.optionIds?.includes(opt.id);
+    if(showResults){
+      return `
+        <div style="margin:6px 0;">
+          <div class="row" style="justify-content:space-between;"><span>${escapeHtml(opt.label)}${checked?' ✓':''}</span><span class="note" style="margin:0;">${count} (${pct}%)</span></div>
+          <div style="height:6px;border-radius:3px;background:var(--iron-700);overflow:hidden;margin-top:2px;">
+            <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);"></div>
+          </div>
+        </div>
+      `;
+    }
+    return `<label class="row" style="align-items:center;gap:8px;margin:4px 0;"><input type="${inputType}" name="pollOpt_${post.id}" value="${opt.id}" ${checked?'checked':''} ${closed?'disabled':''}> ${escapeHtml(opt.label)}</label>`;
+  }).join('');
+  const footer = closed ? `<div class="note">Umfrage beendet${total?` · ${total} Stimme${total>1?'n':''}`:''}</div>`
+    : showResults ? `<div class="note">${total} Stimme${total!==1?'n':''}</div>`
+    : `<button class="btn-sm btn-primary" style="width:auto;margin-top:6px;" onclick="submitSocialPollVote('${post.id}')">Abstimmen</button>`;
+  return `<div style="margin-top:8px;padding:10px;border:1px solid var(--iron-700);border-radius:8px;">${optionsHtml}${footer}</div>`;
+}
+function renderSocialComments(post){
+  const me = pb.authStore.record;
+  const comments = post._comments;
+  const list = !comments ? `<div class="note">Lädt …</div>` : (!comments.length ? `<div class="note">Noch keine Kommentare.</div>` : comments.map(c=>{
+    const canManage = me && (c.author===me.id || isBoxOwner());
+    return `
+      <div class="history-item">
+        <span><b>${escapeHtml(c.expand?.author?.name||c.expand?.author?.email||'Mitglied')}:</b> ${escapeHtml(c.text)}</span>
+        ${canManage ? `<button class="icon-btn" style="width:auto;" onclick="deleteSocialComment('${c.id}','${post.id}')">✕</button>` : ''}
+      </div>
+    `;
+  }).join(''));
+  return `
+    <div style="margin-top:8px;border-top:1px solid var(--iron-700);padding-top:8px;">
+      ${list}
+      <div class="row" style="margin-top:6px;">
+        <input type="text" value="${escapeHtml(state.tmp.socialCommentDraft[post.id]||'')}" oninput="state.tmp.socialCommentDraft['${post.id}']=this.value" placeholder="Kommentieren …">
+        <button class="btn-sm btn-primary" style="width:auto;" onclick="submitSocialComment('${post.id}')">Senden</button>
+      </div>
+    </div>
+  `;
+}
+function renderSocialPostCard(post){
+  const me = pb.authStore.record;
+  const author = post.expand?.author;
+  const avatarUrl = boxAvatarUrl(author, '80x80');
+  const initials = (author?.name||author?.email||'?').slice(0,2).toUpperCase();
+  const canManage = me && (post.author===me.id || isBoxOwner());
+  const isPoll = Array.isArray(post.pollOptions) && post.pollOptions.length>0;
+  const images = Array.isArray(post.images) ? post.images : [];
+  const imagesHtml = images.length ? `
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0;">
+      ${images.map(img=>`<img src="${pb.files.getURL(post, img, {thumb:'300x300'})}" style="width:100%;max-width:160px;height:120px;object-fit:cover;border-radius:8px;">`).join('')}
+    </div>
+  ` : '';
+  const reactionBucket = state.box.socialReactionsByPost[post.id] || {counts:{}, mine:null};
+  const reactionsHtml = `
+    <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:8px;">
+      ${SOCIAL_REACTION_EMOJIS.map(e=>{
+        const count = reactionBucket.counts[e]||0;
+        const active = reactionBucket.mine?.emoji===e;
+        return `<button class="btn-sm ${active?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="toggleSocialReaction('${post.id}','${e}')">${e}${count?` ${count}`:''}</button>`;
+      }).join('')}
+    </div>
+  `;
+  const pollHtml = isPoll ? renderSocialPoll(post) : '';
+  const commentsOpen = state.tmp.socialOpenCommentsPostId===post.id;
+  return `
+    <div class="wod-card" style="margin-bottom:12px;">
+      <div class="row" style="align-items:center;gap:10px;">
+        <div class="box-avatar" style="width:36px;height:36px;font-size:13px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
+        <div style="flex:1;">
+          <div style="font-weight:600;">${escapeHtml(author?.name||author?.email||'Mitglied')}</div>
+          <div class="note" style="margin:0;">${fmtSocialTime(post.created)}</div>
+        </div>
+        ${canManage ? `<button class="icon-btn" onclick="deleteSocialPost('${post.id}')" title="Löschen">🗑️</button>` : ''}
+      </div>
+      ${post.text ? `<div style="margin-top:8px;white-space:pre-wrap;">${escapeHtml(post.text)}</div>` : ''}
+      ${imagesHtml}
+      ${pollHtml}
+      ${reactionsHtml}
+      <div style="margin-top:8px;">
+        <a href="#" onclick="event.preventDefault();toggleSocialComments('${post.id}')" style="color:var(--chalk-yellow);">${commentsOpen?'Kommentare ausblenden':'Kommentare'}</a>
+      </div>
+      ${commentsOpen ? renderSocialComments(post) : ''}
+    </div>
+  `;
+}
+function renderBoxSocialTab(){
+  const boxId = state.box.membership.box;
+  const loaded = state.box.socialLoaded;
+  const composer = renderSocialComposer();
+  const body = !loaded ? `<div class="note">Lädt …</div>`
+    : (!state.box.socialPosts.length ? `<div class="note">Noch keine Beiträge. Sei der/die Erste!</div>` : state.box.socialPosts.map(renderSocialPostCard).join(''));
+  const loadMore = (loaded && state.box.socialHasMore) ? `<button class="btn btn-ghost" onclick="loadSocialFeed('${boxId}',{more:true})">Mehr laden</button>` : '';
+  return `${composer}${body}${loadMore}`;
 }
 /* ---- Buchungen / Anwesenheit ---- */
 async function loadMyBookings(boxId){
@@ -4451,6 +4864,24 @@ function renderBoxHomeHeader(){
     </div>
   `;
 }
+function renderBoxNameCard(box){
+  const url = boxLogoUrl(box, '100x100');
+  const initial = (box?.name||'Box').slice(0,1).toUpperCase();
+  const logoCircle = `<div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initial}</div>`;
+  const uploadField = isBoxAdminView()
+    ? `<div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>`
+    : `<h2 style="margin:0;">${escapeHtml(box?.name || 'Box')}</h2>`;
+  return `
+    <div class="card">
+      <div class="row" style="align-items:center;gap:12px;">
+        ${logoCircle}
+        ${uploadField}
+      </div>
+      ${isBoxAdminView() ? `<h2 style="margin-top:10px;">${escapeHtml(box?.name || 'Box')}</h2>` : ''}
+      ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
+    </div>
+  `;
+}
 function renderBoxHomeAdmin(box){
   const pending = state.box.pendingMemberships;
   const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
@@ -4460,7 +4891,7 @@ function renderBoxHomeAdmin(box){
   const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
   return `
     ${renderBoxHomeHeader()}
-    <div class="card"><h2>${escapeHtml(box?.name || 'Box')}</h2></div>
+    ${renderBoxNameCard(box)}
     <div class="card">
       <h2 class="small">Einladungslink teilen</h2>
       <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
@@ -4502,7 +4933,7 @@ function renderBoxHomeMember(box){
   const next = getNextUpcomingBooking(bookings);
   return `
     ${renderBoxHomeHeader()}
-    <div class="card"><h2>${escapeHtml(box?.name || 'Box')}</h2></div>
+    ${renderBoxNameCard(box)}
     <div class="card">
       <h2 class="small">Nächster Termin</h2>
       ${next ? `
@@ -4541,6 +4972,14 @@ function shiftScheduleWeek(delta){
 function resetScheduleWeek(){
   state.tmp.scheduleWeekOffset = 0;
   selectScheduleDate(todayStr());
+}
+function shiftWorkoutsWeek(delta){
+  state.tmp.workoutsWeekOffset = (state.tmp.workoutsWeekOffset||0) + delta;
+  selectWorkoutsDate(weekDates(state.tmp.workoutsWeekOffset)[0]);
+}
+function resetWorkoutsWeek(){
+  state.tmp.workoutsWeekOffset = 0;
+  selectWorkoutsDate(todayStr());
 }
 function renderBoxScheduleTab(){
   const weekOffset = state.tmp.scheduleWeekOffset||0;
@@ -4742,8 +5181,16 @@ function renderBoxWorkoutCard(w, opts){
   `;
 }
 function renderBoxWorkoutsTab(){
+  const weekOffset = state.tmp.workoutsWeekOffset||0;
   const selected = state.tmp.workoutsSelectedDate || todayStr();
-  const strip = renderWeekdayStrip(selected, 'selectWorkoutsDate');
+  const weekLabel = weekOffset===0 ? 'Diese Woche' : (weekOffset>0 ? `+${weekOffset} Woche${weekOffset>1?'n':''}` : `${weekOffset} Woche${weekOffset<-1?'n':''}`);
+  const weekNav = `
+    <div class="row" style="align-items:center;gap:6px;margin-bottom:8px;">
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftWorkoutsWeek(-1)">‹</button>
+      <span class="note" style="flex:1;text-align:center;margin:0;">${weekLabel}${weekOffset!==0 ? ` <a href="#" onclick="event.preventDefault();resetWorkoutsWeek();" style="color:var(--chalk-yellow);">Heute</a>` : ''}</span>
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftWorkoutsWeek(1)">›</button>
+    </div>`;
+  const strip = renderWeekdayStrip(selected, 'selectWorkoutsDate', weekOffset);
   const loaded = state.box.tabWorkoutsDate===selected;
   const workouts = loaded ? state.box.tabWorkouts : [];
   const body = !loaded ? `<div class="note">Lädt …</div>`
@@ -4774,7 +5221,7 @@ function renderBoxWorkoutsTab(){
       `}
     </div>
   ` : '';
-  return `<div class="card"><div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
+  return `<div class="card">${weekNav}<div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
 }
 function renderBox(){
   const b = state.box;
@@ -4796,10 +5243,12 @@ function renderBox(){
       <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('home')">Home</button>
       <button class="btn ${state.tmp.boxSubTab==='schedule'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('schedule')">Kursplan</button>
       <button class="btn ${state.tmp.boxSubTab==='workouts'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('workouts')">Workouts</button>
+      <button class="btn ${state.tmp.boxSubTab==='social'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('social')">Social</button>
     </div>
   `;
   const body = state.tmp.boxSubTab==='schedule' ? renderBoxScheduleTab()
     : state.tmp.boxSubTab==='workouts' ? renderBoxWorkoutsTab()
+    : state.tmp.boxSubTab==='social' ? renderBoxSocialTab()
     : renderBoxHome(box);
   return subNav + body;
 }
@@ -5701,7 +6150,7 @@ function buildForTimeRoundsLog(b){
   for(let ri=0; ri<roundsCount; ri++){
     roundsLog.push(b.movements.map(m=>{
       const target = String(m.reps || (schemeArr.length ? pctForIndex(schemeArr, ri) : ''));
-      return { target, reps: target, done:false };
+      return { target, reps: target, done:false, edited:false };
     }));
   }
   return roundsLog;
@@ -5762,6 +6211,7 @@ function updateForTimeRoundValue(ri, mi, val){
   const b = state.tmp.forTimeBuilder;
   const item = b.roundsLog[ri][mi];
   item.reps = val;
+  item.edited = true;
   item.done = item.target!=='' && val===item.target;
   const cb = document.getElementById(`ftRoundCheck_${ri}_${mi}`);
   if(cb) cb.checked = item.done;
@@ -5825,7 +6275,13 @@ async function saveForTimeWorkout(){
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
-  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const singleRoundActuals = (b.roundsLog && b.roundsLog.length===1) ? b.roundsLog[0] : null;
+  const movements = b.movements.map((m,mi)=>{
+    let reps = m.reps||'';
+    const item = singleRoundActuals && singleRoundActuals[mi];
+    if(item) reps = (item.done || item.edited) ? (item.reps||'') : '0';
+    return {exerciseId:m.exerciseId, reps, unit:m.unit||'reps', weight:m.weight||''};
+  }).filter(m=>m.exerciseId);
   const prMovements = buildPrMovementsFromFlat(movements);
   const workout = {
     id: uid(), date, name, note, format:'for-time', movements: prMovements,
@@ -7766,9 +8222,9 @@ function renderProfileSettings(){
       ${(()=>{ const url=boxAvatarUrl(me,'100x100'); const initials=(me?.name || me?.email || '?').slice(0,2).toUpperCase();
         return `<div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
           <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
-          <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this)"></div>
+          <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'avatar')"></div>
         </div>
-        ${renderAvatarEditor()}`; })()}
+        ${state.tmp.avatarEdit?.kind!=='boxLogo' ? renderAvatarEditor() : ''}`; })()}
       <div class="field"><label>Name</label>
         <div class="row">
           <input type="text" id="displayNameInput" value="${escapeHtml(me?.name||'')}" placeholder="Wie sollen dich andere sehen?">
@@ -7897,7 +8353,7 @@ async function saveProfile(){
 async function resetAll(){
   stopTicking();
   await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{} }, tmp: defaultTmp()};
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{} }, tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
