@@ -483,6 +483,38 @@ async function enablePushNotifications(){
     showToast('Aktivierung fehlgeschlagen');
   }
 }
+const NOTIFICATION_CATEGORIES = [
+  {key:'waitlistPromoted', label:'Warteliste rückt nach'},
+  {key:'newWorkout', label:'Neues WOD veröffentlicht'},
+  {key:'newPoll', label:'Neue Umfrage'},
+  {key:'postComment', label:'Kommentar auf deinen Beitrag'},
+  {key:'joinRequest', label:'Neue Beitrittsanfrage (Coach)'},
+  {key:'joinApproved', label:'Beitrittsanfrage angenommen'},
+  {key:'announcement', label:'Box-Ankündigungen'}
+];
+function renderNotificationSettings(){
+  const me = pb.authStore.record;
+  const prefs = me?.notificationPrefs || {};
+  return `
+    <div class="note" style="margin-bottom:6px;">Einzelne Kategorien abschalten:</div>
+    ${NOTIFICATION_CATEGORIES.map(c=>`
+      <label class="row" style="align-items:center;gap:8px;margin:6px 0;">
+        <input type="checkbox" style="flex:0 0 auto;width:auto;" ${prefs[c.key]!==false?'checked':''} onchange="toggleNotificationPref('${c.key}',this.checked)"> ${c.label}
+      </label>
+    `).join('')}
+  `;
+}
+async function toggleNotificationPref(key, checked){
+  const me = pb.authStore.record;
+  if(!me) return;
+  const prefs = {...(me.notificationPrefs||{}), [key]:checked};
+  try{
+    await pb.collection('users').update(me.id, {notificationPrefs:prefs});
+    render();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
 const SYNC_KEYS = ['profile','exercises','workouts','drafts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
 function getPendingSync(){
   try{ return JSON.parse(localStorage.getItem('ironlog:_pendingSync')||'[]'); }catch(e){ return []; }
@@ -4639,6 +4671,19 @@ async function regenerateInviteCode(){
     showToast('Fehlgeschlagen');
   }
 }
+async function sendBoxAnnouncement(){
+  if(!isBoxOwner()) return;
+  const input = document.getElementById('announceText');
+  const text = (input?.value || '').trim();
+  if(!text){ showToast('Bitte einen Text eingeben'); return; }
+  try{
+    await pb.send('/box-announce', {method:'POST', body:{box: state.box.membership.box, text}});
+    if(input) input.value = '';
+    showToast('Ankündigung gesendet 📣');
+  }catch(e){
+    showToast('Senden fehlgeschlagen');
+  }
+}
 async function saveScheduleSlot(id){
   const weekday = parseInt(document.getElementById('slotWeekday').value);
   const startTime = document.getElementById('slotStartTime').value.trim();
@@ -4903,6 +4948,12 @@ function renderBoxHomeAdmin(box){
         <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
       </div>
       <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+    </div>
+    <div class="card">
+      <h2 class="small">Box-Ankündigung</h2>
+      <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
+      <div class="field"><textarea id="announceText" rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen"></textarea></div>
+      <button class="btn btn-primary" onclick="sendBoxAnnouncement()">📣 Ankündigung senden</button>
     </div>
     ${pending.length ? `
       <div class="card">
@@ -8243,9 +8294,10 @@ function renderProfileSettings(){
     </div>
     <div class="card">
       <h2 class="small">Benachrichtigungen</h2>
-      <div class="note" style="margin-bottom:10px;">Erhalte eine Push-Benachrichtigung, sobald du von der Warteliste nachrückst — auch wenn die App gerade geschlossen ist.</div>
+      <div class="note" style="margin-bottom:10px;">Erhalte Push-Benachrichtigungen zu deiner Box — auch wenn die App gerade geschlossen ist.</div>
       <button class="btn btn-primary" onclick="enablePushNotifications()">🔔 Push-Benachrichtigungen aktivieren</button>
       ${(!('serviceWorker' in navigator) || !('PushManager' in window)) ? '<div class="note" style="color:var(--plate-red);margin-top:8px;">Auf diesem Gerät/Browser nicht unterstützt.</div>' : ''}
+      <div style="margin-top:14px;">${renderNotificationSettings()}</div>
     </div>
     ${isBoxAdminView() ? `
     <div class="card">

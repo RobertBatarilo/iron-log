@@ -2,10 +2,12 @@
 
 // WICHTIG: config.local.js wird NICHT mitgeliefert (enthaelt Secrets) -
 // muss direkt auf dem Server angelegt werden, siehe config.local.example.js
-const cfg = require(`${__hooks}/config.local.js`);
-
+// require() bewusst INNERHALB des Handlers (nicht auf Modul-Ebene): mehrere
+// .pb.js-Hooks werden von PocketBase in einem gemeinsamen Scope ausgefuehrt,
+// ein Top-Level-const mit demselben Namen in zwei Dateien kollidiert sonst.
 onRecordAfterUpdateSuccess((e) => {
   try {
+    const notify = require(`${__hooks}/notify_helper.js`);
     const booking = e.record;
     if (booking.getString("status") !== "cancelled") {
       e.next();
@@ -45,44 +47,10 @@ onRecordAfterUpdateSuccess((e) => {
 
     // Push an den nachgerueckten Nutzer
     const userId = promoted.getString("user");
-    const subs = $app.findRecordsByFilter(
-      "push_subscriptions",
-      `user = {:uid}`,
-      "",
-      0, 0,
-      { uid: userId }
-    );
-
     const kursName = instance.getString("label") || "deinem Kurs";
     const notifBody = `Dein Platz in ${kursName} ist bestaetigt.`;
-
-    for (const sub of subs) {
-      try {
-        $http.send({
-          url: cfg.pushServiceUrl,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Internal-Secret": cfg.pushInternalSecret
-          },
-          body: JSON.stringify({
-            subscription: {
-              endpoint: sub.getString("endpoint"),
-              keys: {
-                p256dh: sub.getString("p256dh"),
-                auth: sub.getString("auth")
-              }
-            },
-            title: "Du bist nachgerueckt!",
-            body: notifBody,
-            url: "./index.html"
-          })
-        });
-      } catch (pushErr) {
-        console.log("Push-Versand fehlgeschlagen fuer Subscription " + sub.id, pushErr);
-        // bewusst kein throw: ein fehlgeschlagener Push darf die DB-Promotion nicht rueckgaengig machen
-      }
-    }
+    notify.sendPushToUser(userId, "waitlistPromoted", "Du bist nachgerueckt!", notifBody);
+    // bewusst kein throw bei Push-Fehlern: darf die DB-Promotion nicht rueckgaengig machen
   } catch (err) {
     console.log("waitlist_promotion Hook-Fehler", err);
   }
