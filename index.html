@@ -4610,17 +4610,92 @@ function boxWorkoutSearchText(w){
   const preview = w.mode==='freeform' ? (w.bodyText||'') : formatBoxWorkoutPreview(w);
   return `${w.name||''} ${preview}`.toLowerCase();
 }
+function archiveWorkoutTemplates(){
+  // Ein Archiv-Eintrag pro Name: das Trainingsarchiv ist eine Vorlagen-Bibliothek zum
+  // Wiederverwenden, keine Historie "wann haben wir X gemacht" - bei mehrfach veroeffentlichten
+  // WODs desselben Namens zaehlt nur die zuletzt erstellte Fassung.
+  const byName = new Map();
+  for(const w of state.box.allWorkouts){
+    const key = w.name || w.id;
+    const existing = byName.get(key);
+    if(!existing || (w.date||'') > (existing.date||'')) byName.set(key, w);
+  }
+  return [...byName.values()].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+}
+function renderArchivedWorkoutCard(w){
+  const bodyHtml = w.mode==='freeform'
+    ? `<div class="note" style="white-space:pre-wrap;">${escapeHtml(w.bodyText||'')}</div>`
+    : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div>
+       <div class="note" style="margin-top:4px;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>`;
+  const manageHtml = isBoxAdminView() ? `
+    <div class="row" style="gap:8px;margin-top:8px;">
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="editBoxWorkout('${w.id}')">✎ Bearbeiten</button>
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteBoxWorkout('${w.id}')">✕ Löschen</button>
+    </div>
+  ` : '';
+  const assignOpen = state.tmp.archiveAssignId===w.id;
+  return `
+    <div class="wod-card">
+      <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">zuletzt ${fmtDate(w.date)}</span></div>
+      ${bodyHtml}
+      ${manageHtml}
+      <div class="row" style="margin-top:10px;">
+        <button class="btn-sm btn-primary" onclick="state.tmp.archiveAssignId='${assignOpen?'':w.id}'; render();">${assignOpen?'Abbrechen':'WOD übernehmen'}</button>
+      </div>
+      ${assignOpen ? renderArchiveAssignForm(w) : ''}
+    </div>
+  `;
+}
+function renderArchiveAssignForm(w){
+  const selected = state.tmp.workoutsSelectedDate || todayStr();
+  const weekday = new Date(selected+'T00:00:00').getDay();
+  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.weekday===weekday).map(s=>s.label))];
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--iron-700);">
+      <div class="note" style="margin-bottom:6px;">Für ${fmtDate(selected)} übernehmen:</div>
+      ${categories.length ? `
+        <div class="field"><label>Workout-Art (optional)</label>
+          <select id="archiveAssignCategory_${w.id}">
+            <option value="">— Keine Zuordnung —</option>
+            ${categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
+      <button class="btn btn-primary" style="width:100%;" onclick="confirmArchiveAssign('${w.id}')">Übernehmen</button>
+    </div>
+  `;
+}
+async function confirmArchiveAssign(id){
+  const w = state.box.allWorkouts.find(x=>x.id===id);
+  if(!w) return;
+  const selected = state.tmp.workoutsSelectedDate || todayStr();
+  const category = document.getElementById('archiveAssignCategory_'+id)?.value || null;
+  try{
+    await pb.collection('box_workouts').create({
+      box: state.box.membership.box, date: selected, format: w.format, name: w.name,
+      payload: w.payload, mode: w.mode, bodyText: w.bodyText||'',
+      publishedBy: pb.authStore.record.id, category: category || null
+    });
+    state.tmp.archiveAssignId = null;
+    showToast('WOD übernommen 📣');
+    await loadAllBoxWorkouts(state.box.membership.box);
+    await selectWorkoutsDate(selected);
+  }catch(e){
+    showToast('Übernehmen fehlgeschlagen');
+  }
+}
 function renderBoxWorkoutArchive(){
   if(!state.box.allWorkoutsLoaded) return `<div class="card"><div class="note">Lädt …</div></div>`;
+  const templates = archiveWorkoutTemplates();
   const search = (state.tmp.boxArchiveSearch||'').trim().toLowerCase();
-  const matches = search ? state.box.allWorkouts.filter(w=>boxWorkoutSearchText(w).includes(search)) : state.box.allWorkouts;
+  const matches = search ? templates.filter(w=>boxWorkoutSearchText(w).includes(search)) : templates;
   return `
     <div class="card">
       <h2 class="small">Trainingsarchiv</h2>
       <div class="field"><input type="text" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; render();" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
-      ${!state.box.allWorkouts.length ? `<div class="note">Noch keine Workouts veröffentlicht.</div>`
+      ${!templates.length ? `<div class="note">Noch keine Workouts veröffentlicht.</div>`
         : !matches.length ? `<div class="note">Keine Treffer.</div>`
-        : matches.map(w=>`<div class="note" style="margin-bottom:2px;">${fmtDate(w.date)}</div>${renderBoxWorkoutCard(w)}`).join('')}
+        : matches.map(renderArchivedWorkoutCard).join('')}
     </div>
   `;
 }
