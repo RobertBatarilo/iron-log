@@ -5240,12 +5240,13 @@ function renderBox(){
     `;
   }
   const box = b.membership.expand?.box;
+  const subNavBtnStyle = 'flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;';
   const subNav = `
-    <div class="row" style="margin-bottom:14px;">
-      <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('home')">Home</button>
-      <button class="btn ${state.tmp.boxSubTab==='schedule'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('schedule')">Kursplan</button>
-      <button class="btn ${state.tmp.boxSubTab==='workouts'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('workouts')">Workouts</button>
-      <button class="btn ${state.tmp.boxSubTab==='social'?'btn-primary':'btn-ghost'}" onclick="setBoxSubTab('social')">Social</button>
+    <div class="row" style="margin-bottom:14px;gap:6px;flex-wrap:wrap;">
+      <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('home')">Home</button>
+      <button class="btn ${state.tmp.boxSubTab==='schedule'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('schedule')">Kursplan</button>
+      <button class="btn ${state.tmp.boxSubTab==='workouts'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('workouts')">Workouts</button>
+      <button class="btn ${state.tmp.boxSubTab==='social'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('social')">Social</button>
     </div>
   `;
   const body = state.tmp.boxSubTab==='schedule' ? renderBoxScheduleTab()
