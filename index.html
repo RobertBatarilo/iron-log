@@ -637,6 +637,7 @@ function defaultTmp(){
     scheduleSelectedDate:null, scheduleWeekOffset:0,
     workoutsSelectedDate:null, workoutsWeekOffset:0,
     boxFreeformOpen:false,
+    boxDraftsOpen:false, boxHistoryOpen:false, boxArchiveSearch:'',
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
@@ -660,7 +661,7 @@ let state = {
   timeRecords:[],
   trainingPlan:null,
   activeTab:'today',
-  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{} },
+  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -4589,6 +4590,40 @@ async function loadWorkoutsForDate(boxId, dateStr){
   }
   render();
 }
+function toggleBoxWorkoutArchive(){
+  state.tmp.boxHistoryOpen = !state.tmp.boxHistoryOpen;
+  render();
+  if(state.tmp.boxHistoryOpen && !state.box.allWorkoutsLoaded){
+    loadAllBoxWorkouts(state.box.membership.box);
+  }
+}
+async function loadAllBoxWorkouts(boxId){
+  try{
+    state.box.allWorkouts = await pb.collection('box_workouts').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'-date'});
+  }catch(e){
+    state.box.allWorkouts = [];
+  }
+  state.box.allWorkoutsLoaded = true;
+  render();
+}
+function boxWorkoutSearchText(w){
+  const preview = w.mode==='freeform' ? (w.bodyText||'') : formatBoxWorkoutPreview(w);
+  return `${w.name||''} ${preview}`.toLowerCase();
+}
+function renderBoxWorkoutArchive(){
+  if(!state.box.allWorkoutsLoaded) return `<div class="card"><div class="note">Lädt …</div></div>`;
+  const search = (state.tmp.boxArchiveSearch||'').trim().toLowerCase();
+  const matches = search ? state.box.allWorkouts.filter(w=>boxWorkoutSearchText(w).includes(search)) : state.box.allWorkouts;
+  return `
+    <div class="card">
+      <h2 class="small">Trainingsarchiv</h2>
+      <div class="field"><input type="text" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; render();" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
+      ${!state.box.allWorkouts.length ? `<div class="note">Noch keine Workouts veröffentlicht.</div>`
+        : !matches.length ? `<div class="note">Keine Treffer.</div>`
+        : matches.map(w=>`<div class="note" style="margin-bottom:2px;">${fmtDate(w.date)}</div>${renderBoxWorkoutCard(w)}`).join('')}
+    </div>
+  `;
+}
 async function publishWorkoutResult(workoutId){
   const resultText = (document.getElementById('resultText_'+workoutId)?.value||'').trim();
   const scaling = document.getElementById('resultScaling_'+workoutId)?.value || '';
@@ -4685,7 +4720,6 @@ async function sendBoxAnnouncement(){
   }
 }
 async function saveScheduleSlot(id){
-  const weekday = parseInt(document.getElementById('slotWeekday').value);
   const startTime = document.getElementById('slotStartTime').value.trim();
   const label = document.getElementById('slotLabel').value.trim();
   const coachName = document.getElementById('slotCoachName').value.trim();
@@ -4697,9 +4731,14 @@ async function saveScheduleSlot(id){
   const boxId = state.box.membership.box;
   try{
     if(id){
+      const weekday = parseInt(document.getElementById('slotWeekday').value);
       await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
     } else {
-      await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
+      const weekdays = Array.from(document.querySelectorAll('.slotWeekdayCheck:checked')).map(el=>parseInt(el.value));
+      if(!weekdays.length){ showToast('Bitte mindestens einen Wochentag wählen'); return; }
+      for(const weekday of weekdays){
+        await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
+      }
     }
     state.tmp.boxScheduleEditId = null;
     state.tmp.scheduleEnsuredDates = new Set();
@@ -4795,7 +4834,7 @@ function importBoxWorkout(id){
   setTab('workout');
 }
 function editBoxWorkout(id){
-  const w = state.box.tabWorkouts.find(x=>x.id===id);
+  const w = state.box.tabWorkouts.find(x=>x.id===id) || state.box.allWorkouts.find(x=>x.id===id);
   if(!w){ showToast('Workout nicht gefunden'); return; }
   if(w.mode==='freeform'){
     state.tmp.editingBoxWorkoutId = id;
@@ -4832,6 +4871,7 @@ async function deleteBoxWorkout(id){
   try{
     await pb.collection('box_workouts').delete(id);
     showToast('Workout gelöscht');
+    state.box.allWorkouts = state.box.allWorkouts.filter(w=>w.id!==id);
     await loadWorkoutsForDate(state.box.membership.box, state.box.tabWorkoutsDate);
   }catch(e){
     showToast('Löschen fehlgeschlagen');
@@ -4853,16 +4893,32 @@ function renderBoxJoinOrCreate(){
   `;
 }
 function renderScheduleSlotForm(s, editId){
+  const isNew = editId==='new';
+  const weekdayField = isNew ? `
+    <div class="field"><label>Wochentag(e)</label>
+      <div class="row" style="flex-wrap:wrap;gap:10px;">
+        ${[1,2,3,4,5,6,0].map(d=>`
+          <label class="row" style="align-items:center;gap:4px;width:auto;flex:0 0 auto;">
+            <input type="checkbox" class="slotWeekdayCheck" value="${d}" style="flex:0 0 auto;width:auto;" ${s.weekday===d?'checked':''}> ${WEEKDAY_NAMES[d]}
+          </label>
+        `).join('')}
+      </div>
+      <div class="note" style="margin-top:4px;">Mehrere Tage wählbar — legt für jeden gewählten Tag einen eigenen Termin mit derselben Uhrzeit an.</div>
+    </div>
+    <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
+  ` : `
+    <div class="row">
+      <div class="field"><label>Wochentag</label>
+        <select id="slotWeekday">
+          ${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${s.weekday===d?'selected':''}>${WEEKDAY_NAMES[d]}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
+    </div>
+  `;
   return `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
-      <div class="row">
-        <div class="field"><label>Wochentag</label>
-          <select id="slotWeekday">
-            ${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${s.weekday===d?'selected':''}>${WEEKDAY_NAMES[d]}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
-      </div>
+      ${weekdayField}
       <div class="field"><label>Bezeichnung</label><input type="text" id="slotLabel" value="${escapeHtml(s.label||'')}" placeholder="CrossFit"></div>
       <div class="field"><label>Coach (optional)</label><input type="text" id="slotCoachName" value="${escapeHtml(s.coachName||'')}"></div>
       <div class="row">
@@ -5271,8 +5327,14 @@ function renderBoxWorkoutsTab(){
           <button class="btn btn-ghost" onclick="state.tmp.boxFreeformOpen=true; render();">+ Freitext-WOD veröffentlichen</button>
           <button class="btn btn-ghost" onclick="state.tmp.wodDate='${selected}'; setTab('workout');">+ Workout erstellen</button>
         </div>
+        <div class="row" style="gap:8px;margin-top:8px;">
+          <button class="btn btn-ghost" onclick="state.tmp.boxDraftsOpen=!state.tmp.boxDraftsOpen; render();">${state.tmp.boxDraftsOpen?'Entwürfe ausblenden':'📝 Entwürfe fortsetzen'}</button>
+          <button class="btn btn-ghost" onclick="toggleBoxWorkoutArchive()">${state.tmp.boxHistoryOpen?'Archiv ausblenden':'📋 Trainingsarchiv'}</button>
+        </div>
       `}
     </div>
+    ${state.tmp.boxDraftsOpen && !state.tmp.boxFreeformOpen ? (renderDraftsCard() || `<div class="card"><div class="note">Keine Entwürfe vorhanden.</div></div>`) : ''}
+    ${state.tmp.boxHistoryOpen && !state.tmp.boxFreeformOpen ? renderBoxWorkoutArchive() : ''}
   ` : '';
   return `<div class="card">${weekNav}<div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
 }
@@ -5335,9 +5397,20 @@ function renderWorkoutHistory(){
     </div>
   `;
 }
+function exerciseDisplayName(id){
+  const ex = state.exercises.find(e=>e.id===id);
+  if(ex) return ex.name;
+  if(!id) return '—';
+  // Uebungs-IDs sind "<slug-des-namens>-<zufallssuffix>" (siehe slug()) und daher nicht
+  // stabil ueber Sessions/Geraete hinweg - bei alten box_workouts findet sich die exacte ID
+  // oft nicht mehr in der aktuellen state.exercises-Liste. Als Fallback den Namen aus der
+  // ID selbst ableiten, statt nur "—" anzuzeigen.
+  const stem = id.replace(/-[a-z0-9]{1,4}$/,'').replace(/-/g,' ').trim();
+  return stem ? stem.replace(/\b\w/g,c=>c.toUpperCase()) : '—';
+}
 function formatMovementLine(m){
   const ex = state.exercises.find(e=>e.id===m.exerciseId);
-  const name = ex ? ex.name : '—';
+  const name = exerciseDisplayName(m.exerciseId);
   const type = getExerciseType(ex);
   if(type==='cardio'){
     if(m.unit==='m') return `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}`;
@@ -5366,13 +5439,11 @@ function formatBoxWorkoutPreview(w){
     return `AMRAP ${p.durationMin||0}:${String(p.durationSec||0).padStart(2,'0')} — ${moves}`;
   }
   if(w.format==='for-load'){
-    const ex = state.exercises.find(e=>e.id===p.exerciseId);
     const cap = (p.timeCapMin||p.timeCapSec) ? ` (Cap ${p.timeCapMin||0}:${String(p.timeCapSec||0).padStart(2,'0')})` : '';
-    return `${p.targetReps||''}x ${ex?ex.name:'—'}${cap}`;
+    return `${p.targetReps||''}x ${exerciseDisplayName(p.exerciseId)}${cap}`;
   }
   const lines = (p.wodTemplate||[]).map(m=>{
-    const ex = state.exercises.find(e=>e.id===m.exerciseId);
-    return `${m.setsCount||''}x${m.repsTarget||''} ${ex?ex.name:'—'}`.trim();
+    return `${m.setsCount||''}x${m.repsTarget||''} ${exerciseDisplayName(m.exerciseId)}`.trim();
   });
   const emomLabel = w.format==='emom' ? `EMOM ${p.emomMin||0}:${String(p.emomSec||0).padStart(2,'0')} × ${p.emomRounds||1} — ` : '';
   return emomLabel + lines.join(', ');
@@ -8408,7 +8479,7 @@ async function saveProfile(){
 async function resetAll(){
   stopTicking();
   await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{} }, tmp: defaultTmp()};
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false }, tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
