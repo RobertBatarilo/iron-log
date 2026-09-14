@@ -612,7 +612,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false,
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null,
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -3566,6 +3566,17 @@ function applyTargetingRepsFromLeftover(leftoverLines, movements){
     emptyRepsMoves[0].repsTarget = capturedNum;
   }
 }
+function resolveStructuredMoveUnitReps(mv, exerciseId){
+  const ex = state.exercises.find(e=>e.id===exerciseId);
+  const isCardioMove = getExerciseType(ex)==='cardio';
+  let unit = isCardioMove ? 'kcal' : 'reps', reps = mv.reps||'';
+  if(isCardioMove && mv.reps && mv.unit){
+    if(mv.unit==='m'){ unit = 'm'; }
+    else if(mv.unit==='km'){ unit = 'm'; reps = String(Math.round(parseFloat(mv.reps) * 1000)); }
+    else { unit = 'kcal'; }
+  }
+  return { unit, reps };
+}
 function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
   const exerciseId = resolveExerciseIdFromName(mv.name);
   const ex = state.exercises.find(e=>e.id===exerciseId);
@@ -3656,7 +3667,11 @@ function applyParsedWorkout(input){
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
     b.durationMin = p.durationMin; b.durationSec = p.durationSec;
-    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight: mv.weight||'', unit:'reps'}));
+    if(p.movements.length) b.movements = p.movements.map(mv=>{
+      const exerciseId = resolveExerciseIdFromName(mv.name);
+      const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
+      return {exerciseId, reps, weight: mv.weight||'', unit};
+    });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
   } else if(format==='for-load'){
@@ -3680,7 +3695,11 @@ function applyParsedWorkout(input){
     ensureForTimeBuilder();
     const b = state.tmp.forTimeBuilder;
     b.rounds = p.rounds; b.repScheme = p.repScheme; b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
-    if(p.movements.length) b.movements = p.movements.map(mv=>({exerciseId: resolveExerciseIdFromName(mv.name), reps: mv.reps||'', weight: mv.weight||'', unit:'reps'}));
+    if(p.movements.length) b.movements = p.movements.map(mv=>{
+      const exerciseId = resolveExerciseIdFromName(mv.name);
+      const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
+      return {exerciseId, reps, weight: mv.weight||'', unit};
+    });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
   }
@@ -3747,21 +3766,31 @@ function setWodFormat(fmt){
   state.tmp.editingBoxWorkoutId = null;
   render();
 }
-function cancelWodBuild(){
+function cancelForTimeRunning(){
+  const b = state.tmp.forTimeBuilder;
   stopTicking();
-  state.tmp.wodFormat = 'strength';
-  state.tmp.wodTemplate = null;
-  state.tmp.wodMoves = null;
-  state.tmp.wodPhase = 'template';
-  state.tmp.forTimeBuilder = null;
-  state.tmp.amrapBuilder = null;
-  state.tmp.forLoadBuilder = null;
-  state.tmp.gps = null;
-  state.tmp.loadedDraftId = null;
-  state.tmp.editingBoxWorkoutId = null;
-  state.tmp.wodName = null;
-  state.tmp.wodDate = null;
-  state.tmp.wodNote = null;
+  b.phase = 'build';
+  b.startedAt = null; b.elapsedMs = 0; b.running = false;
+  b.capped = false; b.finalElapsedSec = null; b.roundsCompleted = 0; b.roundsLog = [];
+  state.tmp.confirmCancelWod = false;
+  render();
+  window.scrollTo(0,0);
+}
+function cancelAmrapRunning(){
+  const b = state.tmp.amrapBuilder;
+  stopTicking();
+  b.phase = 'build';
+  b.startedAt = null; b.running = false; b.remainingMs = 0; b.durationMs = 0;
+  b.roundsCompleted = 0; b.extraReps = ''; b.timedOut = false;
+  state.tmp.confirmCancelWod = false;
+  render();
+  window.scrollTo(0,0);
+}
+function cancelForLoadRunning(){
+  const b = state.tmp.forLoadBuilder;
+  stopTicking();
+  b.phase = 'build';
+  b.startedAt = null; b.running = false; b.elapsedMs = 0; b.achievedWeight = '';
   state.tmp.confirmCancelWod = false;
   render();
   window.scrollTo(0,0);
@@ -5432,6 +5461,38 @@ function weekSwipeEnd(event, onSwipeLeft, onSwipeRight){
   if(Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)*1.5) return;
   (dx < 0 ? onSwipeLeft : onSwipeRight)();
 }
+const SWIPE_DELETE_WIDTH = 76;
+let _cardSwipe = null;
+function cardSwipeStart(event, id){
+  const wrap = event.currentTarget;
+  const content = wrap.querySelector('.swipe-content');
+  const t = event.touches ? event.touches[0] : event;
+  _cardSwipe = { id, content, startX: t.clientX, startY: t.clientY, dx: 0, locked: null };
+  document.querySelectorAll('.swipe-content').forEach(el=>{
+    if(el!==content) el.style.transform = 'translateX(0px)';
+  });
+}
+function cardSwipeMove(event){
+  if(!_cardSwipe) return;
+  const t = event.touches ? event.touches[0] : event;
+  const dx = t.clientX - _cardSwipe.startX, dy = t.clientY - _cardSwipe.startY;
+  if(_cardSwipe.locked===null && (Math.abs(dx)>6 || Math.abs(dy)>6)){
+    _cardSwipe.locked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if(_cardSwipe.locked!=='x') return;
+  const base = state.tmp.swipedWorkoutId===_cardSwipe.id ? -SWIPE_DELETE_WIDTH : 0;
+  const clamped = Math.max(-SWIPE_DELETE_WIDTH, Math.min(0, base+dx));
+  _cardSwipe.dx = clamped - base;
+  _cardSwipe.content.style.transform = `translateX(${clamped}px)`;
+}
+function cardSwipeEnd(event, id){
+  if(!_cardSwipe || _cardSwipe.id!==id){ _cardSwipe = null; return; }
+  const wasOpen = state.tmp.swipedWorkoutId===id;
+  const finalX = (wasOpen ? -SWIPE_DELETE_WIDTH : 0) + _cardSwipe.dx;
+  _cardSwipe = null;
+  state.tmp.swipedWorkoutId = finalX < -SWIPE_DELETE_WIDTH/2 ? id : null;
+  render();
+}
 function renderBoxScheduleTab(){
   const weekOffset = state.tmp.scheduleWeekOffset||0;
   const selected = state.tmp.scheduleSelectedDate || todayStr();
@@ -5859,13 +5920,16 @@ function renderWorkoutHistoryEntry(w){
       }).join('')}
     </div>`;
   }
+  const swipeOffset = state.tmp.swipedWorkoutId===w.id ? -SWIPE_DELETE_WIDTH : 0;
   return `
-    <div class="wod-card">
-      <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
-      ${body}
-      ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
-      <div class="row" style="justify-content:flex-end;margin-top:4px;">
-        <button class="remove-row" onclick="deleteWorkout('${w.id}')">✕</button>
+    <div class="swipe-item" style="position:relative;overflow:hidden;touch-action:pan-y;margin-bottom:14px;" ontouchstart="cardSwipeStart(event,'${w.id}')" ontouchmove="cardSwipeMove(event)" ontouchend="cardSwipeEnd(event,'${w.id}')">
+      <div style="position:absolute;top:0;right:0;bottom:0;width:${SWIPE_DELETE_WIDTH}px;background:var(--plate-red);border-radius:0 10px 10px 0;">
+        <button type="button" style="background:none;border:none;color:#fff;font-weight:600;font-size:12px;width:100%;height:100%;cursor:pointer;line-height:1.4;" onclick="deleteWorkout('${w.id}')">🗑️<br>Löschen</button>
+      </div>
+      <div class="swipe-content wod-card" style="position:relative;background:var(--graphite-800);margin-bottom:0;transform:translateX(${swipeOffset}px);transition:transform 0.2s ease;">
+        <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
+        ${body}
+        ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
       </div>
     </div>
   `;
@@ -6077,7 +6141,6 @@ function renderWodTemplatePhase(headerFields, historyHtml){
 
   return `
     <div class="card">
-      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues Workout</h2>
       ${headerFields}
       ${emomFields}
@@ -6520,7 +6583,6 @@ function renderForTimeFlow(historyHtml){
     : '';
   return `
     <div class="card">
-      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues For Time</h2>
       ${headerFields}
       ${refNote}
@@ -6719,7 +6781,7 @@ function renderForTimeRunning(b){
         <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
         <div class="row" style="margin-bottom:14px;">
           <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
-          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+          <button class="btn btn-danger" onclick="cancelForTimeRunning()">Ja, abbrechen</button>
         </div>
       ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">${b.timeCapMs>0?'Verbleibend (Time Cap)':'Zeit läuft'}</div>
@@ -6929,7 +6991,6 @@ function renderAmrapFlow(historyHtml){
     : '';
   return `
     <div class="card">
-      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues AMRAP</h2>
       ${headerFields}
       ${refNote}
@@ -7079,7 +7140,7 @@ function renderAmrapRunning(b){
         <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
         <div class="row" style="margin-bottom:14px;">
           <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
-          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+          <button class="btn btn-danger" onclick="cancelAmrapRunning()">Ja, abbrechen</button>
         </div>
       ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">Verbleibend</div>
@@ -7173,7 +7234,6 @@ function renderForLoadFlow(historyHtml){
     : '';
   return `
     <div class="card">
-      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues For Load</h2>
       ${headerFields}
       ${refNote}
@@ -7304,7 +7364,7 @@ function renderForLoadRunning(b){
         <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
         <div class="row" style="margin-bottom:14px;">
           <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
-          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+          <button class="btn btn-danger" onclick="cancelForLoadRunning()">Ja, abbrechen</button>
         </div>
       ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">${ex?ex.name:'—'}${(isCardio||isMobility) ? '' : ` · Ziel: ${b.targetReps} Wdh.`}</div>
