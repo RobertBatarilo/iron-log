@@ -5232,7 +5232,7 @@ function renderAthleteAttendanceCard(){
   const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
   return `
     <div class="card">
-      <h2 class="small">🏆 Hall of Discipline</h2>
+      <h2 class="small">🏅 Hall of Discipline</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
         <span class="val">Check-ins</span>
@@ -5254,7 +5254,7 @@ function renderCoachLeaderboardCard(){
     .filter(r=>!search || r.name.toLowerCase().includes(search));
   return `
     <div class="card">
-      <h2 class="small">🏆 Hall of Discipline</h2>
+      <h2 class="small">🏅 Hall of Discipline</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="field" style="margin-bottom:10px;">
         <input type="text" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; debounceRender('leaderboardSearch');">
@@ -8271,6 +8271,7 @@ function formatMeasurementLine(m){
 function renderProgress(){
   const section = state.tmp.progressSection;
   if(section==='1rm') return renderProgress1RM();
+  if(section==='discipline') return renderProgressDiscipline();
   if(section==='times') return renderProgressTimes();
   if(section==='body') return renderProgressBody();
   if(section==='history') return renderProgressHistory();
@@ -8281,6 +8282,7 @@ function renderProgressMenu(){
     <div class="card">
       <h2>Fortschritt</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Hall of Strength</button>
+      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('discipline')">🏅 Hall of Discipline</button>` : ''}
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
@@ -8293,7 +8295,17 @@ function renderProgressHistory(){
     ${renderWorkoutHistory()}
   `;
 }
-function setProgressSection(s){ state.tmp.progressSection = s; render(); }
+function setProgressSection(s){
+  state.tmp.progressSection = s;
+  if(s==='discipline' && !state.box.loaded) loadBoxData();
+  render();
+}
+function renderProgressDiscipline(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    ${renderAthleteAttendanceCard()}
+  `;
+}
 function renderProgress1RM(){
   const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0).sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
