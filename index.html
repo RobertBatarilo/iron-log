@@ -612,7 +612,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false,
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -3194,6 +3194,27 @@ function choosePhotoImportOption(idx){
     .join('\n');
   applyParsedWorkout(reconstructed);
 }
+function renderScalingTierPicker(pi){
+  if(!state.profile?.gender){
+    return `
+      <div class="field"><label>Geschlecht (für Gewichtsvorgaben nötig)</label>
+        <div class="row">
+          <button type="button" class="btn btn-ghost" onclick="setGenderChoice('m')">Männlich</button>
+          <button type="button" class="btn btn-ghost" onclick="setGenderChoice('w')">Weiblich</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="field"><label>Skalierungsstufe</label>
+      <select onchange="state.tmp.photoImport.scaleTier=this.value;">
+        <option value="rx" ${pi.scaleTier==='rx'?'selected':''}>Rx</option>
+        <option value="intermediate" ${pi.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
+        <option value="scaled" ${pi.scaleTier==='scaled'?'selected':''}>Scaled</option>
+      </select>
+    </div>
+  `;
+}
 function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
   if(!pi || !pi.open) return '';
@@ -3207,15 +3228,7 @@ function renderPhotoImportModal(){
     ${pi.aiMode
       ? `<div class="note" style="margin-bottom:14px;">Dein Foto wird zur Analyse an einen Server gesendet (Claude KI) — anders als bei der Texterkennung bleibt es dabei nicht nur auf deinem Gerät.</div>`
       : `<div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Bild wird nirgends hochgeladen.</div>`}
-    ${state.profile?.gender ? `
-    <div class="field"><label>Skalierungsstufe</label>
-      <select onchange="state.tmp.photoImport.scaleTier=this.value;">
-        <option value="rx" ${pi.scaleTier==='rx'?'selected':''}>Rx</option>
-        <option value="intermediate" ${pi.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
-        <option value="scaled" ${pi.scaleTier==='scaled'?'selected':''}>Scaled</option>
-      </select>
-    </div>
-    ` : ''}
+    ${renderScalingTierPicker(pi)}
     <div class="field"><label>Screenshot/Bild hochladen</label>
       <input type="file" accept="image/*" onchange="handlePhotoImportFile(this)">
     </div>
@@ -3227,6 +3240,7 @@ function renderPhotoImportModal(){
   `;
   const reviewBody = `
     ${pi.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(pi.error)}</div>` : ''}
+    ${renderScalingTierPicker(pi)}
     <div class="field"><label>Erkannter Text (bitte prüfen und korrigieren)</label>
       <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
     </div>
@@ -3255,6 +3269,7 @@ function renderPhotoImportModal(){
   `;
   const chooseOptionBody = `
     <div class="note" style="margin-bottom:14px;">Mehrere Optionen erkannt — welche soll übernommen werden?</div>
+    ${renderScalingTierPicker(pi)}
     ${(pi.optionChoices||[]).map((opt,i)=>`
       <button type="button" class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:8px;white-space:normal;" onclick="choosePhotoImportOption(${i})">
         <strong>Option ${escapeHtml(opt.label)}</strong><br>${escapeHtml(opt.content)}
@@ -3377,6 +3392,19 @@ function parseScalingLines(lines){
     remainingLines.push(line);
   });
   return { tiers, remainingLines };
+}
+function buildTiersFromStructured(raw){
+  const tiers = {};
+  if(!raw) return tiers;
+  ['rx','intermediate','scaled'].forEach(key=>{
+    const t = raw[key];
+    if(!t) return;
+    const male = parseFloat(t.male), female = parseFloat(t.female);
+    if(!isNaN(male) || !isNaN(female)){
+      tiers[key] = { male: isNaN(male)?null:male, female: isNaN(female)?null:female };
+    }
+  });
+  return tiers;
 }
 function detectWorkoutFormat(text){
   const t = text.toLowerCase();
@@ -3575,7 +3603,7 @@ function applyParsedWorkout(input){
   const text = structured ? '' : input;
   const allLines = structured ? [] : ocrTextLines(text);
   const nameInfo = structured ? { name: input.name || null, remainingLines: [] } : extractWorkoutName(allLines);
-  const scalingInfo = structured ? { tiers: {}, remainingLines: [] } : parseScalingLines(nameInfo.remainingLines);
+  const scalingInfo = structured ? { tiers: buildTiersFromStructured(input.scalingTiers), remainingLines: [] } : parseScalingLines(nameInfo.remainingLines);
   const parseLines = scalingInfo.remainingLines;
 
   state.tmp.wodTemplate = null;
@@ -3717,6 +3745,33 @@ function setWodFormat(fmt){
   state.tmp.gps = null;
   state.tmp.loadedDraftId = null;
   state.tmp.editingBoxWorkoutId = null;
+  render();
+}
+function cancelWodBuild(){
+  stopTicking();
+  state.tmp.wodFormat = 'strength';
+  state.tmp.wodTemplate = null;
+  state.tmp.wodMoves = null;
+  state.tmp.wodPhase = 'template';
+  state.tmp.forTimeBuilder = null;
+  state.tmp.amrapBuilder = null;
+  state.tmp.forLoadBuilder = null;
+  state.tmp.gps = null;
+  state.tmp.loadedDraftId = null;
+  state.tmp.editingBoxWorkoutId = null;
+  state.tmp.wodName = null;
+  state.tmp.wodDate = null;
+  state.tmp.wodNote = null;
+  state.tmp.confirmCancelWod = false;
+  render();
+  window.scrollTo(0,0);
+}
+function requestCancelWodRunning(){
+  state.tmp.confirmCancelWod = true;
+  render();
+}
+function cancelCancelWodRunning(){
+  state.tmp.confirmCancelWod = false;
   render();
 }
 async function saveWodDraft(){
@@ -5128,8 +5183,8 @@ function renderIdentityLine(){
   const roleLabel = isActive && m.role==='owner' ? 'Coach' : 'Athlet';
   const boxName = isActive ? (m.expand?.box?.name || 'Box') : null;
   return boxName
-    ? `${escapeHtml(displayName)} <span class="note" style="display:inline;">(${roleLabel})</span> at <span style="color:var(--chalk-yellow);">${escapeHtml(boxName)}</span>`
-    : `${escapeHtml(displayName)} <span class="note" style="display:inline;">(${roleLabel})</span> aktuell keiner Box zugehörig`;
+    ? `${escapeHtml(displayName)} <span style="color:var(--chalk-yellow);">(${roleLabel})</span> at <span style="color:var(--chalk-yellow);">${escapeHtml(boxName)}</span>`
+    : `${escapeHtml(displayName)} <span style="color:var(--chalk-yellow);">(${roleLabel})</span> aktuell keiner Box zugehörig`;
 }
 function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
   return weekDates(offsetWeeks).map(d=>{
@@ -5809,6 +5864,9 @@ function renderWorkoutHistoryEntry(w){
       <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
       ${body}
       ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
+      <div class="row" style="justify-content:flex-end;margin-top:4px;">
+        <button class="remove-row" onclick="deleteWorkout('${w.id}')">✕</button>
+      </div>
     </div>
   `;
 }
@@ -6019,6 +6077,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
 
   return `
     <div class="card">
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues Workout</h2>
       ${headerFields}
       ${emomFields}
@@ -6461,6 +6520,7 @@ function renderForTimeFlow(historyHtml){
     : '';
   return `
     <div class="card">
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues For Time</h2>
       ${headerFields}
       ${refNote}
@@ -6479,6 +6539,7 @@ function renderForTimeFlow(historyHtml){
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startForTimeWod()">WOD starten</button>
       </div>
+      <button class="btn btn-ghost" style="margin-top:8px;" onclick="skipForTimeTimer()">✍️ Ohne Timer eintragen</button>
       ${isBoxAdminView() ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="publishBoxWorkout()">📣 An Box veröffentlichen</button>` : ''}
     </div>
     ${historyHtml}
@@ -6654,6 +6715,13 @@ function renderForTimeRunning(b){
   }).join('');
   return `
     <div class="card" style="text-align:center;">
+      ${state.tmp.confirmCancelWod ? `
+        <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
+        <div class="row" style="margin-bottom:14px;">
+          <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
+          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+        </div>
+      ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">${b.timeCapMs>0?'Verbleibend (Time Cap)':'Zeit läuft'}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
       <div id="ftChecklist" style="text-align:left;max-height:360px;overflow-y:auto;margin-bottom:14px;">
@@ -6670,7 +6738,10 @@ function renderForTimeSummary(b){
   return `
     <div class="card" style="text-align:center;">
       <h2>Workout abgeschlossen 🏁</h2>
-      <div class="stat-num" style="font-size:40px;margin:14px 0;">${fmtClock((b.finalElapsedSec||0)*1000,false)}</div>
+      <div class="field" style="text-align:left;max-width:180px;margin:14px auto;">
+        <label>Zeit (mm:ss)</label>
+        <input type="text" id="forTimeManualTime" value="${fmtClock((b.finalElapsedSec||0)*1000,false)}" placeholder="z.B. 12:34" style="text-align:center;font-size:28px;">
+      </div>
       ${b.capped ? `<div class="chip">Time Cap erreicht</div>` : ''}
       <div class="field" style="text-align:left;margin-top:14px;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
       <label class="checkbox-row"><input type="checkbox" id="forTimeSaveAsBest" checked> Als Bestzeit in Erfolge speichern</label>
@@ -6678,8 +6749,27 @@ function renderForTimeSummary(b){
     </div>
   `;
 }
+function skipForTimeTimer(){
+  const b = state.tmp.forTimeBuilder;
+  b.finalElapsedSec = 0;
+  b.roundsCompleted = parseInt(b.rounds)||1;
+  b.capped = false;
+  b.phase = 'summary';
+  render();
+  window.scrollTo(0,0);
+}
+function parseClockToSec(str){
+  const parts = String(str||'').trim().split(':').map(p=>parseInt(p,10));
+  if(!parts.length || parts.some(isNaN)) return null;
+  if(parts.length===1) return parts[0];
+  if(parts.length===2) return parts[0]*60+parts[1];
+  if(parts.length===3) return parts[0]*3600+parts[1]*60+parts[2];
+  return null;
+}
 async function saveForTimeWorkout(){
   const b = state.tmp.forTimeBuilder;
+  const manualTimeSec = parseClockToSec(document.getElementById('forTimeManualTime')?.value);
+  if(manualTimeSec!=null) b.finalElapsedSec = manualTimeSec;
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
@@ -6839,6 +6929,7 @@ function renderAmrapFlow(historyHtml){
     : '';
   return `
     <div class="card">
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues AMRAP</h2>
       ${headerFields}
       ${refNote}
@@ -6984,6 +7075,13 @@ function renderAmrapRunning(b){
   }
   return `
     <div class="card" style="text-align:center;">
+      ${state.tmp.confirmCancelWod ? `
+        <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
+        <div class="row" style="margin-bottom:14px;">
+          <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
+          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+        </div>
+      ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">Verbleibend</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
       <div class="moves" style="text-align:left;margin-bottom:14px;">
@@ -7075,6 +7173,7 @@ function renderForLoadFlow(historyHtml){
     : '';
   return `
     <div class="card">
+      <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="cancelWodBuild()">✕ Abbrechen</button>
       <h2>Neues For Load</h2>
       ${headerFields}
       ${refNote}
@@ -7201,6 +7300,13 @@ function renderForLoadRunning(b){
     : `<div class="field" style="text-align:left;"><label>Erreichtes Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(b.achievedWeight)}" oninput="updateForLoadWeight(this.value)" placeholder="z.B. 82.5"></div>`;
   return `
     <div class="card" style="text-align:center;">
+      ${state.tmp.confirmCancelWod ? `
+        <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
+        <div class="row" style="margin-bottom:14px;">
+          <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
+          <button class="btn btn-danger" onclick="cancelWodBuild()">Ja, abbrechen</button>
+        </div>
+      ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
       <div class="stat-label">${ex?ex.name:'—'}${(isCardio||isMobility) ? '' : ` · Ziel: ${b.targetReps} Wdh.`}</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(displayMs,false)}</div>
       ${achievedField}
@@ -8173,6 +8279,12 @@ async function deleteTimeRecord(id){
   showToast('Eintrag gelöscht');
   render();
 }
+async function deleteWorkout(id){
+  state.workouts = state.workouts.filter(w=>w.id!==id);
+  await saveKey('workouts', state.workouts);
+  showToast('Workout gelöscht');
+  render();
+}
 
 /* ---------- NUTRITION TAB ---------- */
 function todaysNutrition(){
@@ -8712,7 +8824,7 @@ function renderProfileAccount(){
       <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
       <div class="field"><label>Geschlecht</label>
         <div class="row">
-          <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
+          <button type="button" class="btn ${p.gender==='m'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
           <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
         </div>
       </div>
