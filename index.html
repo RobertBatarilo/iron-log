@@ -3210,7 +3210,7 @@ function renderScalingTierPicker(pi){
       <select onchange="state.tmp.photoImport.scaleTier=this.value;">
         <option value="rx" ${pi.scaleTier==='rx'?'selected':''}>Rx</option>
         <option value="intermediate" ${pi.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
-        <option value="scaled" ${pi.scaleTier==='scaled'?'selected':''}>Scaled</option>
+        <option value="scaled" ${pi.scaleTier==='scaled'?'selected':''}>Basic</option>
       </select>
     </div>
   `;
@@ -3384,9 +3384,16 @@ function parseScalingLines(lines){
   const remainingLines = [];
   lines.forEach(line=>{
     const tierDef = SCALING_TIER_PATTERNS.find(t=>t.re.test(line));
-    const nums = tierDef && line.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)\s*kg/i);
-    if(tierDef && nums){
-      tiers[tierDef.key] = { male: parseFloat(nums[1].replace(',','.')), female: parseFloat(nums[2].replace(',','.')) };
+    if(!tierDef){ remainingLines.push(line); return; }
+    const weightNums = line.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)\s*kg/i);
+    const calNums = line.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)\s*cal/i);
+    if(weightNums || calNums){
+      tiers[tierDef.key] = {
+        male: weightNums ? parseFloat(weightNums[1].replace(',','.')) : null,
+        female: weightNums ? parseFloat(weightNums[2].replace(',','.')) : null,
+        calMale: calNums ? parseFloat(calNums[1].replace(',','.')) : null,
+        calFemale: calNums ? parseFloat(calNums[2].replace(',','.')) : null
+      };
       return;
     }
     remainingLines.push(line);
@@ -3400,8 +3407,12 @@ function buildTiersFromStructured(raw){
     const t = raw[key];
     if(!t) return;
     const male = parseFloat(t.male), female = parseFloat(t.female);
-    if(!isNaN(male) || !isNaN(female)){
-      tiers[key] = { male: isNaN(male)?null:male, female: isNaN(female)?null:female };
+    const calMale = parseFloat(t.calMale), calFemale = parseFloat(t.calFemale);
+    if(!isNaN(male) || !isNaN(female) || !isNaN(calMale) || !isNaN(calFemale)){
+      tiers[key] = {
+        male: isNaN(male)?null:male, female: isNaN(female)?null:female,
+        calMale: isNaN(calMale)?null:calMale, calFemale: isNaN(calFemale)?null:calFemale
+      };
     }
   });
   return tiers;
@@ -3711,12 +3722,14 @@ function applyParsedWorkout(input){
     const tier = scalingInfo.tiers[chosenScaleTier];
     if(tier){
       const kg = state.profile.gender==='w' ? tier.female : tier.male;
-      if(kg!=null && !isNaN(kg)){
-        activeMovements.forEach(mv=>{
-          const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-          if(ex && getExerciseType(ex)==='weighted') mv.weight = String(kg);
-        });
-      }
+      const cal = state.profile.gender==='w' ? tier.calFemale : tier.calMale;
+      activeMovements.forEach(mv=>{
+        const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+        if(!ex) return;
+        const type = getExerciseType(ex);
+        if(type==='weighted' && kg!=null && !isNaN(kg)) mv.weight = String(kg);
+        if(type==='cardio' && mv.unit==='kcal' && cal!=null && !isNaN(cal)) mv.reps = String(cal);
+      });
     }
   }
   if(chosenScaleTier && state.profile && state.profile.scaleTier !== chosenScaleTier){

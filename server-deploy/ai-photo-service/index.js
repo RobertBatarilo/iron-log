@@ -32,7 +32,7 @@ Regeln:
 - Uebungsnamen auf Englisch in der ueblichen CrossFit-Schreibweise (z.B. "Pull-ups", "Air Squats", "Power Clean").
 - Erkennst du "16/12 Calorie Air Bike" o.ae. (Maenner/Frauen-Kalorienangabe), nimm die erste (Maenner-)Zahl als reps und "cal" als unit.
 - Erkennst du bei Gewichtsangaben ein Maenner/Frauen-Splitformat wie "61/43 kg" oder "61/43kg", nimm NUR die erste (Maenner-)Zahl als weight (also "61", nicht "61/43") - weight muss immer eine einzelne reine Zahl als String sein, niemals ein Bruch/Slash.
-- Zeigt das Bild fuer "for-time"/"amrap"/"emom" GETRENNTE Gewichtsangaben fuer mehrere Skalierungsstufen (z.B. "Rx: 42.5/30kg", "Intermediate: 30/20kg", "Scaled: 20/15kg" - "Basic"/"Beginner" zaehlt als "scaled"), fuege zusaetzlich ein Top-Level-Feld "scalingTiers" hinzu: {"rx":{"male":"<kg>","female":"<kg>"},"intermediate":{"male":"<kg>","female":"<kg>"},"scaled":{"male":"<kg>","female":"<kg>"}} - nur die Stufen eintragen, die im Bild tatsaechlich vorkommen, jeweils als reine Zahl (kein Bruch/Slash). Das normale movements[].weight-Feld bleibt davon unberuehrt und zeigt weiterhin die Rx- bzw. erste im Bild genannte Gewichtsangabe (Maenner-Wert).
+- Zeigt das Bild fuer "for-time"/"amrap"/"emom" GETRENNTE Angaben fuer mehrere Skalierungsstufen (z.B. "Rx: 42.5/30kg", "Intermediate: 30/20kg, 30/22 cal", "Basic: 20/15kg 25/18 cal" - "Scaled"/"Beginner" zaehlt ebenfalls als "scaled"), fuege zusaetzlich ein Top-Level-Feld "scalingTiers" hinzu: {"rx":{"male":"<kg>","female":"<kg>","calMale":"<cal>","calFemale":"<cal>"},"intermediate":{...},"scaled":{...}} - "male"/"female" fuer Gewichtsabweichungen bei Hantel-Uebungen, "calMale"/"calFemale" fuer Kalorien-Abweichungen bei Cardio-Maschinen (Air Bike, Row, Ski Erg etc.). Nur die Stufen UND Felder eintragen, die im Bild tatsaechlich vorkommen (leeres Feld weglassen statt raten), jeweils als reine Zahl (kein Bruch/Slash). Die normalen movements[].weight/reps-Felder bleiben davon unberuehrt und zeigen weiterhin die Rx- bzw. erste im Bild genannte Angabe (Maenner-Wert).
 - Wenn eine Angabe nicht im Bild steht, verwende einen sinnvollen Default (rounds:"1", timeCapMin/Sec:"", etc.) statt das Feld wegzulassen.
 - Bei "strength": steht dort z.B. "Set 1: 7 Reps @ 70%, Set 2: 5 Reps @ 75%, Set 3: 3 Reps @ 80%" (unterschiedliche Reps pro Satz), dann NICHT nur die erste Zahl fuer repsTarget nehmen, sondern ALLE Wiederholungszahlen kommagetrennt in der Reihenfolge der Saetze auflisten (hier also "7,5,3"), passend zur ebenfalls kommagetrennten pctList ("70,75,80").
 - Bei "for-time": Nutze repScheme NUR, wenn in JEDER Runde DIESELBE Wiederholungszahl fuer ALLE Bewegungen gilt und sich diese Zahl von Runde zu Runde aendert (klassisches Benchmark-Schema wie "21-15-9", z.B. Fran) - in diesem Fall lasse reps bei den einzelnen movements leer. Hat dagegen jede Bewegungszeile ihre EIGENE, unterschiedliche Wiederholungszahl (z.B. eine Checkliste/Chipper mit vielen einzelnen Zeilen), trage diese Zahl bei jeder Bewegung einzeln in reps ein und lasse repScheme leer.
@@ -62,6 +62,8 @@ function sanitizeWeights(parsed) {
       if (!tier || typeof tier !== 'object') return;
       if (tier.male !== undefined) tier.male = normalizeWeight(tier.male);
       if (tier.female !== undefined) tier.female = normalizeWeight(tier.female);
+      if (tier.calMale !== undefined) tier.calMale = normalizeWeight(tier.calMale);
+      if (tier.calFemale !== undefined) tier.calFemale = normalizeWeight(tier.calFemale);
     });
   }
 }
