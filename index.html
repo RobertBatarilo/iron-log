@@ -641,7 +641,7 @@ function defaultTmp(){
     workoutsSelectedDate:null, workoutsWeekOffset:0,
     boxFreeformOpen:false,
     boxDraftsOpen:false, boxHistoryOpen:false, boxArchiveSearch:'',
-    leaderboardDetailOpen:false,
+    leaderboardDetailOpen:false, leaderboardSearch:'',
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
@@ -5138,31 +5138,58 @@ function toggleLeaderboardDetail(){
   state.tmp.leaderboardDetailOpen = !state.tmp.leaderboardDetailOpen;
   render();
 }
-function renderBoxLeaderboard(){
+function renderLeaderboardPeriodSelect(){
   const periodKey = state.tmp.leaderboardPeriod || 'month';
-  const ranked = computeBoxLeaderboard(periodKey);
+  return `
+    <div class="field" style="margin-bottom:10px;">
+      <select onchange="state.tmp.leaderboardPeriod=this.value; render();">
+        ${LEADERBOARD_PERIODS.map(p=>`<option value="${p.key}" ${periodKey===p.key?'selected':''}>${p.label}</option>`).join('')}
+      </select>
+    </div>
+  `;
+}
+function renderAthleteAttendanceCard(){
+  const periodKey = state.tmp.leaderboardPeriod || 'month';
   const meId = pb.authStore.record?.id;
+  const mine = computeBoxLeaderboard(periodKey).find(r=>r.userId===meId);
+  const count = mine ? mine.count : 0;
   const detailOpen = state.tmp.leaderboardDetailOpen;
   const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
   return `
     <div class="card">
       <h2 class="small">🏆 Hall of Fame</h2>
-      <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
-        ${LEADERBOARD_PERIODS.map(p=>`<button class="btn-sm ${periodKey===p.key?'btn-primary':'btn-ghost'}" style="flex:0 0 auto;width:auto;" onclick="state.tmp.leaderboardPeriod='${p.key}'; render();">${p.label}</button>`).join('')}
+      ${renderLeaderboardPeriodSelect()}
+      <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
+        <span class="val">Check-ins</span>
+        <span class="note" style="margin:0;">${count}×</span>
       </div>
-      ${!ranked.length ? `<div class="note">Noch keine Check-ins in diesem Zeitraum.</div>` : ranked.map((r,i)=>{
-        const isMe = r.userId===meId;
-        return `
-        <div class="history-item" style="${isMe?'background:var(--iron-700);border-radius:8px;cursor:pointer;':''}" ${isMe?`onclick="toggleLeaderboardDetail()"`:''}>
-          <span class="val">${i+1}. ${escapeHtml(r.name)}${isMe?' (du)':''}</span>
+      ${detailOpen ? `
+        <div class="note" style="margin:8px 0 0;">
+          ${myDates.length ? myDates.map(d=>fmtDate(d)).join(' · ') : 'Keine Trainingstage in diesem Zeitraum.'}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+function renderCoachLeaderboardCard(){
+  const periodKey = state.tmp.leaderboardPeriod || 'month';
+  const search = (state.tmp.leaderboardSearch||'').trim().toLowerCase();
+  const filtered = computeBoxLeaderboard(periodKey)
+    .map((r,i)=>({...r, rank:i+1}))
+    .filter(r=>!search || r.name.toLowerCase().includes(search));
+  return `
+    <div class="card">
+      <h2 class="small">🏆 Hall of Fame</h2>
+      ${renderLeaderboardPeriodSelect()}
+      <div class="field" style="margin-bottom:10px;">
+        <input type="text" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; render();">
+      </div>
+      ${!filtered.length ? `<div class="note">${search?'Kein Athlet gefunden.':'Noch keine Check-ins in diesem Zeitraum.'}</div>` : filtered.map(r=>`
+        <div class="history-item">
+          <span class="val">${r.rank}. ${escapeHtml(r.name)}</span>
           <span class="note" style="margin:0;">${r.count}×</span>
         </div>
-        ${isMe && detailOpen ? `
-          <div class="note" style="margin:4px 0 8px 12px;">
-            ${myDates.length ? myDates.map(d=>fmtDate(d)).join(' · ') : 'Keine Trainingstage in diesem Zeitraum.'}
-          </div>
-        ` : ''}
-      `;}).join('')}
+      `).join('')}
     </div>
   `;
 }
@@ -5202,7 +5229,7 @@ function renderBoxHomeAdmin(box){
         `).join('')}
       </div>
     ` : ''}
-    ${renderBoxLeaderboard()}
+    ${renderCoachLeaderboardCard()}
   `;
 }
 function renderBoxHomeMember(box){
@@ -5221,7 +5248,7 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
-    ${renderBoxLeaderboard()}
+    ${renderAthleteAttendanceCard()}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
