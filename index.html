@@ -613,7 +613,7 @@ function defaultTmp(){
   return {
     wodFormat:'strength',
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null,
-    adminUsers:null, adminSearch:'', adminSelectedUserId:null, showNachbuchenPicker:false, bookableAthletes:null,
+    adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
     forTimeBuilder:null, amrapBuilder:null, forLoadBuilder:null, runBuilder:null,
@@ -2480,6 +2480,12 @@ function renderMigrationScreen(){
 async function initApp(){
   flushPendingSync();
   if(pb.authStore.isValid) pb.collection('users').authRefresh().catch(()=>{});
+  if(pb.authStore.record?.disabled){
+    pb.authStore.clear();
+    state.tmp.auth = {screen:'login', email:'', password:'', passwordConfirm:'', error:'Dein Konto wurde deaktiviert. Bitte kontaktiere deinen Coach.', info:'', loading:false, resetToken:null};
+    renderBoot();
+    return;
+  }
   const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan, drafts] = await Promise.all([
     loadKey('profile', null),
     loadKey('exercises', null),
@@ -5235,7 +5241,7 @@ function renderAthleteAttendanceCard(){
   const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
   return `
     <div class="card">
-      <h2 class="small">🏅 Hall of Discipline</h2>
+      <h2 class="small">🏅 Consistency</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
         <span class="val">Check-ins</span>
@@ -8038,7 +8044,7 @@ function renderPrCards(){
       <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
     </div>
     <div class="card">
-      <h2 class="small">🏆 Hall of Strength</h2>
+      <h2 class="small">🏆 Strength Records</h2>
       ${listHtml}
     </div>
   `;
@@ -8085,7 +8091,7 @@ function renderTimeCards(){
       ${editingTime ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditTime()">Abbrechen</button>` : ''}
     </div>
     <div class="card">
-      <h2 class="small">Deine Bestzeiten</h2>
+      <h2 class="small">⏱️ Workout Records</h2>
       ${timesHtml}
     </div>
   `;
@@ -8283,9 +8289,9 @@ function renderProgressMenu(){
   return `
     <div class="card">
       <h2>Fortschritt</h2>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Hall of Strength</button>
-      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('discipline')">🏅 Hall of Discipline</button>` : ''}
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Strength Records</button>
+      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('discipline')">🏅 Consistency</button>` : ''}
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Workout Records</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
     </div>
@@ -8305,6 +8311,7 @@ function setProgressSection(s){
 function renderProgressDiscipline(){
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="note" style="margin-bottom:14px;">Trainingsbesuche, Check-ins, Serien und Trainingshäufigkeit.</div>
     ${renderAthleteAttendanceCard()}
   `;
 }
@@ -8315,6 +8322,7 @@ function renderProgress1RM(){
 
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="note" style="margin-bottom:14px;">Persönliche Maximalgewichte, 1RM und andere Kraftrekorde.</div>
     <div class="card">
       <h2>1RM-Fortschritt</h2>
       ${exWithLogs.length ? `
@@ -8328,6 +8336,7 @@ function renderProgress1RM(){
 function renderProgressTimes(){
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="note" style="margin-bottom:14px;">Persönliche Bestzeiten bei "For Time"-Workouts.</div>
     ${renderTimeCards()}
   `;
 }
@@ -8527,7 +8536,7 @@ function renderProfileMenu(){
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
-      ${pb.authStore.record?.isAppAdmin ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-top:10px;" onclick="setProfileSection('admin')">🛡️ App-Administration</button>` : ''}
+      ${pb.authStore.record?.isAppAdmin ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-top:10px;" onclick="setProfileSection('admin')">🛡️ Mitglieder-Administration</button>` : ''}
     </div>
   `;
 }
@@ -8569,6 +8578,47 @@ async function saveAdminUserFlags(userId){
     showToast('Speichern fehlgeschlagen');
   }
 }
+async function toggleAdminUserDisabled(userId, disabled){
+  try{
+    await pb.collection('users').update(userId, { disabled });
+    showToast(disabled ? 'Konto deaktiviert' : 'Konto wieder aktiviert');
+    await loadAdminUsers();
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
+  }
+}
+function startAdminUserDelete(userId){
+  state.tmp.adminDeleteConfirmId = userId;
+  render();
+}
+function cancelAdminUserDelete(){
+  state.tmp.adminDeleteConfirmId = null;
+  render();
+}
+async function deleteUserCascade(userId){
+  const ownedCollections = ['memberships','bookings','social_posts','social_comments','social_reactions','social_poll_votes','push_subscriptions'];
+  for(const coll of ownedCollections){
+    const records = await pb.collection(coll).getFullList({filter: pb.filter('user = {:u}', {u:userId})});
+    await Promise.all(records.map(r=>pb.collection(coll).delete(r.id)));
+  }
+  await pb.collection('users').delete(userId);
+}
+async function confirmAdminUserDelete(userId){
+  const typed = (document.getElementById('adminDeleteConfirmText')?.value || '').trim();
+  if(typed !== 'ja, bitte alle Daten unwiderruflich löschen.'){
+    showToast('Bestätigungstext stimmt nicht überein');
+    return;
+  }
+  try{
+    await deleteUserCascade(userId);
+    showToast('Profil endgültig gelöscht');
+    state.tmp.adminDeleteConfirmId = null;
+    state.tmp.adminSelectedUserId = null;
+    await loadAdminUsers();
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
+}
 function renderAdminUsersScreen(){
   if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   const users = state.tmp.adminUsers;
@@ -8577,7 +8627,7 @@ function renderAdminUsersScreen(){
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
     <div class="card">
-      <h2 class="small">App-Administration</h2>
+      <h2 class="small">Mitglieder-Administration</h2>
       <div class="field"><label>Suche</label>
         <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
       </div>
@@ -8593,6 +8643,7 @@ function renderAdminUsersScreen(){
           <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
             ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
             ${u.isProStandalone?'<span class="chip">Pro</span>':''}
+            ${u.disabled?'<span class="chip">Deaktiviert</span>':''}
           </span>
         </div>
       `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
@@ -8620,6 +8671,20 @@ function renderAdminUserDetail(){
       </div>
       <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
       <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
+      <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+      <div class="note" style="margin-bottom:10px;">Konto-Status</div>
+      <button class="btn ${u.disabled?'btn-primary':'btn-ghost'}" onclick="toggleAdminUserDisabled('${u.id}', ${!u.disabled})">${u.disabled?'Wieder aktivieren':'Deaktivieren'}</button>
+      <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+      <div class="note" style="color:var(--plate-red);margin-bottom:10px;">⚠️ Achtung! Diesen Löschvorgang nur durchführen, wenn die Person es ausdrücklich wünscht. Dieser Löschvorgang kann nicht mehr rückgängig gemacht werden.</div>
+      ${state.tmp.adminDeleteConfirmId===u.id ? `
+        <div class="field"><label>Zur Bestätigung eingeben: „ja, bitte alle Daten unwiderruflich löschen."</label>
+          <input type="text" id="adminDeleteConfirmText" placeholder="ja, bitte alle Daten unwiderruflich löschen.">
+        </div>
+        <button class="btn btn-danger" onclick="confirmAdminUserDelete('${u.id}')">Endgültig löschen</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelAdminUserDelete()">Abbrechen</button>
+      ` : `
+        <button class="btn btn-danger" onclick="startAdminUserDelete('${u.id}')">Profil löschen (DSGVO)</button>
+      `}
     </div>
   `;
 }
