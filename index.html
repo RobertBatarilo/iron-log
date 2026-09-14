@@ -5114,6 +5114,17 @@ function renderRoleBadge(){
     ? `<span class="chip chip-owner">Coach</span>`
     : `<span class="chip">Athlet</span>`;
 }
+function renderIdentityLine(){
+  const me = pb.authStore.record;
+  const displayName = me?.name || me?.email || '';
+  const m = state.box.membership;
+  const isActive = m && m.status==='active';
+  const roleLabel = isActive && m.role==='owner' ? 'Coach' : 'Athlet';
+  const boxName = isActive ? (m.expand?.box?.name || 'Box') : null;
+  return boxName
+    ? `${escapeHtml(displayName)} <span class="note" style="display:inline;">(${roleLabel})</span> at <span style="color:var(--chalk-yellow);">${escapeHtml(boxName)}</span>`
+    : `${escapeHtml(displayName)} <span class="note" style="display:inline;">(${roleLabel})</span> aktuell keiner Box zugehörig`;
+}
 function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
   return weekDates(offsetWeeks).map(d=>{
     const isSel = d===selected;
@@ -5126,7 +5137,6 @@ function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
 function renderBoxIdentityCard(box){
   const me = pb.authStore.record;
   const avatarUrl = boxAvatarUrl(me, '100x100');
-  const displayName = me?.name || me?.email || '';
   const initials = (me?.name || me?.email || '?').slice(0,2).toUpperCase();
   const boxUrl = boxLogoUrl(box, '100x100');
   const boxInitial = (box?.name||'Box').slice(0,1).toUpperCase();
@@ -5134,23 +5144,16 @@ function renderBoxIdentityCard(box){
   const admin = isBoxAdminView();
   return `
     <div class="card">
-      <div class="note" style="margin-bottom:6px;letter-spacing:0.08em;">ATHLET</div>
       <div class="row" style="align-items:center;gap:12px;">
         <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
-        <div style="flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(displayName)}</div>
-          ${renderRoleBadge()}
-        </div>
-      </div>
-      <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
-      <div class="note" style="margin-bottom:6px;letter-spacing:0.08em;">BOX</div>
-      <div class="row" style="align-items:center;gap:12px;${admin?'margin-bottom:10px;':''}">
-        ${boxLogoCircle}
-        ${admin
-          ? `<div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>`
-          : `<h2 style="margin:0;">${escapeHtml(box?.name || 'Box')}</h2>`}
+        <div style="flex:1;font-family:var(--font-display);font-weight:700;font-size:16px;">${renderIdentityLine()}</div>
       </div>
       ${admin ? `
+        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+        <div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
+          ${boxLogoCircle}
+          <div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>
+        </div>
         ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
         <div class="field"><label>Box-Name</label>
           <input type="text" id="boxNameInput" value="${escapeHtml(box?.name||'')}">
@@ -5325,7 +5328,6 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
-    ${renderAthleteAttendanceCard()}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
@@ -8651,7 +8653,7 @@ function renderProfileAccount(){
       </div>
       <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="saveProfile()">Speichern</button>
       `}
-      <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((me&&(me.name||me.email))||'—')} ${renderRoleBadge()}</div>
+      <div class="note" style="margin-bottom:10px;">${renderIdentityLine()}</div>
       ${me && !me.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
         <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="resendVerification()">Bestätigungs-Mail erneut senden</button>
