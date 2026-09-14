@@ -641,6 +641,7 @@ function defaultTmp(){
     workoutsSelectedDate:null, workoutsWeekOffset:0,
     boxFreeformOpen:false,
     boxDraftsOpen:false, boxHistoryOpen:false, boxArchiveSearch:'',
+    leaderboardDetailOpen:false,
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
@@ -664,7 +665,7 @@ let state = {
   timeRecords:[],
   trainingPlan:null,
   activeTab:'today',
-  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false },
+  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -2531,6 +2532,7 @@ function iconAmrap(){return `<svg viewBox="0 0 24 24" fill="none" stroke="curren
 function iconEmom(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="12" y2="7"/><line x1="12" y1="12" x2="16" y2="14"/></svg>`;}
 function iconForLoad(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="10" width="6" height="10" rx="1"/><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/></svg>`;}
 function iconBuilding(){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1"/><line x1="8" y1="7" x2="8" y2="7.01"/><line x1="12" y1="7" x2="12" y2="7.01"/><line x1="16" y1="7" x2="16" y2="7.01"/><line x1="8" y1="11" x2="8" y2="11.01"/><line x1="12" y1="11" x2="12" y2="11.01"/><line x1="16" y1="11" x2="16" y2="11.01"/><line x1="8" y1="15" x2="8" y2="15.01"/><line x1="16" y1="15" x2="16" y2="15.01"/><rect x="10" y="15" width="4" height="6"/></svg>`;}
+function iconWhatsApp(){return `<svg viewBox="0 0 24 24" width="20" height="20" fill="#25D366"><path d="M17.47 14.38c-.29-.15-1.72-.85-1.99-.94-.27-.1-.46-.15-.66.15-.2.29-.76.94-.93 1.13-.17.2-.34.22-.63.07-.29-.15-1.23-.45-2.34-1.44-.87-.77-1.45-1.72-1.62-2.01-.17-.29-.02-.45.13-.6.13-.13.29-.34.44-.51.15-.17.2-.29.29-.49.1-.2.05-.37-.02-.51-.07-.15-.66-1.59-.9-2.17-.24-.58-.48-.5-.66-.51-.17-.01-.37-.01-.56-.01-.2 0-.51.07-.78.37-.27.29-1.02 1-1.02 2.44s1.05 2.83 1.19 3.03c.15.2 2.07 3.16 5.02 4.43.7.3 1.25.48 1.68.62.7.22 1.34.19 1.84.12.56-.08 1.72-.7 1.96-1.38.24-.68.24-1.26.17-1.38-.07-.12-.27-.2-.56-.34z"/><path d="M12.02 2C6.5 2 2.03 6.47 2.03 12c0 1.87.51 3.63 1.4 5.13L2 22l4.97-1.4c1.44.79 3.08 1.24 4.85 1.24h.02c5.52 0 10-4.47 10-10 0-2.67-1.04-5.18-2.93-7.07C17.2 3.04 14.7 2 12.02 2zm0 18.13h-.01c-1.55 0-3.07-.42-4.4-1.2l-.32-.19-3.28.93.88-3.24-.21-.33a8.02 8.02 0 0 1-1.24-4.3c0-4.48 3.63-8.13 8.11-8.13 2.17 0 4.2.85 5.73 2.39a8.05 8.05 0 0 1 2.37 5.74c-.01 4.49-3.65 8.33-8.63 8.33z"/></svg>`;}
 
 /* ---------- TODAY TAB ---------- */
 function weekDates(offsetWeeks){
@@ -2900,7 +2902,8 @@ function openPhotoImportModal(){
     imgSrc:'', sourceFile:null,
     naturalWidth:0, naturalHeight:0,
     cropTop:0, cropBottom:1,
-    aiMode:false
+    aiMode:false,
+    scaleTier: state.profile?.scaleTier || 'rx'
   };
   render();
 }
@@ -3124,6 +3127,15 @@ function renderPhotoImportModal(){
     ${pi.aiMode
       ? `<div class="note" style="margin-bottom:14px;">Dein Foto wird zur Analyse an einen Server gesendet (Claude KI) — anders als bei der Texterkennung bleibt es dabei nicht nur auf deinem Gerät.</div>`
       : `<div class="note" style="margin-bottom:14px;">Foto oder Screenshot eines Workout-Boards auswählen — die Texterkennung läuft direkt im Browser, dein Bild wird nirgends hochgeladen.</div>`}
+    ${state.profile?.gender ? `
+    <div class="field"><label>Skalierungsstufe</label>
+      <select onchange="state.tmp.photoImport.scaleTier=this.value;">
+        <option value="rx" ${pi.scaleTier==='rx'?'selected':''}>Rx</option>
+        <option value="intermediate" ${pi.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
+        <option value="scaled" ${pi.scaleTier==='scaled'?'selected':''}>Scaled</option>
+      </select>
+    </div>
+    ` : ''}
     <div class="field"><label>Screenshot/Bild hochladen</label>
       <input type="file" accept="image/*" onchange="handlePhotoImportFile(this)">
     </div>
@@ -3567,8 +3579,9 @@ function applyParsedWorkout(input){
 
   if(nameInfo.name) state.tmp.wodName = nameInfo.name;
 
-  if(Object.keys(scalingInfo.tiers).length && state.profile && state.profile.scaleTier && state.profile.gender && activeMovements){
-    const tier = scalingInfo.tiers[state.profile.scaleTier];
+  const chosenScaleTier = state.tmp.photoImport?.scaleTier;
+  if(Object.keys(scalingInfo.tiers).length && state.profile && chosenScaleTier && state.profile.gender && activeMovements){
+    const tier = scalingInfo.tiers[chosenScaleTier];
     if(tier){
       const kg = state.profile.gender==='w' ? tier.female : tier.male;
       if(kg!=null && !isNaN(kg)){
@@ -3578,6 +3591,10 @@ function applyParsedWorkout(input){
         });
       }
     }
+  }
+  if(chosenScaleTier && state.profile && state.profile.scaleTier !== chosenScaleTier){
+    state.profile.scaleTier = chosenScaleTier;
+    saveKey('profile', state.profile);
   }
 
   applyTargetingRepsFromLeftover(leftoverLines, state.tmp.wodTemplate);
@@ -3741,10 +3758,12 @@ async function loadBoxData(){
     state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isProStandalone || memberships.some(m=>m.status==='active'));
     if(mine && mine.status==='active'){
       const boxId = mine.box;
-      const [slots] = await Promise.all([
-        pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'})
+      const [slots, allAttended] = await Promise.all([
+        pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
+        pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && status = "attended"', {box:boxId}), expand:'classInstance', requestKey:null})
       ]);
       state.box.scheduleSlots = slots;
+      state.box.allAttendedBookings = allAttended;
       state.box.pendingMemberships = mine.role==='owner'
         ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
         : [];
@@ -3753,6 +3772,7 @@ async function loadBoxData(){
       state.box.scheduleSlots = [];
       state.box.pendingMemberships = [];
       state.box.myBookings = [];
+      state.box.allAttendedBookings = [];
     }
   }catch(e){
     console.error('Box-Daten konnten nicht geladen werden', e);
@@ -5017,7 +5037,7 @@ function renderRoleBadge(){
   if(!m || m.status!=='active') return '';
   return m.role==='owner'
     ? `<span class="chip chip-owner">Coach</span>`
-    : `<span class="chip">Mitglied</span>`;
+    : `<span class="chip">Athlet</span>`;
 }
 function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
   return weekDates(offsetWeeks).map(d=>{
@@ -5028,39 +5048,121 @@ function renderWeekdayStrip(selected, onSelectFnName, offsetWeeks){
     </div>`;
   }).join('');
 }
-function renderBoxHomeHeader(){
+function renderBoxIdentityCard(box){
   const me = pb.authStore.record;
   const avatarUrl = boxAvatarUrl(me, '100x100');
   const displayName = me?.name || me?.email || '';
   const initials = (me?.name || me?.email || '?').slice(0,2).toUpperCase();
+  const boxUrl = boxLogoUrl(box, '100x100');
+  const boxInitial = (box?.name||'Box').slice(0,1).toUpperCase();
+  const boxLogoCircle = `<div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${boxUrl?`background-image:url('${boxUrl}');`:''}">${boxUrl?'':boxInitial}</div>`;
+  const admin = isBoxAdminView();
   return `
     <div class="card">
+      <div class="note" style="margin-bottom:6px;letter-spacing:0.08em;">ATHLET</div>
       <div class="row" style="align-items:center;gap:12px;">
         <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
         <div style="flex:1;">
           <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(displayName)}</div>
           ${renderRoleBadge()}
         </div>
-        <button class="btn-sm btn-ghost" style="width:auto;" onclick="setTab('profile')">⚙️</button>
       </div>
+      <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+      <div class="note" style="margin-bottom:6px;letter-spacing:0.08em;">BOX</div>
+      <div class="row" style="align-items:center;gap:12px;${admin?'margin-bottom:10px;':''}">
+        ${boxLogoCircle}
+        ${admin
+          ? `<div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>`
+          : `<h2 style="margin:0;">${escapeHtml(box?.name || 'Box')}</h2>`}
+      </div>
+      ${admin ? `
+        ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
+        <div class="field"><label>Box-Name</label>
+          <input type="text" id="boxNameInput" value="${escapeHtml(box?.name||'')}">
+        </div>
+        <div class="field"><label>Stornofrist (Stunden vor Kursbeginn)</label>
+          <input type="number" step="1" min="0" id="boxCutoffHoursInput" value="${box?.cancellationCutoffHours ?? 3}">
+        </div>
+        <button class="btn btn-primary" onclick="saveBoxSettings()">Speichern</button>
+      ` : ''}
     </div>
   `;
 }
-function renderBoxNameCard(box){
-  const url = boxLogoUrl(box, '100x100');
-  const initial = (box?.name||'Box').slice(0,1).toUpperCase();
-  const logoCircle = `<div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initial}</div>`;
-  const uploadField = isBoxAdminView()
-    ? `<div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>`
-    : `<h2 style="margin:0;">${escapeHtml(box?.name || 'Box')}</h2>`;
+const LEADERBOARD_PERIODS = [
+  {key:'week', label:'Letzte Woche', days:7},
+  {key:'month', label:'Letzter Monat', days:30},
+  {key:'quarter', label:'Letztes Quartal', days:90},
+  {key:'half', label:'Letztes Halbjahr', days:182},
+  {key:'year', label:'Letztes Jahr', days:365},
+  {key:'all', label:'All Time', days:null}
+];
+function computeBoxLeaderboard(periodKey){
+  const period = LEADERBOARD_PERIODS.find(p=>p.key===periodKey) || LEADERBOARD_PERIODS[1];
+  const bookings = state.box.allAttendedBookings || [];
+  const todayD = todayStr();
+  let cutoff = null;
+  if(period.days!=null){
+    const d = new Date(todayD+'T00:00:00');
+    d.setDate(d.getDate()-period.days);
+    cutoff = localDateStr(d);
+  }
+  const counts = {};
+  for(const b of bookings){
+    const date = b.expand?.classInstance?.date;
+    if(!date || date>todayD) continue;
+    if(cutoff && date<cutoff) continue;
+    const uid = b.user;
+    if(!counts[uid]) counts[uid] = {userId:uid, name: b.userName || 'Athlet', count:0};
+    counts[uid].count++;
+  }
+  return Object.values(counts).sort((a,b)=>b.count-a.count || a.name.localeCompare(b.name,'de'));
+}
+function computeMyAttendedDates(periodKey){
+  const period = LEADERBOARD_PERIODS.find(p=>p.key===periodKey) || LEADERBOARD_PERIODS[1];
+  const bookings = state.box.allAttendedBookings || [];
+  const meId = pb.authStore.record?.id;
+  const todayD = todayStr();
+  let cutoff = null;
+  if(period.days!=null){
+    const d = new Date(todayD+'T00:00:00');
+    d.setDate(d.getDate()-period.days);
+    cutoff = localDateStr(d);
+  }
+  const dates = bookings
+    .filter(b=>b.user===meId)
+    .map(b=>b.expand?.classInstance?.date)
+    .filter(d=>d && d<=todayD && (!cutoff || d>=cutoff));
+  return [...new Set(dates)].sort((a,b)=>b.localeCompare(a));
+}
+function toggleLeaderboardDetail(){
+  state.tmp.leaderboardDetailOpen = !state.tmp.leaderboardDetailOpen;
+  render();
+}
+function renderBoxLeaderboard(){
+  const periodKey = state.tmp.leaderboardPeriod || 'month';
+  const ranked = computeBoxLeaderboard(periodKey);
+  const meId = pb.authStore.record?.id;
+  const detailOpen = state.tmp.leaderboardDetailOpen;
+  const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
   return `
     <div class="card">
-      <div class="row" style="align-items:center;gap:12px;">
-        ${logoCircle}
-        ${uploadField}
+      <h2 class="small">🏆 Hall of Fame</h2>
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+        ${LEADERBOARD_PERIODS.map(p=>`<button class="btn-sm ${periodKey===p.key?'btn-primary':'btn-ghost'}" style="flex:0 0 auto;width:auto;" onclick="state.tmp.leaderboardPeriod='${p.key}'; render();">${p.label}</button>`).join('')}
       </div>
-      ${isBoxAdminView() ? `<h2 style="margin-top:10px;">${escapeHtml(box?.name || 'Box')}</h2>` : ''}
-      ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
+      ${!ranked.length ? `<div class="note">Noch keine Check-ins in diesem Zeitraum.</div>` : ranked.map((r,i)=>{
+        const isMe = r.userId===meId;
+        return `
+        <div class="history-item" style="${isMe?'background:var(--iron-700);border-radius:8px;cursor:pointer;':''}" ${isMe?`onclick="toggleLeaderboardDetail()"`:''}>
+          <span class="val">${i+1}. ${escapeHtml(r.name)}${isMe?' (du)':''}</span>
+          <span class="note" style="margin:0;">${r.count}×</span>
+        </div>
+        ${isMe && detailOpen ? `
+          <div class="note" style="margin:4px 0 8px 12px;">
+            ${myDates.length ? myDates.map(d=>fmtDate(d)).join(' · ') : 'Keine Trainingstage in diesem Zeitraum.'}
+          </div>
+        ` : ''}
+      `;}).join('')}
     </div>
   `;
 }
@@ -5068,18 +5170,14 @@ function renderBoxHomeAdmin(box){
   const pending = state.box.pendingMemberships;
   const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
   const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
-  const stats = attendanceStats(state.box.myBookings);
-  const goal = box?.checkinGoal || 8;
-  const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
   return `
-    ${renderBoxHomeHeader()}
-    ${renderBoxNameCard(box)}
+    ${renderBoxIdentityCard(box)}
     <div class="card">
       <h2 class="small">Einladungslink teilen</h2>
       <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
       <div class="row" style="gap:10px;">
         <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
-        <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">💬</a>
+        <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
         <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
       </div>
       <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
@@ -5104,24 +5202,15 @@ function renderBoxHomeAdmin(box){
         `).join('')}
       </div>
     ` : ''}
-    <div class="card">
-      <h2 class="small">Hall of Fame</h2>
-      <div class="note">${stats.month} / ${goal} diesen Monat</div>
-      <div style="height:8px;border-radius:4px;background:var(--iron-700);margin-top:6px;overflow:hidden;">
-        <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);border-radius:4px;"></div>
-      </div>
-    </div>
+    ${renderBoxLeaderboard()}
   `;
 }
 function renderBoxHomeMember(box){
   const bookings = state.box.myBookings;
   const stats = attendanceStats(bookings);
-  const goal = box?.checkinGoal || 8;
-  const pct = Math.min(100, Math.round((stats.month/Math.max(goal,1))*100));
   const next = getNextUpcomingBooking(bookings);
   return `
-    ${renderBoxHomeHeader()}
-    ${renderBoxNameCard(box)}
+    ${renderBoxIdentityCard(box)}
     <div class="card">
       <h2 class="small">Nächster Termin</h2>
       ${next ? `
@@ -5132,13 +5221,7 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
-    <div class="card">
-      <h2 class="small">Hall of Fame</h2>
-      <div class="note">${stats.month} / ${goal} diesen Monat</div>
-      <div style="height:8px;border-radius:4px;background:var(--iron-700);margin-top:6px;overflow:hidden;">
-        <div style="height:100%;width:${pct}%;background:var(--chalk-yellow);border-radius:4px;"></div>
-      </div>
-    </div>
+    ${renderBoxLeaderboard()}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
@@ -5169,15 +5252,26 @@ function resetWorkoutsWeek(){
   state.tmp.workoutsWeekOffset = 0;
   selectWorkoutsDate(todayStr());
 }
+let _weekSwipe = null;
+function weekSwipeStart(event){
+  const t = event.touches ? event.touches[0] : event;
+  _weekSwipe = { x: t.clientX, y: t.clientY };
+}
+function weekSwipeEnd(event, onSwipeLeft, onSwipeRight){
+  if(!_weekSwipe) return;
+  const t = event.changedTouches ? event.changedTouches[0] : event;
+  const dx = t.clientX - _weekSwipe.x, dy = t.clientY - _weekSwipe.y;
+  _weekSwipe = null;
+  if(Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)*1.5) return;
+  (dx < 0 ? onSwipeLeft : onSwipeRight)();
+}
 function renderBoxScheduleTab(){
   const weekOffset = state.tmp.scheduleWeekOffset||0;
   const selected = state.tmp.scheduleSelectedDate || todayStr();
   const weekLabel = weekOffset===0 ? 'Diese Woche' : (weekOffset>0 ? `+${weekOffset} Woche${weekOffset>1?'n':''}` : `${weekOffset} Woche${weekOffset<-1?'n':''}`);
   const weekNav = `
     <div class="row" style="align-items:center;gap:6px;margin-bottom:8px;">
-      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftScheduleWeek(-1)">‹</button>
       <span class="note" style="flex:1;text-align:center;margin:0;">${weekLabel}${weekOffset!==0 ? ` <a href="#" onclick="event.preventDefault();resetScheduleWeek();" style="color:var(--chalk-yellow);">Heute</a>` : ''}</span>
-      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftScheduleWeek(1)">›</button>
     </div>`;
   const strip = renderWeekdayStrip(selected, 'selectScheduleDate', weekOffset);
   const loaded = state.box.scheduleDate===selected && state.box.tabWorkoutsDate===selected;
@@ -5235,7 +5329,7 @@ function renderBoxScheduleTab(){
       </div>
     `;
   })() : '';
-  return `<div class="card">${weekNav}<div class="row" style="gap:4px;margin-bottom:10px;">${strip}</div>${body}</div>${editorCard}`;
+  return `<div class="card">${weekNav}<div class="row" style="gap:4px;margin-bottom:10px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftScheduleWeek(1), ()=>shiftScheduleWeek(-1))">${strip}</div>${body}</div>${editorCard}`;
 }
 function openClassDetailModal(instanceId){
   state.tmp.classDetailInstanceId = instanceId;
@@ -5374,9 +5468,7 @@ function renderBoxWorkoutsTab(){
   const weekLabel = weekOffset===0 ? 'Diese Woche' : (weekOffset>0 ? `+${weekOffset} Woche${weekOffset>1?'n':''}` : `${weekOffset} Woche${weekOffset<-1?'n':''}`);
   const weekNav = `
     <div class="row" style="align-items:center;gap:6px;margin-bottom:8px;">
-      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftWorkoutsWeek(-1)">‹</button>
       <span class="note" style="flex:1;text-align:center;margin:0;">${weekLabel}${weekOffset!==0 ? ` <a href="#" onclick="event.preventDefault();resetWorkoutsWeek();" style="color:var(--chalk-yellow);">Heute</a>` : ''}</span>
-      <button class="btn-sm btn-ghost" style="width:auto;" onclick="shiftWorkoutsWeek(1)">›</button>
     </div>`;
   const strip = renderWeekdayStrip(selected, 'selectWorkoutsDate', weekOffset);
   const loaded = state.box.tabWorkoutsDate===selected;
@@ -5415,7 +5507,7 @@ function renderBoxWorkoutsTab(){
     ${state.tmp.boxDraftsOpen && !state.tmp.boxFreeformOpen ? (renderDraftsCard() || `<div class="card"><div class="note">Keine Entwürfe vorhanden.</div></div>`) : ''}
     ${state.tmp.boxHistoryOpen && !state.tmp.boxFreeformOpen ? renderBoxWorkoutArchive() : ''}
   ` : '';
-  return `<div class="card">${weekNav}<div class="row" style="gap:4px;">${strip}</div></div>${body}${ownerForm}`;
+  return `<div class="card">${weekNav}<div class="row" style="gap:4px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftWorkoutsWeek(1), ()=>shiftWorkoutsWeek(-1))">${strip}</div></div>${body}${ownerForm}`;
 }
 function renderBox(){
   const b = state.box;
@@ -5432,9 +5524,9 @@ function renderBox(){
     `;
   }
   const box = b.membership.expand?.box;
-  const subNavBtnStyle = 'flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;';
+  const subNavBtnStyle = 'min-width:0;padding:9px 6px;font-size:12px;';
   const subNav = `
-    <div class="row" style="margin-bottom:14px;gap:6px;flex-wrap:wrap;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px;">
       <button class="btn ${state.tmp.boxSubTab==='home'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('home')">Home</button>
       <button class="btn ${state.tmp.boxSubTab==='schedule'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('schedule')">Kursplan</button>
       <button class="btn ${state.tmp.boxSubTab==='workouts'?'btn-primary':'btn-ghost'}" style="${subNavBtnStyle}" onclick="setBoxSubTab('workouts')">Workouts</button>
@@ -8274,7 +8366,9 @@ async function createTrainingPlan(){
 }
 function renderProfile(){
   const section = state.tmp.profileSection;
-  if(section==='settings') return renderProfileSettings();
+  if(section==='account') return renderProfileAccount();
+  if(section==='notifications') return renderProfileNotificationsPage();
+  if(section==='appsettings') return renderProfileAppSettings();
   if(section==='data') return renderProfileData();
   if(section==='admin') return renderAdminUsersScreen();
   if(section==='exercises') return renderMyExercisesScreen();
@@ -8282,7 +8376,7 @@ function renderProfile(){
 }
 function renderMyExercisesScreen(){
   return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection('settings')">← Zurück</button>
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
     <div class="card">
       <h2 class="small">Meine Übungen</h2>
       <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
@@ -8310,7 +8404,10 @@ function renderProfileMenu(){
     ` : ''}
     <div class="card">
       <h2>Profil</h2>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('settings')">⚙️ Einstellungen</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('account')">👤 Persönliche Daten</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
       ${pb.authStore.record?.isAppAdmin ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-top:10px;" onclick="setProfileSection('admin')">🛡️ App-Administration</button>` : ''}
     </div>
@@ -8408,21 +8505,14 @@ function renderAdminUserDetail(){
     </div>
   `;
 }
-function renderProfileSettings(){
+function renderProfileAccount(){
   const p = state.profile || {};
-  const theme = p.theme || 'dark';
   const adminView = isBoxAdminView();
   const me = pb.authStore.record;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
-    ${adminView ? '' : `
     <div class="card">
-      <h2 class="small">Hilfe</h2>
-      <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
-    </div>
-    `}
-    <div class="card">
-      <h2 class="small">Konto</h2>
+      <h2 class="small">Persönliche Daten</h2>
       ${(()=>{ const url=boxAvatarUrl(me,'100x100'); const initials=(me?.name || me?.email || '?').slice(0,2).toUpperCase();
         return `<div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
           <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${url?`background-image:url('${url}');`:''}">${url?'':initials}</div>
@@ -8435,6 +8525,16 @@ function renderProfileSettings(){
           <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;" onclick="saveDisplayName()">Speichern</button>
         </div>
       </div>
+      ${adminView ? '' : `
+      <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
+      <div class="field"><label>Geschlecht</label>
+        <div class="row">
+          <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
+          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
+        </div>
+      </div>
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="saveProfile()">Speichern</button>
+      `}
       <div class="note" style="margin-bottom:10px;">Angemeldet als ${escapeHtml((me&&(me.name||me.email))||'—')} ${renderRoleBadge()}</div>
       ${me && !me.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
@@ -8442,28 +8542,20 @@ function renderProfileSettings(){
       ` : ''}
       <button class="btn btn-danger" onclick="logout()">Abmelden</button>
     </div>
+  `;
+}
+function renderProfileAppSettings(){
+  const p = state.profile || {};
+  const theme = p.theme || 'dark';
+  const adminView = isBoxAdminView();
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${adminView ? '' : `
     <div class="card">
-      <h2 class="small">Benachrichtigungen</h2>
-      <div class="note" style="margin-bottom:10px;">Erhalte Push-Benachrichtigungen zu deiner Box — auch wenn die App gerade geschlossen ist.</div>
-      <button class="btn btn-primary" onclick="enablePushNotifications()">🔔 Push-Benachrichtigungen aktivieren</button>
-      ${(!('serviceWorker' in navigator) || !('PushManager' in window)) ? '<div class="note" style="color:var(--plate-red);margin-top:8px;">Auf diesem Gerät/Browser nicht unterstützt.</div>' : ''}
-      <div style="margin-top:14px;">${renderNotificationSettings()}</div>
+      <h2 class="small">Hilfe</h2>
+      <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
     </div>
-    ${isBoxAdminView() ? `
-    <div class="card">
-      <h2 class="small">Box</h2>
-      <div class="field"><label>Box-Name</label>
-        <input type="text" id="boxNameInput" value="${escapeHtml(state.box.membership?.expand?.box?.name||'')}">
-      </div>
-      <div class="field"><label>Stornofrist (Stunden vor Kursbeginn)</label>
-        <input type="number" step="1" min="0" id="boxCutoffHoursInput" value="${state.box.membership?.expand?.box?.cancellationCutoffHours ?? 3}">
-      </div>
-      <button class="btn btn-ghost" onclick="saveBoxSettings()">Speichern</button>
-    </div>
-    ` : ''}
-    <div class="card">
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
-    </div>
+    `}
     <div class="card">
       <h2>Darstellung</h2>
       <div class="row">
@@ -8472,17 +8564,6 @@ function renderProfileSettings(){
       </div>
     </div>
     ${adminView ? '' : `
-    <div class="card">
-      <h2>Grunddaten</h2>
-      <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
-      <div class="field"><label>Geschlecht</label>
-        <div class="row">
-          <button type="button" class="btn ${(!p.gender||p.gender==='m')?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
-          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
-    </div>
     <div class="card">
       <h2 class="small">Einheiten</h2>
       <div class="row">
@@ -8502,20 +8583,19 @@ function renderProfileSettings(){
       <div class="note" style="margin-bottom:10px;">Gilt für Gewichts- und Distanz-Angaben bei For Time / AMRAP / For Load. Bereits gespeicherte Werte werden intern weiterhin in kg/Meter geführt und nur zur Anzeige umgerechnet.</div>
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
     </div>
-    <div class="card">
-      <h2 class="small">Skalierung</h2>
-      <div class="field">
-        <label>Skalierungsstufe</label>
-        <select id="pScaleTier">
-          <option value="rx" ${(!p.scaleTier||p.scaleTier==='rx')?'selected':''}>Rx</option>
-          <option value="intermediate" ${p.scaleTier==='intermediate'?'selected':''}>Intermediate</option>
-          <option value="scaled" ${p.scaleTier==='scaled'?'selected':''}>Scaled</option>
-        </select>
-      </div>
-      <div class="note" style="margin-bottom:10px;">Wird beim Foto-Import automatisch für Gewichts-Vorgaben wie "Rx: 22,5/15kg" verwendet (in Kombination mit deinem Geschlecht unter Grunddaten). Bleibt pro Übung weiterhin überschreibbar.</div>
-      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
-    </div>
     `}
+  `;
+}
+function renderProfileNotificationsPage(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <div class="card">
+      <h2 class="small">Benachrichtigungen</h2>
+      <div class="note" style="margin-bottom:10px;">Erhalte Push-Benachrichtigungen zu deiner Box — auch wenn die App gerade geschlossen ist.</div>
+      <button class="btn btn-primary" onclick="enablePushNotifications()">🔔 Push-Benachrichtigungen aktivieren</button>
+      ${(!('serviceWorker' in navigator) || !('PushManager' in window)) ? '<div class="note" style="color:var(--plate-red);margin-top:8px;">Auf diesem Gerät/Browser nicht unterstützt.</div>' : ''}
+      <div style="margin-top:14px;">${renderNotificationSettings()}</div>
+    </div>
   `;
 }
 function renderProfileData(){
@@ -8541,12 +8621,14 @@ function cancelResetClick(){
   render();
 }
 async function saveProfile(){
+  const birthDateEl = document.getElementById('pBirthDate');
+  const weightUnitEl = document.getElementById('pWeightUnit');
+  const distanceUnitEl = document.getElementById('pDistanceUnit');
   state.profile = {
     ...state.profile,
-    birthDate: document.getElementById('pBirthDate').value || null,
-    weightUnit: document.getElementById('pWeightUnit').value,
-    distanceUnit: document.getElementById('pDistanceUnit').value,
-    scaleTier: document.getElementById('pScaleTier').value
+    birthDate: birthDateEl ? (birthDateEl.value || null) : state.profile?.birthDate,
+    weightUnit: weightUnitEl ? weightUnitEl.value : state.profile?.weightUnit,
+    distanceUnit: distanceUnitEl ? distanceUnitEl.value : state.profile?.distanceUnit
   };
   await saveKey('profile', state.profile);
   showToast('Profil gespeichert');
@@ -8555,7 +8637,7 @@ async function saveProfile(){
 async function resetAll(){
   stopTicking();
   await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false }, tmp: defaultTmp()};
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] }, tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
