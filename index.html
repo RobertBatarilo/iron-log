@@ -28,7 +28,7 @@
     --plate-red-dim:#8E2F2A;
     --chalk-yellow:#E8B93F;
     --success-green:#6B9E63;
-    --accent-amrap:var(--chalk-yellow);
+    --accent-amrap:#E8B93F;
     --accent-emom:#5B8DEF;
     --accent-forload:#B57EDC;
     --accent-fortime:#E0793C;
@@ -47,6 +47,7 @@
     --chalk-200:#40454F;
     --chalk-yellow:#A9790A;
     --success-green:#4F7A48;
+    --accent-amrap:#A9790A;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -641,7 +642,7 @@ function defaultTmp(){
     workoutsSelectedDate:null, workoutsWeekOffset:0,
     boxFreeformOpen:false,
     boxDraftsOpen:false, boxHistoryOpen:false, boxArchiveSearch:'',
-    leaderboardDetailOpen:false, leaderboardSearch:'',
+    leaderboardDetailOpen:false, leaderboardSearch:'', inviteLinkOpen:false,
     boxResultFormId:null,
     avatarEdit:null,
     joinLinkError:null,
@@ -2098,11 +2099,78 @@ function applyTheme(theme){
   document.documentElement.dataset.theme = theme;
   const meta = document.querySelector('meta[name="theme-color"]');
   if(meta) meta.setAttribute('content', theme==='light' ? '#F1EDE4' : '#1B1D21');
+  applyAccentColor(theme);
 }
 async function setTheme(theme){
   state.profile = state.profile || {};
   state.profile.theme = theme;
   applyTheme(theme);
+  await saveKey('profile', state.profile);
+  render();
+}
+const ACCENT_DEFAULTS = {
+  owner: { dark:'#E8B93F', light:'#A9790A' },
+  member: { dark:'#AFB8C0', light:'#586B7E' }
+};
+function defaultAccentBase(){
+  return state.box.membership?.role==='member' ? ACCENT_DEFAULTS.member.dark : ACCENT_DEFAULTS.owner.dark;
+}
+function hexToHsl(hex){
+  hex = (hex||'').replace('#','');
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const r = parseInt(hex.substring(0,2),16)/255, g = parseInt(hex.substring(2,4),16)/255, b = parseInt(hex.substring(4,6),16)/255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h=0, s=0; const l=(max+min)/2;
+  if(max!==min){
+    const d = max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    if(max===r) h = (g-b)/d + (g<b?6:0);
+    else if(max===g) h = (b-r)/d + 2;
+    else h = (r-g)/d + 4;
+    h *= 60;
+  }
+  return [h, s*100, l*100];
+}
+function hslToHex(h,s,l){
+  s/=100; l/=100;
+  const c = (1-Math.abs(2*l-1))*s, x = c*(1-Math.abs((h/60)%2-1)), m = l-c/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;b=0;} else if(h<120){r=x;g=c;b=0;} else if(h<180){r=0;g=c;b=x;}
+  else if(h<240){r=0;g=x;b=c;} else if(h<300){r=x;g=0;b=c;} else {r=c;g=0;b=x;}
+  const toHex = v => Math.round((v+m)*255).toString(16).padStart(2,'0');
+  return '#'+toHex(r)+toHex(g)+toHex(b);
+}
+function deriveAccentPair(baseHex){
+  const [h,s,l] = hexToHsl(baseHex);
+  const darkL = Math.min(80, Math.max(50, l));
+  const lightL = Math.min(45, Math.max(25, l*0.6));
+  return { dark: hslToHex(h,s,darkL), light: hslToHex(h,s,lightL) };
+}
+function resolveAccentPair(){
+  if(state.profile?.accentColor) return deriveAccentPair(state.profile.accentColor);
+  return state.box.membership?.role==='member' ? ACCENT_DEFAULTS.member : ACCENT_DEFAULTS.owner;
+}
+function applyAccentColor(theme){
+  theme = theme || document.documentElement.dataset.theme || 'dark';
+  const { dark, light } = resolveAccentPair();
+  document.documentElement.style.setProperty('--chalk-yellow', theme==='light' ? light : dark);
+}
+function previewAccentColor(hex){
+  const { dark, light } = deriveAccentPair(hex);
+  const theme = document.documentElement.dataset.theme || 'dark';
+  document.documentElement.style.setProperty('--chalk-yellow', theme==='light' ? light : dark);
+}
+async function setAccentColor(hex){
+  state.profile = state.profile || {};
+  state.profile.accentColor = hex;
+  applyAccentColor();
+  await saveKey('profile', state.profile);
+  render();
+}
+async function resetAccentColor(){
+  state.profile = state.profile || {};
+  delete state.profile.accentColor;
+  applyAccentColor();
   await saveKey('profile', state.profile);
   render();
 }
@@ -2504,7 +2572,13 @@ function setTab(tab){
   if(tab==='box') loadBoxData();
   render();
 }
+const _debounceTimers = {};
+function debounceRender(key, delay=300){
+  clearTimeout(_debounceTimers[key]);
+  _debounceTimers[key] = setTimeout(render, delay);
+}
 function render(){
+  if(!document.getElementById('bottomNav')) return;
   const scrollY = window.scrollY;
   document.getElementById('bottomNav').innerHTML = bottomNavHtml();
   const content = document.getElementById('content');
@@ -3778,6 +3852,7 @@ async function loadBoxData(){
     console.error('Box-Daten konnten nicht geladen werden', e);
   }
   state.box.loaded = true;
+  applyAccentColor();
   if(isBoxAdminView() && state.activeTab===startTab && ['today','workout','progress'].includes(state.activeTab)) state.activeTab = 'box';
   render();
 }
@@ -4716,7 +4791,7 @@ function renderBoxWorkoutArchive(){
   return `
     <div class="card">
       <h2 class="small">Trainingsarchiv</h2>
-      <div class="field"><input type="text" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; render();" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
+      <div class="field"><input type="text" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; debounceRender('boxArchiveSearch');" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
       ${!templates.length ? `<div class="note">Noch keine Workouts veröffentlicht.</div>`
         : !matches.length ? `<div class="note">Keine Treffer.</div>`
         : matches.map(renderArchivedWorkoutCard).join('')}
@@ -5062,7 +5137,7 @@ function renderBoxIdentityCard(box){
       <div class="note" style="margin-bottom:6px;letter-spacing:0.08em;">ATHLET</div>
       <div class="row" style="align-items:center;gap:12px;">
         <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
-        <div style="flex:1;">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <div style="font-family:var(--font-display);font-weight:700;font-size:16px;">${escapeHtml(displayName)}</div>
           ${renderRoleBadge()}
         </div>
@@ -5157,7 +5232,7 @@ function renderAthleteAttendanceCard(){
   const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
   return `
     <div class="card">
-      <h2 class="small">🏆 Hall of Fame</h2>
+      <h2 class="small">🏆 Hall of Discipline</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
         <span class="val">Check-ins</span>
@@ -5179,10 +5254,10 @@ function renderCoachLeaderboardCard(){
     .filter(r=>!search || r.name.toLowerCase().includes(search));
   return `
     <div class="card">
-      <h2 class="small">🏆 Hall of Fame</h2>
+      <h2 class="small">🏆 Hall of Discipline</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="field" style="margin-bottom:10px;">
-        <input type="text" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; render();">
+        <input type="text" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; debounceRender('leaderboardSearch');">
       </div>
       ${!filtered.length ? `<div class="note">${search?'Kein Athlet gefunden.':'Noch keine Check-ins in diesem Zeitraum.'}</div>` : filtered.map(r=>`
         <div class="history-item">
@@ -5199,22 +5274,6 @@ function renderBoxHomeAdmin(box){
   const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
   return `
     ${renderBoxIdentityCard(box)}
-    <div class="card">
-      <h2 class="small">Einladungslink teilen</h2>
-      <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
-      <div class="row" style="gap:10px;">
-        <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
-        <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
-        <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
-      </div>
-      <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
-    </div>
-    <div class="card">
-      <h2 class="small">Box-Ankündigung</h2>
-      <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
-      <div class="field"><textarea id="announceText" rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen"></textarea></div>
-      <button class="btn btn-primary" onclick="sendBoxAnnouncement()">📣 Ankündigung senden</button>
-    </div>
     ${pending.length ? `
       <div class="card">
         <h2 class="small">Beitrittsanfragen</h2>
@@ -5230,6 +5289,24 @@ function renderBoxHomeAdmin(box){
       </div>
     ` : ''}
     ${renderCoachLeaderboardCard()}
+    <div class="card">
+      <h2 class="small">Box-Ankündigung</h2>
+      <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
+      <div class="field"><textarea id="announceText" rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen"></textarea></div>
+      <button class="btn btn-primary" onclick="sendBoxAnnouncement()">📣 Ankündigung senden</button>
+    </div>
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
+      ${state.tmp.inviteLinkOpen ? `
+        <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
+        <div class="row" style="gap:10px;">
+          <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
+          <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
+          <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
+        </div>
+        <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+      ` : ''}
+    </div>
   `;
 }
 function renderBoxHomeMember(box){
@@ -7930,7 +8007,7 @@ function renderPrCards(){
   const hofOptions = hofFiltered.map(e=>`<option value="${e.id}" ${e.id===hofSelectedId?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
 
   const listHtml = !exercisesWithData.length ? `<div class="note">Noch keine 1RM-Werte vorhanden.</div>` : `
-    <div class="field"><label>Suche</label><input type="text" value="${escapeHtml(state.tmp.hallOfFameSearch||'')}" oninput="state.tmp.hallOfFameSearch=this.value; render();" placeholder="Übung suchen …"></div>
+    <div class="field"><label>Suche</label><input type="text" value="${escapeHtml(state.tmp.hallOfFameSearch||'')}" oninput="state.tmp.hallOfFameSearch=this.value; debounceRender('hallOfFameSearch');" placeholder="Übung suchen …"></div>
     ${hofFiltered.length ? `
       <div class="field"><select onchange="state.tmp.hallOfFameExercise=this.value; render();">${hofOptions}</select></div>
       ${hofSelectedEx ? renderHallOfFameEntry(hofSelectedEx) : ''}
@@ -7959,7 +8036,7 @@ function renderPrCards(){
       <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
     </div>
     <div class="card">
-      <h2 class="small">🏆 Hall of Fame</h2>
+      <h2 class="small">🏆 Hall of Strength</h2>
       ${listHtml}
     </div>
   `;
@@ -8203,7 +8280,7 @@ function renderProgressMenu(){
   return `
     <div class="card">
       <h2>Fortschritt</h2>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Hall of Fame</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Hall of Strength</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Bestzeiten</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
@@ -8488,7 +8565,7 @@ function renderAdminUsersScreen(){
     <div class="card">
       <h2 class="small">App-Administration</h2>
       <div class="field"><label>Suche</label>
-        <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; render();" placeholder="Name oder E-Mail suchen …">
+        <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
       </div>
       ${users==null ? '<div class="note">Lädt …</div>' : (filtered.length ? filtered.map(u=>`
         <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
@@ -8588,6 +8665,16 @@ function renderProfileAppSettings(){
       <div class="row">
         <button class="btn ${theme==='dark'?'btn-primary':'btn-ghost'}" onclick="setTheme('dark')">Dunkel</button>
         <button class="btn ${theme==='light'?'btn-primary':'btn-ghost'}" onclick="setTheme('light')">Hell</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2 class="small">Akzentfarbe</h2>
+      <div class="note" style="margin-bottom:10px;">Persönliche Hervorhebungsfarbe der App.</div>
+      <div class="row" style="align-items:center;gap:12px;">
+        <input type="color" value="${escapeHtml(p.accentColor || defaultAccentBase())}"
+               oninput="previewAccentColor(this.value)" onchange="setAccentColor(this.value)"
+               style="width:52px;height:40px;padding:2px;">
+        <button class="btn btn-ghost" onclick="resetAccentColor()">Zurücksetzen auf Standard</button>
       </div>
     </div>
     ${adminView ? '' : `
