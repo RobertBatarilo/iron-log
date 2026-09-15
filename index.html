@@ -519,7 +519,7 @@ async function toggleNotificationPref(key, checked){
     showToast('Speichern fehlgeschlagen');
   }
 }
-const SYNC_KEYS = ['profile','exercises','workouts','drafts','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'];
+const SYNC_KEYS = ['profile','exercises','workouts','drafts','nutritionLogs','measurements','prEntries','timeRecords','readinessLogs','trainingPlan'];
 function getPendingSync(){
   try{ return JSON.parse(localStorage.getItem('ironlog:_pendingSync')||'[]'); }catch(e){ return []; }
 }
@@ -664,6 +664,7 @@ let state = {
   measurements:[],
   prEntries:[],
   timeRecords:[],
+  readinessLogs:[],
   trainingPlan:null,
   activeTab:'today',
   box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] },
@@ -2486,7 +2487,7 @@ async function initApp(){
     renderBoot();
     return;
   }
-  const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, trainingPlan, drafts] = await Promise.all([
+  const [profile, exercises, workoutsStored, oldTrainingLogs, oldWods, nutritionLogs, measurements, prEntries, timeRecords, readinessLogs, trainingPlan, drafts] = await Promise.all([
     loadKey('profile', null),
     loadKey('exercises', null),
     loadKey('workouts', null),
@@ -2496,6 +2497,7 @@ async function initApp(){
     loadKey('measurements', []),
     loadKey('prEntries', []),
     loadKey('timeRecords', []),
+    loadKey('readinessLogs', []),
     loadKey('trainingPlan', null),
     loadKey('drafts', [])
   ]);
@@ -2521,6 +2523,7 @@ async function initApp(){
   state.measurements = measurements;
   state.prEntries = prEntries;
   state.timeRecords = timeRecords;
+  state.readinessLogs = readinessLogs;
   state.drafts = drafts || [];
 
   document.getElementById('app').innerHTML = appShell();
@@ -2671,6 +2674,65 @@ function renderDayDetailModalRoot(){
     </div>
   `;
 }
+function todaysReadinessLog(){
+  const todayD = todayStr();
+  return state.readinessLogs.find(r=>r.date===todayD) || null;
+}
+function readinessHint(log){
+  const flags = [log.energy<=4, log.soreness==='stark', log.sleep==='schlecht'].filter(Boolean).length;
+  if(flags>=2) return 'Deine Werte sprechen für einen ruhigeren Tag — heute keine PR-Jagd, ggf. rund 10% leichter starten.';
+  if(flags===1) return 'Ein Faktor ist heute nicht optimal — hör auf deinen Körper und passe die Intensität bei Bedarf an.';
+  return 'Alles im grünen Bereich — heute darf es ruhig etwas mehr sein.';
+}
+async function saveReadinessLog(){
+  const energy = parseInt(document.getElementById('readinessEnergy')?.value);
+  if(!energy || energy<1 || energy>10){ showToast('Bitte Energie-Level 1–10 angeben'); return; }
+  const soreness = document.getElementById('readinessSoreness')?.value || 'keine';
+  const sleep = document.getElementById('readinessSleep')?.value || 'mittel';
+  const todayD = todayStr();
+  state.readinessLogs = state.readinessLogs.filter(r=>r.date!==todayD);
+  state.readinessLogs.push({id:uid(), date:todayD, energy, soreness, sleep});
+  await saveKey('readinessLogs', state.readinessLogs);
+  render();
+}
+function editReadinessLog(){
+  const todayD = todayStr();
+  state.readinessLogs = state.readinessLogs.filter(r=>r.date!==todayD);
+  render();
+}
+function renderReadinessCard(){
+  const log = todaysReadinessLog();
+  if(log){
+    return `
+      <div class="card">
+        <h2 class="small">Tagesform</h2>
+        <div class="note" style="margin-bottom:8px;">${readinessHint(log)}</div>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="editReadinessLog()">Bearbeiten</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="card">
+      <h2 class="small">Tagesform</h2>
+      <div class="field"><label>Energie heute (1–10)</label><input type="number" id="readinessEnergy" min="1" max="10" step="1" placeholder="z.B. 7"></div>
+      <div class="field"><label>Muskelkater/Beschwerden</label>
+        <select id="readinessSoreness">
+          <option value="keine">Keine</option>
+          <option value="leicht">Leicht</option>
+          <option value="stark">Stark</option>
+        </select>
+      </div>
+      <div class="field"><label>Schlafqualität</label>
+        <select id="readinessSleep">
+          <option value="schlecht">Schlecht</option>
+          <option value="mittel" selected>Mittel</option>
+          <option value="gut">Gut</option>
+        </select>
+      </div>
+      <button class="btn btn-ghost" onclick="saveReadinessLog()">Speichern</button>
+    </div>
+  `;
+}
 function renderToday(){
   const dates = weekDates();
   const trainedDates = new Set(state.workouts.map(w=>w.date));
@@ -2715,6 +2777,7 @@ function renderToday(){
       <h2 class="small">Diese Woche</h2>
       <div class="row" style="gap:4px;">${weekStrip}</div>
     </div>
+    ${renderReadinessCard()}
     ${planHtml ? `<div class="card">
       <h2>Heute</h2>
       ${planHtml}
@@ -9348,8 +9411,8 @@ async function saveProfile(){
 }
 async function resetAll(){
   stopTicking();
-  await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','trainingPlan'].map(deleteKey));
-  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] }, tmp: defaultTmp()};
+  await Promise.all(['profile','exercises','workouts','drafts','trainingLogs','wods','nutritionLogs','measurements','prEntries','timeRecords','readinessLogs','trainingPlan'].map(deleteKey));
+  state = {profile:null, exercises: cloneDefaultExercises(), workouts:[], drafts:[], nutritionLogs:[], measurements:[], prEntries:[], timeRecords:[], readinessLogs:[], trainingPlan:null, activeTab:'profile', box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] }, tmp: defaultTmp()};
   await saveKey('exercises', state.exercises);
   showToast('Daten gelöscht');
   render();
