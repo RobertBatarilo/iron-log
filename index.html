@@ -3425,9 +3425,36 @@ function detectWorkoutFormat(text){
   if(/\d+\s*x\s*\d+/i.test(t) && /@|%|kg|lb/.test(t)) return 'strength';
   return 'for-time';
 }
+function levenshtein(a, b){
+  a = a.toLowerCase(); b = b.toLowerCase();
+  const m = a.length, n = b.length;
+  if(!m) return n;
+  if(!n) return m;
+  const dp = [];
+  for(let i=0;i<=m;i++){ dp.push([i]); }
+  for(let j=1;j<=n;j++){ dp[0][j] = j; }
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+function findSimilarExercise(name){
+  const target = name.toLowerCase().trim();
+  let best = null, bestDist = Infinity;
+  state.exercises.forEach(e=>{
+    const dist = levenshtein(target, e.name.toLowerCase());
+    const threshold = Math.max(2, Math.round(Math.max(target.length, e.name.length) * 0.25));
+    if(dist>0 && dist<=threshold && dist<bestDist){ best = e; bestDist = dist; }
+  });
+  return best;
+}
 function resolveExerciseIdFromName(rawName){
   const name = (rawName||'').trim();
   if(!name) return null;
+  const alias = (state.profile?.exerciseAliases||[]).find(a=>a.alias.toLowerCase()===name.toLowerCase());
+  if(alias && state.exercises.some(e=>e.id===alias.exerciseId)) return alias.exerciseId;
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
   const nameWords = name.toLowerCase().split(/\s+/);
@@ -3436,7 +3463,61 @@ function resolveExerciseIdFromName(rawName){
     return exWords.every(w=>nameWords.includes(w)) || nameWords.every(w=>exWords.includes(w));
   });
   if(partial) return partial.id;
-  return findOrCreateExerciseId(name);
+  const similar = findSimilarExercise(name);
+  const newId = findOrCreateExerciseId(name);
+  if(similar && similar.id!==newId){
+    state.tmp.exerciseAliasSuggestions = state.tmp.exerciseAliasSuggestions || {};
+    state.tmp.exerciseAliasSuggestions[newId] = { rawName: name, suggestedId: similar.id, suggestedName: similar.name };
+  }
+  return newId;
+}
+function renderSimilarExerciseHint(exerciseId){
+  const sug = state.tmp.exerciseAliasSuggestions?.[exerciseId];
+  if(!sug) return '';
+  return `<div class="note" style="margin:4px 0 8px;">Ähnlich zu vorhandener Übung "${escapeHtml(sug.suggestedName)}" — meintest du die? <a href="#" onclick="event.preventDefault();acceptExerciseAliasSuggestion('${exerciseId}');" style="color:var(--chalk-yellow);">Ja, zusammenführen</a> · <a href="#" onclick="event.preventDefault();dismissExerciseAliasSuggestion('${exerciseId}');" style="color:var(--iron-500);">Nein</a></div>`;
+}
+function replaceExerciseIdEverywhere(oldId, newId){
+  const arrays = [
+    state.tmp.wodTemplate, state.tmp.wodMoves,
+    state.tmp.forTimeBuilder?.movements, state.tmp.amrapBuilder?.movements
+  ].filter(Boolean);
+  arrays.forEach(arr=>arr.forEach(mv=>{ if(mv.exerciseId===oldId) mv.exerciseId = newId; }));
+  if(state.tmp.forLoadBuilder?.exerciseId===oldId) state.tmp.forLoadBuilder.exerciseId = newId;
+}
+async function acceptExerciseAliasSuggestion(oldId){
+  const sug = state.tmp.exerciseAliasSuggestions?.[oldId];
+  if(!sug) return;
+  replaceExerciseIdEverywhere(oldId, sug.suggestedId);
+  state.profile = state.profile || {};
+  state.profile.exerciseAliases = state.profile.exerciseAliases || [];
+  state.profile.exerciseAliases.push({id: uid(), alias: sug.rawName, exerciseId: sug.suggestedId});
+  await saveKey('profile', state.profile);
+  state.exercises = state.exercises.filter(e=>e.id!==oldId);
+  await saveKey('exercises', state.exercises);
+  delete state.tmp.exerciseAliasSuggestions[oldId];
+  if(state.tmp.newlyCreatedExerciseIds) state.tmp.newlyCreatedExerciseIds = state.tmp.newlyCreatedExerciseIds.filter(id=>id!==oldId);
+  showToast('Als Alias gemerkt');
+  render();
+}
+function dismissExerciseAliasSuggestion(oldId){
+  if(state.tmp.exerciseAliasSuggestions) delete state.tmp.exerciseAliasSuggestions[oldId];
+  render();
+}
+async function addExerciseAlias(){
+  const alias = (document.getElementById('newAliasText')?.value||'').trim();
+  const exerciseId = document.getElementById('newAliasExercise')?.value;
+  if(!alias || !exerciseId){ showToast('Bitte Alias und Übung angeben'); return; }
+  state.profile = state.profile || {};
+  state.profile.exerciseAliases = (state.profile.exerciseAliases||[]).filter(a=>a.alias.toLowerCase()!==alias.toLowerCase());
+  state.profile.exerciseAliases.push({id: uid(), alias, exerciseId});
+  await saveKey('profile', state.profile);
+  showToast('Alias gespeichert');
+  render();
+}
+async function deleteExerciseAlias(id){
+  state.profile.exerciseAliases = (state.profile.exerciseAliases||[]).filter(a=>a.id!==id);
+  await saveKey('profile', state.profile);
+  render();
 }
 function parseForTimeText(lines){
   const movements = [];
@@ -5315,6 +5396,22 @@ function computeMyAttendedDates(periodKey){
     .filter(d=>d && d<=todayD && (!cutoff || d>=cutoff));
   return [...new Set(dates)].sort((a,b)=>b.localeCompare(a));
 }
+function computeAttendanceRecordForPeriod(periodDays){
+  const meId = pb.authStore.record?.id;
+  const dates = [...new Set((state.box.allAttendedBookings||[])
+    .filter(b=>b.user===meId)
+    .map(b=>b.expand?.classInstance?.date)
+    .filter(Boolean))].sort();
+  if(!dates.length) return 0;
+  const start = new Date(dates[0]+'T00:00:00');
+  const buckets = {};
+  dates.forEach(d=>{
+    const diffDays = Math.floor((new Date(d+'T00:00:00')-start)/86400000);
+    const bucketIdx = Math.floor(diffDays/periodDays);
+    buckets[bucketIdx] = (buckets[bucketIdx]||0)+1;
+  });
+  return Math.max(...Object.values(buckets));
+}
 function toggleLeaderboardDetail(){
   state.tmp.leaderboardDetailOpen = !state.tmp.leaderboardDetailOpen;
   render();
@@ -5336,14 +5433,17 @@ function renderAthleteAttendanceCard(){
   const count = mine ? mine.count : 0;
   const detailOpen = state.tmp.leaderboardDetailOpen;
   const myDates = detailOpen ? computeMyAttendedDates(periodKey) : [];
+  const periodDef = LEADERBOARD_PERIODS.find(p=>p.key===periodKey);
+  const isAttendanceRecord = !!(periodDef?.days && count>0 && count>=computeAttendanceRecordForPeriod(periodDef.days));
   return `
     <div class="card">
       <h2 class="small">🏅 Consistency</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
-        <span class="val">Check-ins</span>
+        <span class="val">Check-ins${isAttendanceRecord?' 🏆':''}</span>
         <span class="note" style="margin:0;">${count}×</span>
       </div>
+      ${isAttendanceRecord ? `<div class="note" style="margin:4px 0 0;">Neuer Rekord für diesen Zeitraum!</div>` : ''}
       ${detailOpen ? `
         <div class="note" style="margin:8px 0 0;">
           ${myDates.length ? myDates.map(d=>fmtDate(d)).join(' · ') : 'Keine Trainingstage in diesem Zeitraum.'}
@@ -6108,7 +6208,16 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
     const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH${isWeighted?' (pro Satz, z.B. 7,5,3)':''}</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
     const pctField = isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
-    const weightField = isWeighted ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alt. zu %"></div>${isDistanceWeighted ? distanceField : repsTargetField}</div>` : '';
+    const e1rmSuggestion = isWeighted && !isDistanceWeighted ? bestE1RM(t.exerciseId) : null;
+    const weightSuggestionNote = e1rmSuggestion ? `
+      <div class="note" style="margin-bottom:8px;">
+        e1RM ${fmtWeight(e1rmSuggestion)} —
+        ${[60,70,80].map(pct=>{
+          const kg = Math.round(e1rmSuggestion*pct/100);
+          return `<a href="#" onclick="event.preventDefault();applySuggestedTemplateWeight(${mi},${kg});" style="color:var(--chalk-yellow);">${pct}% ${fmtWeight(kg)}</a>`;
+        }).join(' · ')}
+      </div>` : '';
+    const weightField = isWeighted ? `${weightSuggestionNote}<div class="row"><div class="field" style="margin-bottom:0;"><label>Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" value="${toDisplayWeight(t.weight)}" oninput="updateTemplateFieldWeight(${mi},this.value)" placeholder="alt. zu %"></div>${isDistanceWeighted ? distanceField : repsTargetField}</div>` : '';
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${t.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'kcal')">Kalorien</button>
@@ -6137,7 +6246,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateTemplateField(${mi},'exerciseId',exId))">➕</button>
         ${state.tmp.wodTemplate.length>1 ? `<button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>` : ''}
       </div>
-      ${state.tmp.newlyCreatedExerciseIds?.includes(t.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
+      ${state.tmp.newlyCreatedExerciseIds?.includes(t.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>${renderSimilarExerciseHint(t.exerciseId)}` : ''}
       ${variantSelector}
       ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
       <div class="row">
@@ -6580,7 +6689,7 @@ function renderForTimeFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForTimeMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeForTimeMove(${mi})">✕</button>` : ''}
       </div>
-      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
+      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>${renderSimilarExerciseHint(m.exerciseId)}` : ''}
       ${variantSelector}
       ${unitToggle}
       <div class="row">
@@ -6809,10 +6918,21 @@ function renderForTimeRunning(b){
     </div>
   `;
 }
+function findPossibleDuplicateWorkout(date, name, format){
+  if(!name) return null;
+  return state.workouts.find(w=>w.date===date && w.format===format && (w.name||'').toLowerCase()===name.toLowerCase());
+}
+function renderDuplicateWarning(format){
+  const date = state.tmp.wodDate || todayStr();
+  const name = (state.tmp.wodName||'').trim();
+  const dup = findPossibleDuplicateWorkout(date, name, format);
+  return dup ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">⚠️ Du hast heute schon ein Workout namens "${escapeHtml(name)}" gespeichert. Trotzdem nochmal speichern?</div>` : '';
+}
 function renderForTimeSummary(b){
   return `
     <div class="card" style="text-align:center;">
       <h2>Workout abgeschlossen 🏁</h2>
+      ${renderDuplicateWarning('for-time')}
       <div class="field" style="text-align:left;max-width:180px;margin:14px auto;">
         <label>Zeit (mm:ss)</label>
         <input type="text" id="forTimeManualTime" value="${fmtClock((b.finalElapsedSec||0)*1000,false)}" placeholder="z.B. 12:34" style="text-align:center;font-size:28px;">
@@ -6860,6 +6980,10 @@ async function saveForTimeWorkout(){
     id: uid(), date, name, note, format:'for-time', movements: prMovements,
     forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0, roundsLog: b.roundsLog||[] }
   };
+  const isNewBestTime = !!(name && b.finalElapsedSec!=null && !b.capped && (()=>{
+    const priorSecs = state.timeRecords.filter(t=>t.name.toLowerCase()===name.toLowerCase()).map(t=>parseClockToSec(t.time)).filter(s=>s!=null);
+    return priorSecs.length>0 && b.finalElapsedSec < Math.min(...priorSecs);
+  })());
   showPRToastIfAny(prMovements);
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
@@ -6873,7 +6997,7 @@ async function saveForTimeWorkout(){
   }
   state.tmp.forTimeBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
-  showToast('Workout gespeichert 🏋️');
+  showToast(isNewBestTime ? `🏆 Neue Bestzeit bei "${name}"!` : 'Workout gespeichert 🏋️');
   render();
 }
 
@@ -6988,7 +7112,7 @@ function renderAmrapFlow(historyHtml){
         <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateAmrapMove(${mi},'exerciseId',exId))">➕</button>
         ${b.movements.length>1 ? `<button class="remove-row" onclick="removeAmrapMove(${mi})">✕</button>` : ''}
       </div>
-      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
+      ${state.tmp.newlyCreatedExerciseIds?.includes(m.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>${renderSimilarExerciseHint(m.exerciseId)}` : ''}
       ${variantSelector}
       ${unitToggle}
       <div class="row">
@@ -7177,6 +7301,7 @@ function renderAmrapSummary(b){
   return `
     <div class="card" style="text-align:center;">
       <h2>Workout abgeschlossen 🏁</h2>
+      ${renderDuplicateWarning('amrap')}
       <div class="stat-num" style="font-size:34px;margin:14px 0;">${b.roundsCompleted} Runden${parseInt(b.extraReps)?' + '+b.extraReps+' Wdh.':''}</div>
       <div class="field" style="text-align:left;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
       <button class="btn btn-primary" style="margin-top:10px;" onclick="saveAmrapWorkout()">Workout speichern</button>
@@ -7190,10 +7315,17 @@ async function saveAmrapWorkout(){
   const note = state.tmp.wodNote || '';
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
   const prMovements = buildPrMovementsFromFlat(movements);
+  const durationSec = Math.round(b.durationMs/1000);
+  const extraReps = parseInt(b.extraReps)||0;
   const workout = {
     id: uid(), date, name, note, format:'amrap', movements: prMovements,
-    amrap: { movements, durationSec: Math.round(b.durationMs/1000), roundsCompleted: b.roundsCompleted, extraReps: parseInt(b.extraReps)||0 }
+    amrap: { movements, durationSec, roundsCompleted: b.roundsCompleted, extraReps }
   };
+  const isNewRoundsPR = !!(name && (()=>{
+    const priorAmraps = state.workouts.filter(w=>w.format==='amrap' && (w.name||'').toLowerCase()===name.toLowerCase() && w.amrap?.durationSec===durationSec);
+    if(!priorAmraps.length) return false;
+    return priorAmraps.every(a=>b.roundsCompleted>a.amrap.roundsCompleted || (b.roundsCompleted===a.amrap.roundsCompleted && extraReps>a.amrap.extraReps));
+  })());
   showPRToastIfAny(prMovements);
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
@@ -7203,7 +7335,7 @@ async function saveAmrapWorkout(){
   }
   state.tmp.amrapBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
-  showToast('Workout gespeichert 🏋️');
+  showToast(isNewRoundsPR ? `🏆 Neue Bestleistung bei "${name}"!` : 'Workout gespeichert 🏋️');
   render();
 }
 
@@ -7257,7 +7389,7 @@ function renderForLoadFlow(historyHtml){
           </select>
           <button type="button" class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(exId=>updateForLoadField('exerciseId',exId))">➕</button>
         </div>
-        ${state.tmp.newlyCreatedExerciseIds?.includes(b.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>` : ''}
+        ${state.tmp.newlyCreatedExerciseIds?.includes(b.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>${renderSimilarExerciseHint(b.exerciseId)}` : ''}
         ${forLoadVariantSelector}
         ${forLoadUnitToggle}
         ${forLoadTargetField}
@@ -7492,6 +7624,10 @@ function updateTemplateFieldVariant(mi, variantId){
 }
 function updateTemplateFieldWeight(mi, displayVal){
   state.tmp.wodTemplate[mi].weight = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
+}
+function applySuggestedTemplateWeight(mi, kg){
+  state.tmp.wodTemplate[mi].weight = String(kg);
+  render();
 }
 function updateTemplateFieldQty(mi, displayVal){
   const t = state.tmp.wodTemplate[mi];
@@ -8687,6 +8823,7 @@ function renderProfile(){
   return renderProfileMenu();
 }
 function renderMyExercisesScreen(){
+  const aliases = state.profile?.exerciseAliases || [];
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
     <div class="card">
@@ -8699,6 +8836,27 @@ function renderMyExercisesScreen(){
           <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(()=>{}, '${e.id}')">✎</button>
         </div>
       `).join('')}
+    </div>
+    <div class="card">
+      <h2 class="small">Abkürzungen &amp; Aliasnamen</h2>
+      <div class="note" style="margin-bottom:10px;">Eigene Kürzel oder Box-Bezeichnungen (z.B. "TTB", "grünes Band"), die beim Foto-/Text-Import automatisch der richtigen Übung zugeordnet werden.</div>
+      ${aliases.length ? aliases.map(a=>{
+        const ex = state.exercises.find(e=>e.id===a.exerciseId);
+        return `
+        <div class="history-item">
+          <span class="val">${escapeHtml(a.alias)} → ${escapeHtml(ex?ex.name:'—')}</span>
+          <button class="remove-row" onclick="deleteExerciseAlias('${a.id}')">✕</button>
+        </div>`;
+      }).join('') : `<div class="note" style="margin-bottom:10px;">Noch keine Aliasnamen angelegt.</div>`}
+      <div class="row" style="margin-top:10px;">
+        <div class="field" style="margin-bottom:0;"><label>Kürzel/Alias</label><input type="text" id="newAliasText" placeholder="z.B. TTB"></div>
+        <div class="field" style="margin-bottom:0;"><label>Übung</label>
+          <select id="newAliasExercise">
+            ${sortedExercises().map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-ghost" style="margin-top:8px;" onclick="addExerciseAlias()">+ Alias hinzufügen</button>
     </div>
   `;
 }
