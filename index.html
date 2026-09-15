@@ -6264,8 +6264,76 @@ function formatBoxWorkoutPreview(w){
   const emomLabel = w.format==='emom' ? `EMOM ${p.emomMin||0}:${String(p.emomSec||0).padStart(2,'0')} × ${p.emomRounds||1} — ` : '';
   return emomLabel + lines.join(', ');
 }
+function workoutPerfScore(w){
+  if(w.format==='for-time'){
+    const ft = w.forTime || {};
+    if(ft.elapsedSec==null || ft.capped) return null;
+    return {type:'time', value: ft.elapsedSec};
+  }
+  if(w.format==='amrap'){
+    const am = w.amrap || {};
+    if(am.roundsCompleted==null) return null;
+    return {type:'rounds', value:(am.roundsCompleted||0) + (parseInt(am.extraReps)||0)/1000};
+  }
+  if(w.format==='for-load'){
+    const fl = w.forLoad || {};
+    if(fl.unit || fl.achievedWeight==null || fl.achievedWeight==='') return null;
+    return {type:'weight', value: parseFloat(fl.achievedWeight)};
+  }
+  return null;
+}
+function perfBetter(type, a, b){
+  return type==='time' ? a<b : a>b;
+}
+function amrapScoreParts(w){
+  const am = w.amrap || {};
+  return {rounds: am.roundsCompleted||0, reps: parseInt(am.extraReps)||0};
+}
+function perfDeltaLabel(type, wA, wB){
+  if(type==='time'){
+    const diff = Math.abs(wA.forTime.elapsedSec - wB.forTime.elapsedSec);
+    return fmtClock(Math.round(diff)*1000,false);
+  }
+  if(type==='weight'){
+    const diff = Math.abs(parseFloat(wA.forLoad.achievedWeight) - parseFloat(wB.forLoad.achievedWeight));
+    return fmtWeight(diff);
+  }
+  if(type==='rounds'){
+    const a = amrapScoreParts(wA), b = amrapScoreParts(wB);
+    const roundsDiff = a.rounds - b.rounds;
+    const repsDiff = a.reps - b.reps;
+    if(roundsDiff!==0){
+      let label = `${Math.abs(roundsDiff)} Runde${Math.abs(roundsDiff)===1?'':'n'}`;
+      if(repsDiff!==0 && Math.sign(repsDiff)===Math.sign(roundsDiff)) label += ` + ${Math.abs(repsDiff)} Wdh.`;
+      return label;
+    }
+    return `${Math.abs(repsDiff)} Wdh.`;
+  }
+  return '';
+}
+function generateWorkoutAutoSummary(w){
+  if(!w.name) return null;
+  const score = workoutPerfScore(w);
+  if(!score) return null;
+  const others = state.workouts
+    .filter(o=>o.id!==w.id && o.name===w.name)
+    .map(o=>({w:o, score: workoutPerfScore(o)}))
+    .filter(o=>o.score && o.score.type===score.type);
+  if(!others.length) return `Erstes Mal "${w.name}" geloggt — ab jetzt vergleichbar.`;
+  const bestOther = others.reduce((best,o)=> perfBetter(score.type, o.score.value, best.score.value) ? o : best, others[0]);
+  const isNewBest = perfBetter(score.type, score.value, bestOther.score.value);
+  const compareTarget = isNewBest ? bestOther : others.slice().sort((a,b)=>b.w.date.localeCompare(a.w.date))[0];
+  const deltaLabel = perfDeltaLabel(score.type, w, compareTarget.w);
+  if(isNewBest){
+    return `🏆 Neue Bestleistung bei "${w.name}"${deltaLabel?` — ${deltaLabel} besser als der bisherige Rekord`:''}.`;
+  }
+  if(score.value===compareTarget.score.value) return `Gleiche Leistung wie beim letzten Versuch am ${fmtDate(compareTarget.w.date)}.`;
+  const improved = perfBetter(score.type, score.value, compareTarget.score.value);
+  return `${improved?'📈':'📉'} ${deltaLabel} ${improved?'besser':'schwächer'} als beim letzten Versuch am ${fmtDate(compareTarget.w.date)}.`;
+}
 function renderWorkoutHistoryEntry(w){
   const format = w.format || 'strength';
+  const autoSummary = generateWorkoutAutoSummary(w);
   let body;
   if(format==='for-time'){
     const ft = w.forTime || {};
@@ -6346,6 +6414,7 @@ function renderWorkoutHistoryEntry(w){
       <div class="swipe-content wod-card" style="position:relative;background:var(--graphite-800);margin-bottom:0;transform:translateX(${swipeOffset}px);transition:transform 0.2s ease;">
         <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
         ${body}
+        ${autoSummary ? `<div class="note" style="color:var(--chalk-yellow);">${escapeHtml(autoSummary)}</div>` : ''}
         ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
       </div>
     </div>
@@ -7301,7 +7370,7 @@ async function saveForTimeWorkout(){
   }
   state.tmp.forTimeBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
-  showToast(isNewBestTime ? `🏆 Neue Bestzeit bei "${name}"!` : 'Workout gespeichert 🏋️');
+  showToast(generateWorkoutAutoSummary(workout) || (isNewBestTime ? `🏆 Neue Bestzeit bei "${name}"!` : 'Workout gespeichert 🏋️'));
   render();
 }
 
@@ -7639,7 +7708,7 @@ async function saveAmrapWorkout(){
   }
   state.tmp.amrapBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
-  showToast(isNewRoundsPR ? `🏆 Neue Bestleistung bei "${name}"!` : 'Workout gespeichert 🏋️');
+  showToast(generateWorkoutAutoSummary(workout) || (isNewRoundsPR ? `🏆 Neue Bestleistung bei "${name}"!` : 'Workout gespeichert 🏋️'));
   render();
 }
 
@@ -7897,7 +7966,7 @@ async function saveForLoadWorkout(){
   }
   state.tmp.forLoadBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
-  showToast('Workout gespeichert 🏋️');
+  showToast(generateWorkoutAutoSummary(workout) || 'Workout gespeichert 🏋️');
   render();
 }
 
@@ -9496,7 +9565,8 @@ function showToast(msg){
   el.className = 'toast';
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(()=>el.remove(), 2200);
+  const duration = msg.length > 40 ? 4200 : 2200;
+  setTimeout(()=>el.remove(), duration);
 }
 
 boot();
