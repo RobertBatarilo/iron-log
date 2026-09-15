@@ -665,7 +665,10 @@ function defaultTmp(){
     editingBoxWorkoutId:null,
     socialComposerOpen:false, socialComposerText:'', socialComposerImages:[],
     socialPollDraft:null,
-    socialOpenCommentsPostId:null, socialCommentDraft:{}
+    socialOpenCommentsPostId:null, socialCommentDraft:{},
+    mpPickerCandidates:null, mpPickerConfirmFn:null, mpPickerContext:null,
+    mpMembersOpen:false, mpMembersList:null, mpMemberSearch:'',
+    mpMemberDetailId:null, mpMemberDetailPlans:null, mpMemberDetailBookings:null, mpNewPlanType:'recurring'
   };
 }
 
@@ -681,7 +684,7 @@ let state = {
   readinessLogs:[],
   trainingPlan:null,
   activeTab:'today',
-  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[] },
+  box:{ loaded:false, membership:null, scheduleSlots:[], pendingMemberships:[], classInstances:[], classBookings:[], scheduleDate:null, myBookings:[], tabWorkouts:[], tabWorkoutsDate:null, workoutResults:{}, socialPosts:[], socialLoaded:false, socialPage:1, socialHasMore:false, socialReactionsByPost:{}, socialMyVoteByPost:{}, socialPollTallyByPost:{}, allWorkouts:[], allWorkoutsLoaded:false, allAttendedBookings:[], membershipPlans:[] },
   tmp: defaultTmp() // transient UI state
 };
 
@@ -2626,7 +2629,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
 
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
   window.scrollTo(0, scrollY);
@@ -4198,12 +4201,14 @@ async function loadBoxData(){
     state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isProStandalone || memberships.some(m=>m.status==='active'));
     if(mine && mine.status==='active'){
       const boxId = mine.box;
-      const [slots, allAttended] = await Promise.all([
+      const [slots, allAttended, membershipPlans] = await Promise.all([
         pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
-        pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && status = "attended"', {box:boxId}), expand:'classInstance', requestKey:null})
+        pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && status = "attended"', {box:boxId}), expand:'classInstance', requestKey:null}),
+        pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:mine.id}), requestKey:null})
       ]);
       state.box.scheduleSlots = slots;
       state.box.allAttendedBookings = allAttended;
+      state.box.membershipPlans = membershipPlans;
       state.box.pendingMemberships = mine.role==='owner'
         ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
         : [];
@@ -4213,6 +4218,7 @@ async function loadBoxData(){
       state.box.pendingMemberships = [];
       state.box.myBookings = [];
       state.box.allAttendedBookings = [];
+      state.box.membershipPlans = [];
     }
   }catch(e){
     console.error('Box-Daten konnten nicht geladen werden', e);
@@ -4809,6 +4815,29 @@ function attendanceStats(bookings){
     allTime: dates.length
   };
 }
+/* ---- Athleten-Kontingent (membership_plans) ---- */
+function isConsumingBooking(b){
+  return b.status==='attended' || (b.status==='cancelled' && b.lateCancel===true);
+}
+function planLabel(plan){
+  return plan.type==='recurring' ? 'Laufende Buchung' : 'Einmalige Buchung';
+}
+function computePlanQuota(plan, bookings){
+  const todayD = todayStr();
+  const grant = parseInt(plan.amount)||0;
+  const notStartedYet = plan.startDate && plan.startDate.slice(0,10) > todayD;
+  let usable, used;
+  if(plan.type==='recurring'){
+    const monthPrefix = todayD.slice(0,7);
+    usable = !notStartedYet && (plan.status==='active' || (plan.status==='cancelled' && plan.cancelledAt && plan.cancelledAt.slice(0,7)===monthPrefix));
+    used = bookings.filter(b=>b.membershipPlan===plan.id && isConsumingBooking(b) && b.expand?.classInstance?.date?.startsWith(monthPrefix)).length;
+  } else {
+    usable = !notStartedYet && plan.status==='active';
+    used = bookings.filter(b=>b.membershipPlan===plan.id && isConsumingBooking(b)).length;
+  }
+  const remaining = usable ? Math.max(0, grant-used) : 0;
+  return {usable, grant, used, remaining};
+}
 function getNextUpcomingBooking(bookings){
   const todayD = todayStr();
   const upcoming = bookings.filter(b=>(b.status==='reserved'||b.status==='attended') && b.expand?.classInstance?.date>=todayD);
@@ -4926,34 +4955,75 @@ function instanceHasStarted(instance){
 function fmtTime(d){
   return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 }
-async function toggleBooking(instanceId){
+function resolveBookingPlan(instanceId){
+  const plans = state.box.membershipPlans;
+  if(!plans.length) return {mode:'none'};
+  const usable = plans
+    .map(p=>({id:p.id, label:planLabel(p), q:computePlanQuota(p, state.box.myBookings)}))
+    .filter(x=>x.q.remaining>0);
+  if(!usable.length) return {mode:'blocked'};
+  if(usable.length===1) return {mode:'single', planId:usable[0].id};
+  return {mode:'picker', candidates: usable.map(u=>({id:u.id, label: u.label+' · '+u.q.remaining+' übrig'}))};
+}
+function openPlanPicker(candidates, confirmFnName, context){
+  state.tmp.mpPickerCandidates = candidates;
+  state.tmp.mpPickerConfirmFn = confirmFnName;
+  state.tmp.mpPickerContext = context || null;
+  render();
+}
+function closePlanPicker(){
+  state.tmp.mpPickerCandidates = null;
+  state.tmp.mpPickerConfirmFn = null;
+  state.tmp.mpPickerContext = null;
+  render();
+}
+async function confirmPlanPickerChoice(){
+  const planId = document.getElementById('mpPickerSelect')?.value;
+  if(!planId) return;
+  const fn = state.tmp.mpPickerConfirmFn;
+  const ctx = state.tmp.mpPickerContext;
+  closePlanPicker();
+  if(fn && window[fn]) await window[fn](planId, ctx);
+}
+async function confirmSelfBookingPlan(planId, ctx){
+  if(ctx?.instanceId) await performBooking(ctx.instanceId, planId);
+}
+async function confirmAdminBookingPlan(planId, ctx){
+  if(ctx) await createAdminBooking(ctx.instanceId, ctx.userId, ctx.name, planId);
+}
+function renderPlanPickerModalRoot(){
+  if(!state.tmp.mpPickerCandidates) return '';
+  const candidates = state.tmp.mpPickerCandidates || [];
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closePlanPicker()">
+      <div class="modal-box">
+        <h2>Aus welchem Kontingent buchen?</h2>
+        <div class="field"><label>Paket</label>
+          <select id="mpPickerSelect">
+            ${candidates.map(c=>`<option value="${c.id}">${escapeHtml(c.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn btn-ghost" onclick="closePlanPicker()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="confirmPlanPickerChoice()">Buchen</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+async function performBooking(instanceId, membershipPlanId){
   const instance = state.box.classInstances.find(i=>i.id===instanceId);
   if(!instance) return;
   const st = classInstanceStatus(instance);
   const myId = pb.authStore.record.id;
   const myRow = state.box.classBookings.find(b=>b.classInstance===instanceId && b.user===myId) || null;
-  const isBookingAction = !(st.mine && (st.mine.status==='reserved'||st.mine.status==='attended'||st.mine.status==='waitlist'));
-  if(isBookingAction && !isBoxOwner() && instanceHasStarted(instance)){
-    showToast('Buchung nach Trainingsbeginn nicht mehr möglich');
-    return;
-  }
   try{
-    if(st.mine && (st.mine.status==='reserved' || st.mine.status==='attended')){
-      if(!canCancelBooking(instance)){
-        showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(instance))+' Uhr)');
-        return;
-      }
-      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
-      showToast('Buchung storniert');
-    } else if(st.mine && st.mine.status==='waitlist'){
-      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
-      showToast('Von Warteliste entfernt');
-    } else if(myRow){
-      await pb.collection('bookings').update(myRow.id, {status: st.spotsLeft>0?'reserved':'waitlist'});
+    if(myRow){
+      await pb.collection('bookings').update(myRow.id, {status: st.spotsLeft>0?'reserved':'waitlist', membershipPlan: membershipPlanId||null});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     } else {
       const myName = pb.authStore.record.name || pb.authStore.record.email || '';
-      await pb.collection('bookings').create({classInstance:instanceId, user:myId, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist', userName: myName});
+      await pb.collection('bookings').create({classInstance:instanceId, user:myId, box:state.box.membership.box, status: st.spotsLeft>0?'reserved':'waitlist', userName: myName, membershipPlan: membershipPlanId||null});
       showToast(st.spotsLeft>0?'Gebucht':'Auf Warteliste gesetzt');
     }
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
@@ -4961,6 +5031,42 @@ async function toggleBooking(instanceId){
   }catch(e){
     showToast('Aktion fehlgeschlagen');
   }
+}
+async function toggleBooking(instanceId){
+  const instance = state.box.classInstances.find(i=>i.id===instanceId);
+  if(!instance) return;
+  const st = classInstanceStatus(instance);
+  const isBookingAction = !(st.mine && (st.mine.status==='reserved'||st.mine.status==='attended'||st.mine.status==='waitlist'));
+  if(isBookingAction && !isBoxOwner() && instanceHasStarted(instance)){
+    showToast('Buchung nach Trainingsbeginn nicht mehr möglich');
+    return;
+  }
+  if(st.mine && (st.mine.status==='reserved' || st.mine.status==='attended')){
+    if(!canCancelBooking(instance)){
+      showToast('Stornierung nicht mehr möglich (Frist war: '+fmtTime(cancellationDeadline(instance))+' Uhr)');
+      return;
+    }
+    try{
+      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
+      showToast('Buchung storniert');
+      await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+      await loadMyBookings(state.box.membership.box);
+    }catch(e){ showToast('Aktion fehlgeschlagen'); }
+    return;
+  }
+  if(st.mine && st.mine.status==='waitlist'){
+    try{
+      await pb.collection('bookings').update(st.mine.id, {status:'cancelled'});
+      showToast('Von Warteliste entfernt');
+      await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+      await loadMyBookings(state.box.membership.box);
+    }catch(e){ showToast('Aktion fehlgeschlagen'); }
+    return;
+  }
+  const resolved = resolveBookingPlan(instanceId);
+  if(resolved.mode==='blocked'){ showToast('Kontingent aufgebraucht'); return; }
+  if(resolved.mode==='picker'){ openPlanPicker(resolved.candidates, 'confirmSelfBookingPlan', {instanceId}); return; }
+  await performBooking(instanceId, resolved.mode==='single' ? resolved.planId : null);
 }
 function canCheckIn(bookingRow, instance){
   return bookingRow.status==='reserved' && (!instanceHasStarted(instance) || isBoxOwner());
@@ -4999,7 +5105,7 @@ async function openNachbuchenPicker(instanceId){
     const memberships = await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "active"', {box:boxId}), expand:'user'});
     const alreadyIds = new Set(state.box.classBookings.filter(b=>b.classInstance===instanceId && b.status!=='cancelled').map(b=>b.user));
     state.tmp.bookableAthletes = memberships.filter(m=>!alreadyIds.has(m.user)).map(m=>({
-      userId: m.user, name: m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied'
+      userId: m.user, membershipId: m.id, name: m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied'
     }));
   }catch(e){
     state.tmp.bookableAthletes = [];
@@ -5007,19 +5113,65 @@ async function openNachbuchenPicker(instanceId){
   }
   render();
 }
-async function adminBookAthlete(instanceId){
-  if(!isBoxOwner()) return;
-  const userId = document.getElementById('nachbuchenSelect')?.value;
-  if(!userId){ showToast('Bitte einen Athleten wählen'); return; }
-  const athlete = (state.tmp.bookableAthletes||[]).find(a=>a.userId===userId);
+function resolveAdminPlanChoice(plans, bookings){
+  if(!plans.length) return {mode:'none'};
+  if(plans.length===1) return {mode:'single', planId:plans[0].id};
+  const candidates = plans.map(p=>{
+    const q = computePlanQuota(p, bookings);
+    return {id:p.id, label: planLabel(p)+' · '+q.remaining+' übrig'};
+  });
+  return {mode:'picker', candidates};
+}
+async function createAdminBooking(instanceId, userId, name, membershipPlanId){
   try{
-    await pb.collection('bookings').create({classInstance:instanceId, user:userId, box:state.box.membership.box, status:'reserved', userName: athlete?.name||'Mitglied'});
+    await pb.collection('bookings').create({classInstance:instanceId, user:userId, box:state.box.membership.box, status:'reserved', userName: name||'Mitglied', membershipPlan: membershipPlanId||null});
     showToast('Athlet nachgebucht');
     state.tmp.showNachbuchenPicker = false;
     state.tmp.bookableAthletes = null;
     await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
   }catch(e){
     showToast('Nachbuchen fehlgeschlagen');
+  }
+}
+async function adminBookAthlete(instanceId){
+  if(!isBoxOwner()) return;
+  const userId = document.getElementById('nachbuchenSelect')?.value;
+  if(!userId){ showToast('Bitte einen Athleten wählen'); return; }
+  const athlete = (state.tmp.bookableAthletes||[]).find(a=>a.userId===userId);
+  if(!athlete?.membershipId){ await createAdminBooking(instanceId, userId, athlete?.name, null); return; }
+  try{
+    const [plans, bookings] = await Promise.all([
+      pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:athlete.membershipId})}),
+      pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && user = {:u}', {box:state.box.membership.box, u:userId}), expand:'classInstance', requestKey:null})
+    ]);
+    const resolved = resolveAdminPlanChoice(plans, bookings);
+    if(resolved.mode==='picker'){
+      openPlanPicker(resolved.candidates, 'confirmAdminBookingPlan', {instanceId, userId, name:athlete.name});
+      return;
+    }
+    await createAdminBooking(instanceId, userId, athlete.name, resolved.mode==='single' ? resolved.planId : null);
+  }catch(e){
+    showToast('Nachbuchen fehlgeschlagen');
+  }
+}
+async function markLateCancel(bookingId){
+  if(!isBoxOwner()) return;
+  try{
+    await pb.collection('bookings').update(bookingId, {status:'cancelled', lateCancel:true});
+    showToast('Als Spätstorno/No-Show markiert');
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
+  }
+}
+async function refundLateCancel(bookingId){
+  if(!isBoxOwner()) return;
+  try{
+    await pb.collection('bookings').update(bookingId, {lateCancel:false});
+    showToast('Kontingent zurückerstattet');
+    await loadClassInstancesForDate(state.box.membership.box, state.box.scheduleDate);
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
   }
 }
 async function adminRemoveBooking(bookingId){
@@ -5235,6 +5387,155 @@ async function approveMembership(id, approve){
   }catch(e){
     showToast('Aktion fehlgeschlagen');
   }
+}
+/* ---- Mitglieder & Kontingente (Coach-Verwaltung) ---- */
+function openBoxMembersScreen(){
+  state.tmp.mpMembersOpen = true;
+  state.tmp.mpMembersList = null;
+  render();
+  loadBoxMembersList();
+}
+function closeBoxMembersScreen(){
+  state.tmp.mpMembersOpen = false;
+  state.tmp.mpMemberDetailId = null;
+  render();
+}
+async function loadBoxMembersList(){
+  try{
+    state.tmp.mpMembersList = await pb.collection('memberships').getFullList({
+      filter: pb.filter('box = {:box} && status = "active"', {box: state.box.membership.box}),
+      expand:'user', sort:'userEmail'
+    });
+  }catch(e){
+    state.tmp.mpMembersList = [];
+    showToast('Mitgliederliste konnte nicht geladen werden');
+  }
+  render();
+}
+function openBoxMemberDetail(membershipId){
+  state.tmp.mpMemberDetailId = membershipId;
+  state.tmp.mpMemberDetailPlans = null;
+  state.tmp.mpMemberDetailBookings = null;
+  render();
+  loadBoxMemberDetail(membershipId);
+}
+function closeBoxMemberDetail(){
+  state.tmp.mpMemberDetailId = null;
+  render();
+}
+async function loadBoxMemberDetail(membershipId){
+  const m = (state.tmp.mpMembersList||[]).find(x=>x.id===membershipId);
+  if(!m) return;
+  try{
+    const [plans, bookings] = await Promise.all([
+      pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:membershipId}), sort:'-created'}),
+      pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && user = {:u}', {box:state.box.membership.box, u:m.user}), expand:'classInstance', requestKey:null})
+    ]);
+    state.tmp.mpMemberDetailPlans = plans;
+    state.tmp.mpMemberDetailBookings = bookings;
+  }catch(e){
+    state.tmp.mpMemberDetailPlans = [];
+    state.tmp.mpMemberDetailBookings = [];
+    showToast('Kontingente konnten nicht geladen werden');
+  }
+  render();
+}
+async function createMembershipPlan(membershipId, opts){
+  opts = opts || {};
+  const type = opts.type || document.getElementById('mpNewType')?.value || 'recurring';
+  const amount = opts.amount!=null ? opts.amount : parseInt(document.getElementById('mpNewAmount')?.value)||0;
+  const startDate = opts.startDate || document.getElementById('mpNewStart')?.value || todayStr();
+  const note = opts.note!=null ? opts.note : (document.getElementById('mpNewNote')?.value||'');
+  if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
+  try{
+    await pb.collection('membership_plans').create({membership:membershipId, type, amount, startDate, status:'active', note});
+    showToast('Kontingent angelegt');
+    await loadBoxMemberDetail(membershipId);
+  }catch(e){
+    showToast('Anlegen fehlgeschlagen');
+  }
+}
+async function grantGoodwillCredit(membershipId){
+  const amount = parseInt(document.getElementById('mpGiftAmount')?.value)||1;
+  const note = document.getElementById('mpGiftNote')?.value || 'Kulanz';
+  await createMembershipPlan(membershipId, {type:'one-time', amount, startDate: todayStr(), note});
+}
+async function cancelMembershipPlan(planId, membershipId){
+  try{
+    await pb.collection('membership_plans').update(planId, {status:'cancelled', cancelledAt: todayStr()});
+    showToast('Kontingent gekündigt');
+    await loadBoxMemberDetail(membershipId);
+  }catch(e){
+    showToast('Aktion fehlgeschlagen');
+  }
+}
+function renderBoxMembersScreen(){
+  if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
+  const search = (state.tmp.mpMemberSearch||'').toLowerCase();
+  const list = state.tmp.mpMembersList;
+  const filtered = list ? list.filter(m=>{
+    const name = m.expand?.user?.name || m.userEmail || m.expand?.user?.email || '';
+    return !search || name.toLowerCase().includes(search);
+  }) : null;
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
+    <div class="card">
+      <h2>Mitglieder & Kontingente</h2>
+      <div class="field" style="margin-bottom:0;">
+        <input type="text" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
+      </div>
+    </div>
+    ${list===null ? `<div class="note">Lädt …</div>` : (filtered.length ? filtered.map(m=>`
+      <div class="history-item" style="cursor:pointer;" onclick="openBoxMemberDetail('${m.id}')">
+        <span class="row" style="align-items:center;gap:8px;">
+          <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((m.expand?.user?.name||m.userEmail||'?').slice(0,2).toUpperCase())}</span>
+          <span class="val">${escapeHtml(m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied')}</span>
+        </span>
+        <span class="note" style="margin:0;">${m.role==='owner'?'Coach':'Athlet'}</span>
+      </div>
+    `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
+  `;
+}
+function renderBoxMemberDetail(){
+  const m = (state.tmp.mpMembersList||[]).find(x=>x.id===state.tmp.mpMemberDetailId);
+  if(!m) return `<button class="btn btn-ghost" onclick="closeBoxMembersScreen()">← Zurück</button>`;
+  const name = m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied';
+  const plans = state.tmp.mpMemberDetailPlans;
+  const bookings = state.tmp.mpMemberDetailBookings || [];
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMemberDetail()">← Zurück</button>
+    <div class="card">
+      <h2>${escapeHtml(name)}</h2>
+      <h2 class="small" style="margin-top:14px;">Kontingente</h2>
+      ${plans===null ? `<div class="note">Lädt …</div>` : (plans.length ? plans.map(p=>{
+        const q = computePlanQuota(p, bookings);
+        return `
+        <div class="history-item">
+          <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+            <span class="val">${planLabel(p)}${p.status==='cancelled'?' (gekündigt)':''}</span>
+            <span class="note" style="margin:0;">${q.remaining} / ${q.grant} übrig${p.note?' · '+escapeHtml(p.note):''}</span>
+          </span>
+          ${p.status==='active' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="cancelMembershipPlan('${p.id}','${m.id}')">Kündigen</button>` : ''}
+        </div>`;
+      }).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
+      <h2 class="small" style="margin-top:14px;">Kontingent anlegen</h2>
+      <div class="field"><label>Typ</label>
+        <select id="mpNewType">
+          <option value="recurring">Laufende Buchung (pro Monat)</option>
+          <option value="one-time">Einmalige Buchung (fester Block)</option>
+        </select>
+      </div>
+      <div class="field"><label>Menge</label><input type="number" id="mpNewAmount" min="1" placeholder="z.B. 10"></div>
+      <div class="field"><label>Startdatum</label><input type="date" id="mpNewStart" value="${todayStr()}"></div>
+      <div class="field"><label>Notiz (optional)</label><input type="text" id="mpNewNote" placeholder="z.B. 10er-Monatspaket"></div>
+      <button class="btn btn-primary" onclick="createMembershipPlan('${m.id}')">Kontingent anlegen</button>
+      <h2 class="small" style="margin-top:14px;">Guthaben schenken (Kulanz)</h2>
+      <div class="note" style="margin-bottom:10px;">Kostenlose Einheiten gutschreiben, z.B. bei einem Notfall nach Ablauf der Stornofrist.</div>
+      <div class="field"><label>Menge</label><input type="number" id="mpGiftAmount" min="1" value="1"></div>
+      <div class="field"><label>Grund (optional)</label><input type="text" id="mpGiftNote" placeholder="z.B. Kulanz — Notfall"></div>
+      <button class="btn btn-ghost" onclick="grantGoodwillCredit('${m.id}')">Guthaben schenken</button>
+    </div>
+  `;
 }
 async function regenerateInviteCode(){
   if(!isBoxOwner()) return;
@@ -5657,6 +5958,7 @@ function renderCoachLeaderboardCard(){
   `;
 }
 function renderBoxHomeAdmin(box){
+  if(state.tmp.mpMembersOpen) return renderBoxMembersScreen();
   const pending = state.box.pendingMemberships;
   const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
   const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
@@ -5677,6 +5979,11 @@ function renderBoxHomeAdmin(box){
       </div>
     ` : ''}
     ${renderCoachLeaderboardCard()}
+    <div class="card">
+      <h2 class="small">Mitglieder & Kontingente</h2>
+      <div class="note" style="margin-bottom:10px;">Buchungs-Kontingente pro Athlet zuweisen, kündigen oder kostenlos gutschreiben.</div>
+      <button class="btn btn-ghost" onclick="openBoxMembersScreen()">Verwalten →</button>
+    </div>
     <div class="card">
       <h2 class="small">Box-Ankündigung</h2>
       <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
@@ -5713,6 +6020,16 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
+    ${state.box.membershipPlans.length ? `
+    <div class="card">
+      <h2 class="small">Mein Kontingent</h2>
+      ${state.box.membershipPlans
+        .map(p=>({p, q: computePlanQuota(p, state.box.myBookings)}))
+        .filter(({p,q})=>p.status==='active' || q.usable)
+        .map(({p,q})=>`<div class="history-item"><span class="val">${planLabel(p)}</span><span class="note" style="margin:0;">${q.usable ? q.remaining+' / '+q.grant+' übrig' : 'Kontingent aufgebraucht'}</span></div>`)
+        .join('')}
+    </div>
+    ` : ''}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
@@ -5875,6 +6192,7 @@ function renderClassDetailModalRoot(){
   const matched = state.box.tabWorkouts.filter(w=>w.category===slot?.label && w.date===inst.date);
   const reserved = state.box.classBookings.filter(b=>b.classInstance===id && (b.status==='reserved'||b.status==='attended')).sort((a,b)=>(a.created||'').localeCompare(b.created||''));
   const waitlist = state.box.classBookings.filter(b=>b.classInstance===id && b.status==='waitlist').sort((a,b)=>(a.created||'').localeCompare(b.created||''));
+  const lateCancelled = state.box.classBookings.filter(b=>b.classInstance===id && b.status==='cancelled' && b.lateCancel===true);
   const pillClass = st.pill==='RESERVIERT'?'chip-reserved':st.pill==='WARTELISTE'?'chip-waitlist':st.pill==='AUSGEBUCHT'?'chip-full':'chip-available';
   const minP = slot?.minParticipants;
   const showCheckIn = st.mine && canCheckIn(st.mine, inst);
@@ -5907,6 +6225,7 @@ function renderClassDetailModalRoot(){
               ${b.status==='attended'?'<span class="chip chip-reserved">EINGECHECKT</span>':''}
               ${isBoxOwner() ? `
                 ${b.status!=='attended' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="checkIn('${b.id}')">Einchecken</button>` : ''}
+                ${b.status==='reserved' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="markLateCancel('${b.id}')">Spätstorno/No-Show</button>` : ''}
                 <button class="btn-sm btn-ghost" style="width:auto;" onclick="adminRemoveBooking('${b.id}')">Entfernen</button>
               ` : ''}
             </span>
@@ -5914,6 +6233,10 @@ function renderClassDetailModalRoot(){
         ${waitlist.length ? `
           <h2 class="small" style="margin-top:14px;">Warteliste (${waitlist.length})</h2>
           ${waitlist.map((b,i)=>`<div class="history-item"><span class="val">${i+1}. ${escapeHtml(b.userName||'Mitglied')}</span>${isBoxOwner()?`<button class="btn-sm btn-ghost" style="width:auto;" onclick="adminRemoveBooking('${b.id}')">Entfernen</button>`:''}</div>`).join('')}
+        ` : ''}
+        ${(isBoxOwner() && lateCancelled.length) ? `
+          <h2 class="small" style="margin-top:14px;">Spätstorno / No-Show (${lateCancelled.length})</h2>
+          ${lateCancelled.map(b=>`<div class="history-item"><span class="val">${escapeHtml(b.userName||'Mitglied')}</span><button class="btn-sm btn-ghost" style="width:auto;" onclick="refundLateCancel('${b.id}')">Kontingent zurückerstatten</button></div>`).join('')}
         ` : ''}
         ${isBoxOwner() ? `
           <div style="margin-top:10px;">
