@@ -612,7 +612,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null,
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -5888,6 +5888,90 @@ function setHistoryNameFilter(name){
   state.tmp.historyNameFilter = name || null;
   render();
 }
+function workoutExerciseIds(w){
+  if(w.format==='for-time') return (w.forTime?.movements||[]).map(m=>m.exerciseId).filter(Boolean);
+  if(w.format==='amrap') return (w.amrap?.movements||[]).map(m=>m.exerciseId).filter(Boolean);
+  if(w.format==='for-load') return w.forLoad?.exerciseId ? [w.forLoad.exerciseId] : [];
+  if(w.format==='run') return [];
+  return (w.movements||[]).map(m=>m.exerciseId).filter(Boolean);
+}
+function workoutWeightsForExercise(w, exerciseId){
+  const weights = [];
+  if(w.format==='for-time') (w.forTime?.movements||[]).forEach(m=>{ if(m.exerciseId===exerciseId && m.weight) weights.push(parseFloat(m.weight)); });
+  else if(w.format==='amrap') (w.amrap?.movements||[]).forEach(m=>{ if(m.exerciseId===exerciseId && m.weight) weights.push(parseFloat(m.weight)); });
+  else if(w.format==='for-load'){ if(w.forLoad?.exerciseId===exerciseId && w.forLoad?.achievedWeight) weights.push(parseFloat(w.forLoad.achievedWeight)); }
+  else (w.movements||[]).forEach(m=>{ if(m.exerciseId===exerciseId) (m.sets||[]).forEach(s=>{ if(s.weight) weights.push(parseFloat(s.weight)); }); });
+  return weights.filter(n=>!isNaN(n));
+}
+function parseWorkoutSearchQuery(query){
+  const q = query.toLowerCase().trim();
+  const exerciseIds = new Set();
+  state.exercises.forEach(e=>{
+    const nameLower = e.name.toLowerCase();
+    if(q.includes(nameLower)){ exerciseIds.add(e.id); return; }
+    const words = nameLower.split(/[\s-]+/).filter(Boolean);
+    if(words.length===1){
+      const re = new RegExp(`\\b${words[0]}s?\\b`, 'i');
+      if(re.test(q)) exerciseIds.add(e.id);
+    }
+  });
+  let nameFilter = null;
+  const knownNames = [...new Set([...CROSSFIT_WODS.map(w=>w.name), ...state.workouts.map(w=>w.name).filter(Boolean)])];
+  knownNames.sort((a,b)=>b.length-a.length);
+  for(const name of knownNames){
+    if(name && q.includes(name.toLowerCase())){ nameFilter = name; break; }
+  }
+  let minWeightKg = null;
+  const weightMatch = q.match(/(?:mindestens|min\.?|über|mehr als|ab)\s*(\d+(?:[.,]\d+)?)\s*kg/i) || q.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+  if(weightMatch) minWeightKg = parseFloat(weightMatch[1].replace(',','.'));
+  let maxTimeSec = null;
+  const timeMatch = q.match(/(?:unter|weniger als|max\.?)\s*(\d+)\s*(?:minuten|min)\b/i);
+  if(timeMatch) maxTimeSec = parseInt(timeMatch[1])*60;
+  return { exerciseIds:[...exerciseIds], nameFilter, minWeightKg, maxTimeSec };
+}
+function searchWorkoutsByQuery(query){
+  const q = (query||'').trim();
+  if(!q) return [];
+  const parsed = parseWorkoutSearchQuery(q);
+  const hasStructuredCriteria = parsed.nameFilter || parsed.exerciseIds.length || parsed.minWeightKg!=null || parsed.maxTimeSec!=null;
+  let results = state.workouts.slice();
+  if(!hasStructuredCriteria){
+    results = results.filter(w=>`${w.name||''} ${w.note||''}`.toLowerCase().includes(q.toLowerCase()));
+    return results.sort((a,b)=>b.date.localeCompare(a.date));
+  }
+  if(parsed.nameFilter) results = results.filter(w=>(w.name||'').toLowerCase()===parsed.nameFilter.toLowerCase());
+  if(parsed.exerciseIds.length){
+    results = results.filter(w=>{
+      const ids = workoutExerciseIds(w);
+      return parsed.exerciseIds.every(id=>ids.includes(id));
+    });
+  }
+  if(parsed.minWeightKg!=null){
+    results = results.filter(w=>{
+      const idsToCheck = parsed.exerciseIds.length ? parsed.exerciseIds : workoutExerciseIds(w);
+      return idsToCheck.some(id=>workoutWeightsForExercise(w,id).some(kg=>kg>=parsed.minWeightKg));
+    });
+  }
+  if(parsed.maxTimeSec!=null){
+    results = results.filter(w=>w.format==='for-time' && w.forTime?.elapsedSec!=null && w.forTime.elapsedSec<=parsed.maxTimeSec);
+  }
+  return results.sort((a,b)=>b.date.localeCompare(a.date));
+}
+function renderWorkoutSearchScreen(){
+  const query = state.tmp.workoutSearchQuery || '';
+  const trimmed = query.trim();
+  const results = trimmed ? searchWorkoutsByQuery(query) : [];
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="note" style="margin-bottom:14px;">Frag in eigenen Worten, z.B. "Workouts mit Thrusters und Pull-ups" oder "Fran mit mindestens 40kg".</div>
+    <div class="card">
+      <div class="field" style="margin-bottom:0;">
+        <input type="text" value="${escapeHtml(query)}" oninput="state.tmp.workoutSearchQuery=this.value; debounceRender('workoutSearchQuery');" placeholder="Was möchtest du wissen?">
+      </div>
+    </div>
+    ${trimmed ? (results.length ? results.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Keine Treffer.</div>`) : ''}
+  `;
+}
 function renderWorkoutHistory(){
   const collapsed = state.tmp.historyCollapsed;
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
@@ -8604,6 +8688,7 @@ function renderProgress(){
   if(section==='times') return renderProgressTimes();
   if(section==='body') return renderProgressBody();
   if(section==='history') return renderProgressHistory();
+  if(section==='search') return renderWorkoutSearchScreen();
   return renderProgressMenu();
 }
 function renderProgressMenu(){
@@ -8614,7 +8699,8 @@ function renderProgressMenu(){
       ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('discipline')">🏅 Consistency</button>` : ''}
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Workout Records</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('history')">📋 Verlauf</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('history')">📋 Verlauf</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('search')">🔍 Suche</button>
     </div>
   `;
 }
