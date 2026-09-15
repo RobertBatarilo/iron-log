@@ -584,14 +584,28 @@ window.addEventListener('online', flushPendingSync);
 
 /* ---------- App State ---------- */
 const DEFAULT_EXERCISES_RAW = [
-  {name:'Back Squat', type:'weighted'}, {name:'Front Squat', type:'weighted'}, {name:'Deadlift', type:'weighted'},
-  {name:'Bench Press', type:'weighted'}, {name:'Overhead Press', type:'weighted'}, {name:'Push Press', type:'weighted'},
-  {name:'Strict Press', type:'weighted'}, {name:'Clean', type:'weighted'}, {name:'Power Clean', type:'weighted'},
-  {name:'Snatch', type:'weighted'}, {name:'Power Snatch', type:'weighted'}, {name:'Clean & Jerk', type:'weighted'},
-  {name:'Thruster', type:'weighted'}, {name:'Pull-up', type:'bodyweight'}, {name:'Bent-over Row', type:'weighted'},
-  {name:'Row', type:'cardio'}, {name:'Air Bike', type:'cardio'}, {name:'Bike', type:'cardio'}, {name:'Ski Erg', type:'cardio'}, {name:'Run', type:'cardio'}
+  {name:'Back Squat', type:'weighted', pattern:'squat'}, {name:'Front Squat', type:'weighted', pattern:'squat'}, {name:'Deadlift', type:'weighted', pattern:'hinge'},
+  {name:'Bench Press', type:'weighted', pattern:'push'}, {name:'Overhead Press', type:'weighted', pattern:'push'}, {name:'Push Press', type:'weighted', pattern:'push'},
+  {name:'Strict Press', type:'weighted', pattern:'push'}, {name:'Clean', type:'weighted', pattern:'olympic'}, {name:'Power Clean', type:'weighted', pattern:'olympic'},
+  {name:'Snatch', type:'weighted', pattern:'olympic'}, {name:'Power Snatch', type:'weighted', pattern:'olympic'}, {name:'Clean & Jerk', type:'weighted', pattern:'olympic'},
+  {name:'Thruster', type:'weighted', pattern:'squat'}, {name:'Pull-up', type:'bodyweight', pattern:'pull'}, {name:'Bent-over Row', type:'weighted', pattern:'pull'},
+  {name:'Row', type:'cardio', pattern:'row'}, {name:'Air Bike', type:'cardio', pattern:'cardio'}, {name:'Bike', type:'cardio', pattern:'cardio'}, {name:'Ski Erg', type:'cardio', pattern:'cardio'}, {name:'Run', type:'cardio', pattern:'run'}
 ];
-const DEFAULT_EXERCISES = DEFAULT_EXERCISES_RAW.map(e => ({id: slug(e.name), name: e.name, custom:false, type: e.type}));
+const MOVEMENT_PATTERN_LABELS = { squat:'Kniebeuge', hinge:'Hüftstreckung', push:'Push', pull:'Pull', olympic:'Olympisches Heben', row:'Rudern', cardio:'Cardio-Maschine', run:'Laufen', core:'Core', gymnastics:'Gymnastics' };
+function guessMovementPattern(name){
+  const n = (name||'').toLowerCase();
+  if(/squat|thruster/.test(n)) return 'squat';
+  if(/deadlift|hinge|kettlebell swing|kb swing/.test(n)) return 'hinge';
+  if(/press|push-?up|dip/.test(n)) return 'push';
+  if(/pull-?up|row(?!ing machine)|chin-?up|lat\s*pull/.test(n)) return 'pull';
+  if(/clean|snatch|jerk/.test(n)) return 'olympic';
+  if(/bike|ski\s*erg/.test(n)) return 'cardio';
+  if(/\brun|jog/.test(n)) return 'run';
+  if(/sit-?up|ab[\s-]?mat|toes-?to-?bar|\bttb\b|plank|core|v-?up/.test(n)) return 'core';
+  if(/muscle-?up|handstand|hspu|rope climb|pistol|double under/.test(n)) return 'gymnastics';
+  return null;
+}
+const DEFAULT_EXERCISES = DEFAULT_EXERCISES_RAW.map(e => ({id: slug(e.name), name: e.name, custom:false, type: e.type, movementPattern: e.pattern}));
 function cloneDefaultExercises(){ return DEFAULT_EXERCISES.map(e=>({...e})); }
 function getExerciseType(ex){ return (ex && ex.type) || 'weighted'; }
 function sortedExercises(){ return state.exercises.slice().sort((a,b)=>a.name.localeCompare(b.name,'de')); }
@@ -1874,7 +1888,7 @@ function guessExerciseType(name){
 function findOrCreateExerciseId(name, type){
   const existing = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(existing) return existing.id;
-  const ex = {id: slug(name), name, custom:true, type: type || guessExerciseType(name)};
+  const ex = {id: slug(name), name, custom:true, type: type || guessExerciseType(name), movementPattern: guessMovementPattern(name)};
   state.exercises.push(ex);
   saveKey('exercises', state.exercises);
   return ex.id;
@@ -2194,6 +2208,19 @@ function migrateStaleExerciseTypes(){
   });
   return changed;
 }
+function migrateMovementPatterns(){
+  let changed = false;
+  state.exercises.forEach(ex=>{
+    if(ex.movementPattern) return;
+    const def = DEFAULT_EXERCISES.find(d=>d.id===ex.id || d.name.toLowerCase()===ex.name.toLowerCase());
+    const pattern = def ? def.movementPattern : guessMovementPattern(ex.name);
+    if(pattern){
+      ex.movementPattern = pattern;
+      changed = true;
+    }
+  });
+  return changed;
+}
 function migrateMovementsForPR(){
   let changed = false;
   state.workouts.forEach(w=>{
@@ -2507,7 +2534,9 @@ async function initApp(){
   state.trainingPlan = trainingPlan;
   if(exercises && exercises.length){
     state.exercises = exercises;
-    if(migrateStaleExerciseTypes()) await saveKey('exercises', state.exercises);
+    let exercisesChanged = migrateStaleExerciseTypes();
+    if(migrateMovementPatterns()) exercisesChanged = true;
+    if(exercisesChanged) await saveKey('exercises', state.exercises);
   } else {
     state.exercises = cloneDefaultExercises();
     await saveKey('exercises', state.exercises);
@@ -6041,6 +6070,44 @@ function setHistoryNameFilter(name){
   state.tmp.historyNameFilter = name || null;
   render();
 }
+function computeMovementPatternLoad(days){
+  const cutoff = (()=>{ const d=new Date(todayStr()+'T00:00:00'); d.setDate(d.getDate()-days); return localDateStr(d); })();
+  const counts = {};
+  state.workouts.filter(w=>w.date>=cutoff).forEach(w=>{
+    const patterns = new Set();
+    if(w.format==='run') patterns.add('run');
+    workoutExerciseIds(w).forEach(exId=>{
+      const ex = state.exercises.find(e=>e.id===exId);
+      if(ex?.movementPattern) patterns.add(ex.movementPattern);
+    });
+    patterns.forEach(p=>{ counts[p] = (counts[p]||0)+1; });
+  });
+  return counts;
+}
+function renderLoadAnalysisScreen(){
+  const days = 14;
+  const counts = computeMovementPatternLoad(days);
+  const maxCount = Math.max(1, ...Object.values(counts));
+  const order = ['squat','hinge','push','pull','olympic','row','cardio','run','core','gymnastics'];
+  const rows = order.filter(p=>counts[p]).sort((a,b)=>counts[b]-counts[a]);
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    <div class="note" style="margin-bottom:14px;">Wie oft welches Bewegungsmuster in den letzten ${days} Tagen vorkam — hilft zu sehen, was zuletzt zu kurz kam.</div>
+    <div class="card">
+      ${rows.length ? rows.map(p=>`
+        <div style="margin-bottom:10px;">
+          <div class="row" style="justify-content:space-between;margin-bottom:4px;">
+            <span class="val">${MOVEMENT_PATTERN_LABELS[p]||p}</span>
+            <span class="note" style="margin:0;">${counts[p]}×</span>
+          </div>
+          <div style="background:var(--iron-700);border-radius:6px;height:8px;overflow:hidden;">
+            <div style="background:var(--chalk-yellow);height:100%;width:${Math.round(counts[p]/maxCount*100)}%;"></div>
+          </div>
+        </div>
+      `).join('') : `<div class="note">Noch keine Trainingsdaten in diesem Zeitraum.</div>`}
+    </div>
+  `;
+}
 function workoutExerciseIds(w){
   if(w.format==='for-time') return (w.forTime?.movements||[]).map(m=>m.exerciseId).filter(Boolean);
   if(w.format==='amrap') return (w.amrap?.movements||[]).map(m=>m.exerciseId).filter(Boolean);
@@ -8842,6 +8909,7 @@ function renderProgress(){
   if(section==='body') return renderProgressBody();
   if(section==='history') return renderProgressHistory();
   if(section==='search') return renderWorkoutSearchScreen();
+  if(section==='load') return renderLoadAnalysisScreen();
   return renderProgressMenu();
 }
 function renderProgressMenu(){
@@ -8853,7 +8921,8 @@ function renderProgressMenu(){
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Workout Records</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('history')">📋 Verlauf</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('search')">🔍 Suche</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('search')">🔍 Suche</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('load')">📊 Belastung</button>
     </div>
   `;
 }
