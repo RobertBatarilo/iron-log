@@ -27,10 +27,12 @@ routerAdd("POST", "/ai-photo-parse", (e) => {
   }
   if (!hasPro) return e.json(403, { ok: false, error: "Pro-Zugang erforderlich" });
 
-  const data = new DynamicModel({ imageBase64: "", mimeType: "" });
+  const data = new DynamicModel({ imageBase64: "", mimeType: "", text: "" });
   e.bindBody(data);
-  if (!data.imageBase64 || !data.mimeType) {
-    return e.json(400, { ok: false, error: "Bild fehlt" });
+  const hasImage = !!(data.imageBase64 && data.mimeType);
+  const hasText = !!(data.text && data.text.trim());
+  if (!hasImage && !hasText) {
+    return e.json(400, { ok: false, error: "Bild oder Text fehlt" });
   }
 
   try {
@@ -41,7 +43,7 @@ routerAdd("POST", "/ai-photo-parse", (e) => {
         "Content-Type": "application/json",
         "X-Internal-Secret": aiPhotoCfg.aiPhotoInternalSecret
       },
-      body: JSON.stringify({ imageBase64: data.imageBase64, mimeType: data.mimeType })
+      body: JSON.stringify({ imageBase64: data.imageBase64, mimeType: data.mimeType, text: data.text })
     });
     const parsed = JSON.parse(res.raw || "{}");
     return e.json(res.statusCode || 502, parsed);

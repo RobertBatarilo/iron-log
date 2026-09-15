@@ -90,15 +90,22 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(400); res.end('invalid json'); return;
   }
 
-  const { imageBase64, mimeType } = payload || {};
-  if (!imageBase64 || typeof imageBase64 !== 'string' || !mimeType || !/^image\//.test(mimeType)) {
+  const { imageBase64, mimeType, text } = payload || {};
+  const hasImage = !!imageBase64 && typeof imageBase64 === 'string' && !!mimeType && /^image\//.test(mimeType);
+  const hasText = !!text && typeof text === 'string' && text.trim().length > 0;
+  if (!hasImage && !hasText) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'missing imageBase64/mimeType' }));
+    res.end(JSON.stringify({ ok: false, error: 'missing imageBase64/mimeType or text' }));
     return;
   }
-  if (imageBase64.length > MAX_BASE64_LEN) {
+  if (hasImage && imageBase64.length > MAX_BASE64_LEN) {
     res.writeHead(413, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'image too large' }));
+    return;
+  }
+  if (hasText && text.length > 20000) {
+    res.writeHead(413, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'text too large' }));
     return;
   }
 
@@ -117,10 +124,14 @@ const server = http.createServer(async (req, res) => {
         system: SYSTEM_PROMPT,
         messages: [{
           role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
-            { type: 'text', text: 'Lies dieses Workout-Foto aus und gib das JSON gemaess Systemanweisung zurueck.' }
-          ]
+          content: hasImage
+            ? [
+                { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
+                { type: 'text', text: 'Lies dieses Workout-Foto aus und gib das JSON gemaess Systemanweisung zurueck.' }
+              ]
+            : [
+                { type: 'text', text: `Lies diesen (kopierten) Workout-Text aus und gib das JSON gemaess Systemanweisung zurueck:\n\n${text}` }
+              ]
         }]
       })
     });

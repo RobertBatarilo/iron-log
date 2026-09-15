@@ -2934,9 +2934,10 @@ function renderFormatSelector(){
       <button class="btn ${menu==='done'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('done')">Done</button>
       <button class="btn ${state.tmp.wodFormat==='run'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="selectRunFormat()">Run</button>
       <button class="btn ${menu==='timer'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('timer')">Timer</button>
+      <button class="btn ${menu==='quick'?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setWorkoutMenu('quick')">⚡ Schnell-Eingabe</button>
     </div>`;
 
-  const sectionLabels = {formats:'Formate', girls:'Girls', heroes:'Hero WODs', done:'Done'};
+  const sectionLabels = {formats:'Formate', girls:'Girls', heroes:'Hero WODs', done:'Done', quick:'Schnell-Eingabe'};
   let subContent = '';
   if(menu==='formats'){
     const current = formats.find(f=>f.id===state.tmp.wodFormat);
@@ -2959,6 +2960,13 @@ function renderFormatSelector(){
       </div>
       <div class="note" style="margin-top:8px;">Lädt die zuletzt getrackten Werte als neues Workout zum Anpassen.</div>` : `
       <div class="note">Noch keine benannten Workouts gespeichert.</div>`;
+  } else if(menu==='quick'){
+    subContent = `
+      <div class="field"><label>Ergebnis in einem Satz</label>
+        <input type="text" id="quickEntryText" placeholder='z.B. "Fran, 40kg, 7:58"'>
+      </div>
+      <button class="btn btn-primary" onclick="applyQuickEntry()">Übernehmen</button>
+      <div class="note" style="margin-top:8px;">Erkennt bekannte Benchmark-WODs (Girls/Heros) samt Gewicht und Zeit/Runden — alles Weitere landet als Notiz.</div>`;
   }
   const subSection = subContent ? `
     <hr class="hairline" style="margin:14px 0 10px;">
@@ -3109,6 +3117,19 @@ async function runAiParseOnSource(source){
     render();
   }
 }
+async function runAiTextParse(text){
+  const pi = state.tmp.photoImport;
+  pi.loading = true; pi.error = '';
+  render();
+  try{
+    const result = await pb.send('/ai-photo-parse', { method:'POST', body:{ text } });
+    if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Erkennung fehlgeschlagen');
+    applyParsedWorkout(result);
+  } catch(err){
+    pi.loading = false;
+    applyParsedWorkout(text);
+  }
+}
 let _cropDrag = null;
 const CROP_MIN_GAP = 0.05;
 function startCropDrag(event, which){
@@ -3171,6 +3192,10 @@ function confirmPhotoImport(){
   const pi = state.tmp.photoImport;
   const text = (pi.rawText || '').trim();
   if(!text){ showToast('Bitte Text eingeben oder Foto wählen'); return; }
+  if(pi.aiMode && state.profile?.hasPro){
+    runAiTextParse(text);
+    return;
+  }
   const { lines, options } = detectPhotoImportOptions(text);
   if(options.length >= 2){
     pi.optionLines = lines;
@@ -3244,6 +3269,7 @@ function renderPhotoImportModal(){
     <div class="field"><label>Erkannter Text (bitte prüfen und korrigieren)</label>
       <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
     </div>
+    ${pi.loading ? `<div class="note">KI analysiert deinen Text …</div>` : ''}
   `;
   const cropBody = `
     <div class="field"><label>Trainingsbereich markieren — oben/unten ziehen</label></div>
@@ -3278,7 +3304,7 @@ function renderPhotoImportModal(){
   const body = pi.stage==='pick' ? pickBody : pi.stage==='crop' ? cropBody : pi.stage==='chooseOption' ? chooseOptionBody : reviewBody;
   const footer = pi.stage==='chooseOption'
     ? `<button class="btn btn-ghost" onclick="state.tmp.photoImport.stage='review'; render();">Zurück</button>`
-    : (pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : '');
+    : (pi.stage==='review' ? `<button class="btn btn-primary" ${pi.loading?'disabled':''} onclick="confirmPhotoImport()">Übernehmen</button>` : '');
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closePhotoImportModal()">
       <div class="modal-box">
@@ -3830,6 +3856,70 @@ function applyParsedWorkout(input){
   state.tmp.photoImport = null;
   showToast('Aus Foto übernommen — bitte kurz prüfen 👀');
   render();
+}
+function parseQuickEntryText(text){
+  const raw = (text||'').trim();
+  if(!raw) return null;
+  const commaParts = raw.split(',').map(s=>s.trim()).filter(Boolean);
+  const nameCandidate = commaParts[0] || raw.split(/\s+/).slice(0,2).join(' ');
+  let bestWod = null, bestDist = Infinity;
+  CROSSFIT_WODS.forEach(w=>{
+    const dist = levenshtein(nameCandidate.toLowerCase(), w.name.toLowerCase());
+    const threshold = Math.max(1, Math.round(w.name.length*0.3));
+    if(dist<=threshold && dist<bestDist){ bestWod = w; bestDist = dist; }
+  });
+  let remainder = raw;
+  if(bestWod){
+    remainder = remainder.replace(new RegExp(bestWod.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'i'), '').replace(/^,\s*/, '').trim();
+  }
+  const weightMatch = remainder.match(/(\d+(?:[.,]\d+)?)\s*(?:kg|kilo)/i);
+  const weightKg = weightMatch ? parseFloat(weightMatch[1].replace(',','.')) : null;
+  if(weightMatch) remainder = remainder.replace(weightMatch[0], '').trim();
+  const timeMatch = remainder.match(/\b(\d{1,2}:\d{2})\b/);
+  const elapsedSec = timeMatch ? parseClockToSec(timeMatch[1]) : null;
+  if(timeMatch) remainder = remainder.replace(timeMatch[0], '').trim();
+  const roundsMatch = remainder.match(/(\d+)\s*(?:runden|rounds)/i);
+  const rounds = roundsMatch ? parseInt(roundsMatch[1]) : null;
+  if(roundsMatch) remainder = remainder.replace(roundsMatch[0], '').trim();
+  remainder = remainder.replace(/^[,.\s]+|[,.\s]+$/g, '').trim();
+  return { wod: bestWod, weightKg, elapsedSec, rounds, note: remainder };
+}
+function applyQuickEntry(){
+  const text = document.getElementById('quickEntryText')?.value || '';
+  const parsed = parseQuickEntryText(text);
+  if(!parsed || !parsed.wod){ showToast('WOD nicht erkannt — bitte manuell eintragen'); return; }
+  loadBenchmarkWod(parsed.wod.id);
+  if(parsed.wod.format==='amrap'){
+    const b = state.tmp.amrapBuilder;
+    if(parsed.weightKg!=null){
+      b.movements.forEach(m=>{
+        const ex = state.exercises.find(e=>e.id===m.exerciseId);
+        if(ex && getExerciseType(ex)==='weighted') m.weight = String(parsed.weightKg);
+      });
+    }
+    if(parsed.rounds!=null){
+      b.roundsCompleted = parsed.rounds;
+      b.phase = 'summary';
+    }
+    if(parsed.note) state.tmp.wodNote = parsed.note;
+  } else {
+    const b = state.tmp.forTimeBuilder;
+    if(parsed.weightKg!=null){
+      b.movements.forEach(m=>{
+        const ex = state.exercises.find(e=>e.id===m.exerciseId);
+        if(ex && getExerciseType(ex)==='weighted') m.weight = String(parsed.weightKg);
+      });
+    }
+    if(parsed.elapsedSec!=null){
+      b.finalElapsedSec = parsed.elapsedSec;
+      b.roundsCompleted = parseInt(b.rounds)||1;
+      b.phase = 'summary';
+    }
+    if(parsed.note) state.tmp.wodNote = parsed.note;
+  }
+  state.tmp.workoutMenu = 'formats';
+  render();
+  window.scrollTo(0,0);
 }
 function loadBenchmarkWod(wodId){
   if(!wodId) return;
