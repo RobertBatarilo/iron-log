@@ -76,6 +76,7 @@
     outline-offset:1px;
     border-color:var(--chalk-yellow);
   }
+  textarea{ resize:none; }
   label{
     display:block;
     font-size:12px;
@@ -4293,11 +4294,9 @@ async function saveDisplayName(){
 async function saveBoxSettings(){
   if(!isBoxOwner()) return;
   const name = (document.getElementById('boxNameInput')?.value || '').trim();
-  const cutoffRaw = document.getElementById('boxCutoffHoursInput')?.value;
-  const cancellationCutoffHours = cutoffRaw==='' || cutoffRaw==null ? null : Number(cutoffRaw);
   if(!name){ showToast('Bitte einen Namen eingeben'); return; }
   try{
-    await pb.collection('boxes').update(state.box.membership.box, {name, cancellationCutoffHours});
+    await pb.collection('boxes').update(state.box.membership.box, {name});
     showToast('Box-Einstellungen gespeichert');
     await loadBoxData();
   }catch(e){
@@ -4938,8 +4937,8 @@ function classInstanceStatus(instance){
   return {pill, mine, spotsLeft, activeCount};
 }
 function cancellationDeadline(instance){
-  const box = state.box.membership?.expand?.box;
-  const cutoffHours = (box && box.cancellationCutoffHours != null && box.cancellationCutoffHours !== '') ? Number(box.cancellationCutoffHours) : 3;
+  const slot = state.box.scheduleSlots.find(s=>s.id===instance.scheduleSlot);
+  const cutoffHours = (slot && slot.cancellationCutoffHours != null && slot.cancellationCutoffHours !== '') ? Number(slot.cancellationCutoffHours) : 3;
   const start = new Date(instance.date+'T'+(instance.startTime||'00:00')+':00');
   return new Date(start.getTime() - cutoffHours*3600*1000);
 }
@@ -5469,16 +5468,33 @@ async function cancelMembershipPlan(planId, membershipId){
     showToast('Aktion fehlgeschlagen');
   }
 }
-function renderBoxMembersScreen(){
+function renderBoxMembersScreen(box){
   if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
+  const pending = state.box.pendingMemberships;
   const search = (state.tmp.mpMemberSearch||'').toLowerCase();
   const list = state.tmp.mpMembersList;
   const filtered = list ? list.filter(m=>{
     const name = m.expand?.user?.name || m.userEmail || m.expand?.user?.email || '';
     return !search || name.toLowerCase().includes(search);
   }) : null;
+  const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
+  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
+    ${pending.length ? `
+      <div class="card">
+        <h2 class="small">Beitrittsanfragen</h2>
+        ${pending.map(m=>`
+          <div class="history-item">
+            <span class="val">${escapeHtml(m.userEmail||m.expand?.user?.email||'Nutzer')}</span>
+            <span>
+              <button class="btn-sm btn-primary" style="width:auto;" onclick="approveMembership('${m.id}',true)">Annehmen</button>
+              <button class="btn-sm btn-ghost" style="width:auto;" onclick="approveMembership('${m.id}',false)">Ablehnen</button>
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
     <div class="card">
       <h2>Mitglieder & Kontingente</h2>
       <div class="field" style="margin-bottom:0;">
@@ -5494,6 +5510,18 @@ function renderBoxMembersScreen(){
         <span class="note" style="margin:0;">${m.role==='owner'?'Coach':'Athlet'}</span>
       </div>
     `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
+      ${state.tmp.inviteLinkOpen ? `
+        <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
+        <div class="row" style="gap:10px;">
+          <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
+          <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
+          <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
+        </div>
+        <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+      ` : ''}
+    </div>
   `;
 }
 function renderBoxMemberDetail(){
@@ -5568,17 +5596,19 @@ async function saveScheduleSlot(id){
   const capacity = parseInt(document.getElementById('slotCapacity').value) || 12;
   const minRaw = (document.getElementById('slotMinParticipants')?.value || '').trim();
   const minParticipants = minRaw==='' ? null : parseInt(minRaw);
+  const cutoffRaw = (document.getElementById('slotCancellationCutoffHours')?.value || '').trim();
+  const cancellationCutoffHours = cutoffRaw==='' ? null : parseInt(cutoffRaw);
   if(!startTime || !label){ showToast('Bitte Uhrzeit und Bezeichnung angeben'); return; }
   const boxId = state.box.membership.box;
   try{
     if(id){
       const weekday = parseInt(document.getElementById('slotWeekday').value);
-      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
+      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
     } else {
       const weekdays = Array.from(document.querySelectorAll('.slotWeekdayCheck:checked')).map(el=>parseInt(el.value));
       if(!weekdays.length){ showToast('Bitte mindestens einen Wochentag wählen'); return; }
       for(const weekday of weekdays){
-        await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants});
+        await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
       }
     }
     state.tmp.boxScheduleEditId = null;
@@ -5767,6 +5797,7 @@ function renderScheduleSlotForm(s, editId){
         <div class="field"><label>Kapazität</label><input type="number" step="1" id="slotCapacity" value="${s.capacity||12}"></div>
       </div>
       <div class="field"><label>Mindestteilnehmer (optional)</label><input type="number" step="1" min="0" id="slotMinParticipants" value="${s.minParticipants ?? ''}"></div>
+      <div class="field"><label>Stornofrist (Stunden vor Kursbeginn, optional)</label><input type="number" step="1" min="0" id="slotCancellationCutoffHours" value="${s.cancellationCutoffHours ?? ''}" placeholder="Standard: 3"></div>
       <div class="row">
         <button class="btn btn-ghost" onclick="state.tmp.boxScheduleEditId=null; render();">Abbrechen</button>
         <button class="btn btn-primary" onclick="saveScheduleSlot('${editId==='new'?'':editId}')">Speichern</button>
@@ -5824,9 +5855,6 @@ function renderBoxIdentityCard(box){
         ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
         <div class="field"><label>Box-Name</label>
           <input type="text" id="boxNameInput" value="${escapeHtml(box?.name||'')}">
-        </div>
-        <div class="field"><label>Stornofrist (Stunden vor Kursbeginn)</label>
-          <input type="number" step="1" min="0" id="boxCutoffHoursInput" value="${box?.cancellationCutoffHours ?? 3}">
         </div>
         <button class="btn btn-primary" onclick="saveBoxSettings()">Speichern</button>
       ` : ''}
@@ -5958,30 +5986,14 @@ function renderCoachLeaderboardCard(){
   `;
 }
 function renderBoxHomeAdmin(box){
-  if(state.tmp.mpMembersOpen) return renderBoxMembersScreen();
+  if(state.tmp.mpMembersOpen) return renderBoxMembersScreen(box);
   const pending = state.box.pendingMemberships;
-  const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
-  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
   return `
     ${renderBoxIdentityCard(box)}
-    ${pending.length ? `
-      <div class="card">
-        <h2 class="small">Beitrittsanfragen</h2>
-        ${pending.map(m=>`
-          <div class="history-item">
-            <span class="val">${escapeHtml(m.userEmail||m.expand?.user?.email||'Nutzer')}</span>
-            <span>
-              <button class="btn-sm btn-primary" style="width:auto;" onclick="approveMembership('${m.id}',true)">Annehmen</button>
-              <button class="btn-sm btn-ghost" style="width:auto;" onclick="approveMembership('${m.id}',false)">Ablehnen</button>
-            </span>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
     ${renderCoachLeaderboardCard()}
     <div class="card">
-      <h2 class="small">Mitglieder & Kontingente</h2>
-      <div class="note" style="margin-bottom:10px;">Buchungs-Kontingente pro Athlet zuweisen, kündigen oder kostenlos gutschreiben.</div>
+      <h2 class="small">Mitglieder</h2>
+      <div class="note" style="margin-bottom:10px;">${pending.length ? `${pending.length} offene Beitrittsanfrage${pending.length===1?'':'n'} · ` : ''}Kontingente zuweisen, Beitrittsanfragen bestätigen, Einladungslink teilen.</div>
       <button class="btn btn-ghost" onclick="openBoxMembersScreen()">Verwalten →</button>
     </div>
     <div class="card">
@@ -5989,18 +6001,6 @@ function renderBoxHomeAdmin(box){
       <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
       <div class="field"><textarea id="announceText" rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen"></textarea></div>
       <button class="btn btn-primary" onclick="sendBoxAnnouncement()">📣 Ankündigung senden</button>
-    </div>
-    <div class="card">
-      <h2 class="small" style="cursor:pointer;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
-      ${state.tmp.inviteLinkOpen ? `
-        <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
-        <div class="row" style="gap:10px;">
-          <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
-          <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
-          <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
-        </div>
-        <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
-      ` : ''}
     </div>
   `;
 }
@@ -6151,7 +6151,7 @@ function renderBoxScheduleTab(){
   const editorCard = isBoxAdminView() ? (()=>{
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null} : editing;
+    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
     return `
       <div class="card">
         <h2 class="small">Termine verwalten</h2>
