@@ -14,17 +14,9 @@ routerAdd("POST", "/ai-photo-parse", (e) => {
   const user = e.auth;
   if (!user) return e.json(401, { ok: false, error: "unauthorized" });
 
-  let hasPro = !!(user.getBool("isAppAdmin") || user.getBool("isProStandalone"));
-  if (!hasPro) {
-    const memberships = $app.findRecordsByFilter(
-      "memberships",
-      `user = {:uid} && status = "active"`,
-      "",
-      1, 0,
-      { uid: user.id }
-    );
-    hasPro = memberships.length > 0;
-  }
+  // Wichtig: reine aktive Box-Mitgliedschaft gewaehrt seit dem Rollen-Update KEINEN
+  // automatischen KI-Zugang mehr - nur explizit gesetztes isPro (oder isAppAdmin).
+  const hasPro = !!(user.getBool("isAppAdmin") || user.getBool("isPro"));
   if (!hasPro) return e.json(403, { ok: false, error: "Pro-Zugang erforderlich" });
 
   const data = new DynamicModel({ imageBase64: "", mimeType: "", text: "" });

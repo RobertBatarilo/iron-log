@@ -284,6 +284,13 @@
   .wod-card .moves{margin-top:6px;font-size:13px;}
   .wod-card .moves div{display:flex;justify-content:space-between;padding:3px 0;}
   .wod-card--box{ border-left-color:var(--accent-emom); background:linear-gradient(90deg, rgba(91,141,239,0.08), rgba(91,141,239,0.08)), var(--graphite-800); }
+  .invite-box{
+    border-radius:10px;
+    padding:14px;
+    margin-top:12px;
+    background:linear-gradient(135deg, rgba(232,185,63,0.12), rgba(232,185,63,0.04)), var(--graphite-800);
+    border:1px solid var(--chalk-yellow);
+  }
   .chip{
     display:inline-block;
     font-size:10px;
@@ -669,7 +676,8 @@ function defaultTmp(){
     socialOpenCommentsPostId:null, socialCommentDraft:{},
     mpPickerCandidates:null, mpPickerConfirmFn:null, mpPickerContext:null,
     mpMembersOpen:false, mpMembersList:null, mpMemberSearch:'',
-    mpMemberDetailId:null, mpMemberDetailPlans:null, mpMemberDetailBookings:null, mpNewPlanType:'recurring'
+    mpMemberDetailId:null, mpMemberDetailPlans:null, mpMemberDetailBookings:null, mpNewPlanType:'recurring',
+    mpArchivedPlansOpen:false, mpAllUsersMode:false, mpMemberDetailUser:null
   };
 }
 
@@ -4173,6 +4181,11 @@ function isBoxOwner(){
 function isBoxAdminView(){
   return isBoxOwner() && state.profile?.boxViewMode==='box';
 }
+function userTierLabel(user, hasActiveBox){
+  if(user.isAppAdmin) return 'Admin';
+  if(user.isPro) return hasActiveBox ? 'Pro (mit Box)' : 'Pro (ohne Box)';
+  return hasActiveBox ? 'Athlet (mit Box)' : 'Athlet (ohne Box)';
+}
 function setBoxViewMode(mode){
   state.profile.boxViewMode = mode;
   saveKey('profile', state.profile);
@@ -4199,7 +4212,7 @@ async function loadBoxData(){
       || memberships.find(m=>m.status==='pending')
       || null;
     state.box.membership = mine;
-    state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isProStandalone || memberships.some(m=>m.status==='active'));
+    state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isPro);
     if(mine && mine.status==='active'){
       const boxId = mine.box;
       const [slots, allAttended, membershipPlans] = await Promise.all([
@@ -4837,6 +4850,13 @@ function computePlanQuota(plan, bookings){
   const remaining = usable ? Math.max(0, grant-used) : 0;
   return {usable, grant, used, remaining};
 }
+function isPlanArchived(plan, bookings){
+  if(plan.status==='cancelled') return true;
+  if(plan.type!=='one-time') return false;
+  const notStartedYet = plan.startDate && plan.startDate.slice(0,10) > todayStr();
+  if(notStartedYet) return false;
+  return computePlanQuota(plan, bookings).remaining===0;
+}
 function getNextUpcomingBooking(bookings){
   const todayD = todayStr();
   const upcoming = bookings.filter(b=>(b.status==='reserved'||b.status==='attended') && b.expand?.classInstance?.date>=todayD);
@@ -5415,6 +5435,8 @@ function openBoxMemberDetail(membershipId){
   state.tmp.mpMemberDetailId = membershipId;
   state.tmp.mpMemberDetailPlans = null;
   state.tmp.mpMemberDetailBookings = null;
+  state.tmp.mpMemberDetailUser = null;
+  state.tmp.mpArchivedPlansOpen = false;
   render();
   loadBoxMemberDetail(membershipId);
 }
@@ -5426,12 +5448,15 @@ async function loadBoxMemberDetail(membershipId){
   const m = (state.tmp.mpMembersList||[]).find(x=>x.id===membershipId);
   if(!m) return;
   try{
-    const [plans, bookings] = await Promise.all([
+    const tasks = [
       pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:membershipId}), sort:'-created'}),
       pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && user = {:u}', {box:state.box.membership.box, u:m.user}), expand:'classInstance', requestKey:null})
-    ]);
+    ];
+    if(pb.authStore.record?.isAppAdmin) tasks.push(pb.collection('users').getOne(m.user));
+    const [plans, bookings, user] = await Promise.all(tasks);
     state.tmp.mpMemberDetailPlans = plans;
     state.tmp.mpMemberDetailBookings = bookings;
+    if(user) state.tmp.mpMemberDetailUser = user;
   }catch(e){
     state.tmp.mpMemberDetailPlans = [];
     state.tmp.mpMemberDetailBookings = [];
@@ -5468,8 +5493,59 @@ async function cancelMembershipPlan(planId, membershipId){
     showToast('Aktion fehlgeschlagen');
   }
 }
+function setMpAllUsersMode(on){
+  state.tmp.mpAllUsersMode = on;
+  state.tmp.adminSelectedUserId = null;
+  if(on){
+    state.tmp.adminSearch = '';
+    state.tmp.adminUsers = null;
+    render();
+    loadAdminUsers();
+  } else {
+    render();
+  }
+}
 function renderBoxMembersScreen(box){
+  if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
+  const isAdmin = !!pb.authStore.record?.isAppAdmin;
+  const toggleHtml = isAdmin ? `
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn ${!state.tmp.mpAllUsersMode?'btn-primary':'btn-ghost'}" onclick="setMpAllUsersMode(false)">Diese Box</button>
+      <button class="btn ${state.tmp.mpAllUsersMode?'btn-primary':'btn-ghost'}" onclick="setMpAllUsersMode(true)">Alle Nutzer</button>
+    </div>
+  ` : '';
+  if(isAdmin && state.tmp.mpAllUsersMode){
+    const users = state.tmp.adminUsers;
+    const q = (state.tmp.adminSearch||'').toLowerCase().trim();
+    const filteredUsers = users==null ? null : (q ? users.filter(u=>(u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)) : users);
+    return `
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
+      ${toggleHtml}
+      <div class="card">
+        <h2>Alle Nutzer</h2>
+        <div class="field" style="margin-bottom:0;">
+          <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
+        </div>
+      </div>
+      ${users===null ? `<div class="note">Lädt …</div>` : (filteredUsers.length ? filteredUsers.map(u=>`
+        <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
+          <span class="row" style="align-items:center;gap:10px;width:auto;flex:1;">
+            <span class="box-avatar" style="width:32px;height:32px;font-size:12px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
+            <span style="display:flex;flex-direction:column;overflow:hidden;">
+              <span class="val">${escapeHtml(u.name||'—')}</span>
+              <span class="note" style="margin:0;">${escapeHtml(u.email||'')}</span>
+            </span>
+          </span>
+          <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
+            ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
+            ${u.isPro?'<span class="chip">Pro</span>':''}
+            ${u.disabled?'<span class="chip">Deaktiviert</span>':''}
+          </span>
+        </div>
+      `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
+    `;
+  }
   const pending = state.box.pendingMemberships;
   const search = (state.tmp.mpMemberSearch||'').toLowerCase();
   const list = state.tmp.mpMembersList;
@@ -5481,6 +5557,7 @@ function renderBoxMembersScreen(box){
   const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
+    ${toggleHtml}
     ${pending.length ? `
       <div class="card">
         <h2 class="small">Beitrittsanfragen</h2>
@@ -5500,6 +5577,18 @@ function renderBoxMembersScreen(box){
       <div class="field" style="margin-bottom:0;">
         <input type="text" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
       </div>
+      <div class="invite-box">
+        <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
+        ${state.tmp.inviteLinkOpen ? `
+          <div class="note" style="margin:10px 0;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
+          <div class="row" style="gap:10px;">
+            <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
+            <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
+            <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
+          </div>
+          <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+        ` : ''}
+      </div>
     </div>
     ${list===null ? `<div class="note">Lädt …</div>` : (filtered.length ? filtered.map(m=>`
       <div class="history-item" style="cursor:pointer;" onclick="openBoxMemberDetail('${m.id}')">
@@ -5510,18 +5599,6 @@ function renderBoxMembersScreen(box){
         <span class="note" style="margin:0;">${m.role==='owner'?'Coach':'Athlet'}</span>
       </div>
     `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
-    <div class="card">
-      <h2 class="small" style="cursor:pointer;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
-      ${state.tmp.inviteLinkOpen ? `
-        <div class="note" style="margin-bottom:10px;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
-        <div class="row" style="gap:10px;">
-          <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
-          <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
-          <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
-        </div>
-        <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
-      ` : ''}
-    </div>
   `;
 }
 function renderBoxMemberDetail(){
@@ -5530,22 +5607,30 @@ function renderBoxMemberDetail(){
   const name = m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied';
   const plans = state.tmp.mpMemberDetailPlans;
   const bookings = state.tmp.mpMemberDetailBookings || [];
+  const activePlans = plans===null ? null : plans.filter(p=>!isPlanArchived(p, bookings));
+  const archivedPlans = plans===null ? [] : plans.filter(p=>isPlanArchived(p, bookings));
+  const u = state.tmp.mpMemberDetailUser;
+  const renderPlanRow = (p) => {
+    const q = computePlanQuota(p, bookings);
+    return `
+    <div class="history-item">
+      <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <span class="val">${planLabel(p)}${p.status==='cancelled'?' (gekündigt)':''}</span>
+        <span class="note" style="margin:0;">${q.remaining} / ${q.grant} übrig${p.note?' · '+escapeHtml(p.note):''}</span>
+      </span>
+      ${p.status==='active' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="cancelMembershipPlan('${p.id}','${m.id}')">Kündigen</button>` : ''}
+    </div>`;
+  };
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMemberDetail()">← Zurück</button>
     <div class="card">
       <h2>${escapeHtml(name)}</h2>
       <h2 class="small" style="margin-top:14px;">Kontingente</h2>
-      ${plans===null ? `<div class="note">Lädt …</div>` : (plans.length ? plans.map(p=>{
-        const q = computePlanQuota(p, bookings);
-        return `
-        <div class="history-item">
-          <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
-            <span class="val">${planLabel(p)}${p.status==='cancelled'?' (gekündigt)':''}</span>
-            <span class="note" style="margin:0;">${q.remaining} / ${q.grant} übrig${p.note?' · '+escapeHtml(p.note):''}</span>
-          </span>
-          ${p.status==='active' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="cancelMembershipPlan('${p.id}','${m.id}')">Kündigen</button>` : ''}
-        </div>`;
-      }).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
+      ${activePlans===null ? `<div class="note">Lädt …</div>` : (activePlans.length ? activePlans.map(renderPlanRow).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
+      ${archivedPlans.length ? `
+        <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpArchivedPlansOpen=!state.tmp.mpArchivedPlansOpen; render();">Abgelaufene Buchungen (${archivedPlans.length}) ${state.tmp.mpArchivedPlansOpen?'▾':'▸'}</h2>
+        ${state.tmp.mpArchivedPlansOpen ? archivedPlans.map(renderPlanRow).join('') : ''}
+      ` : ''}
       <h2 class="small" style="margin-top:14px;">Kontingent anlegen</h2>
       <div class="field"><label>Typ</label>
         <select id="mpNewType">
@@ -5562,6 +5647,30 @@ function renderBoxMemberDetail(){
       <div class="field"><label>Menge</label><input type="number" id="mpGiftAmount" min="1" value="1"></div>
       <div class="field"><label>Grund (optional)</label><input type="text" id="mpGiftNote" placeholder="z.B. Kulanz — Notfall"></div>
       <button class="btn btn-ghost" onclick="grantGoodwillCredit('${m.id}')">Guthaben schenken</button>
+      ${u ? `
+        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+        <h2 class="small">Rolle & Zugang · ${userTierLabel(u, true)}</h2>
+        <div class="row" style="align-items:center;gap:14px;margin-bottom:10px;">
+          <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
+          <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}> Pro</label>
+        </div>
+        <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
+        <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
+        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+        <div class="note" style="margin-bottom:10px;">Konto-Status</div>
+        <button class="btn ${u.disabled?'btn-primary':'btn-ghost'}" onclick="toggleAdminUserDisabled('${u.id}', ${!u.disabled})">${u.disabled?'Wieder aktivieren':'Deaktivieren'}</button>
+        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+        <div class="note" style="color:var(--plate-red);margin-bottom:10px;">⚠️ Achtung! Diesen Löschvorgang nur durchführen, wenn die Person es ausdrücklich wünscht. Dieser Löschvorgang kann nicht mehr rückgängig gemacht werden.</div>
+        ${state.tmp.adminDeleteConfirmId===u.id ? `
+          <div class="field"><label>Zur Bestätigung eingeben: „ja, bitte alle Daten unwiderruflich löschen."</label>
+            <input type="text" id="adminDeleteConfirmText" placeholder="ja, bitte alle Daten unwiderruflich löschen.">
+          </div>
+          <button class="btn btn-danger" onclick="confirmAdminUserDelete('${u.id}')">Endgültig löschen</button>
+          <button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelAdminUserDelete()">Abbrechen</button>
+        ` : `
+          <button class="btn btn-danger" onclick="startAdminUserDelete('${u.id}')">Profil löschen (DSGVO)</button>
+        `}
+      ` : ''}
     </div>
   `;
 }
@@ -9518,7 +9627,6 @@ function renderProfile(){
   if(section==='notifications') return renderProfileNotificationsPage();
   if(section==='appsettings') return renderProfileAppSettings();
   if(section==='data') return renderProfileData();
-  if(section==='admin') return renderAdminUsersScreen();
   if(section==='exercises') return renderMyExercisesScreen();
   return renderProfileMenu();
 }
@@ -9579,17 +9687,11 @@ function renderProfileMenu(){
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
-      ${pb.authStore.record?.isAppAdmin ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-top:10px;" onclick="setProfileSection('admin')">🛡️ Mitglieder-Administration</button>` : ''}
     </div>
   `;
 }
 function setProfileSection(s){
   state.tmp.profileSection = s;
-  if(s==='admin'){
-    state.tmp.adminSearch = '';
-    state.tmp.adminSelectedUserId = null;
-    loadAdminUsers();
-  }
   render();
 }
 async function loadAdminUsers(){
@@ -9611,12 +9713,13 @@ function closeAdminUserDetail(){
 }
 async function saveAdminUserFlags(userId){
   const isAppAdmin = !!document.getElementById(`adminFlag_${userId}`)?.checked;
-  const isProStandalone = !!document.getElementById(`proFlag_${userId}`)?.checked;
+  const isPro = !!document.getElementById(`proFlag_${userId}`)?.checked;
   const title = document.getElementById(`titleField_${userId}`)?.value || '';
   try{
-    await pb.collection('users').update(userId, { isAppAdmin, isProStandalone, title });
+    await pb.collection('users').update(userId, { isAppAdmin, isPro, title });
     showToast('Gespeichert');
     await loadAdminUsers();
+    if(state.tmp.mpMemberDetailId){ state.tmp.mpMemberDetailUser = await pb.collection('users').getOne(userId); render(); }
   }catch(e){
     showToast('Speichern fehlgeschlagen');
   }
@@ -9626,6 +9729,7 @@ async function toggleAdminUserDisabled(userId, disabled){
     await pb.collection('users').update(userId, { disabled });
     showToast(disabled ? 'Konto deaktiviert' : 'Konto wieder aktiviert');
     await loadAdminUsers();
+    if(state.tmp.mpMemberDetailId){ state.tmp.mpMemberDetailUser = await pb.collection('users').getOne(userId); render(); }
   }catch(e){
     showToast('Aktion fehlgeschlagen');
   }
@@ -9658,40 +9762,13 @@ async function confirmAdminUserDelete(userId){
     state.tmp.adminDeleteConfirmId = null;
     state.tmp.adminSelectedUserId = null;
     await loadAdminUsers();
+    if(state.tmp.mpMemberDetailId){
+      closeBoxMemberDetail();
+      await loadBoxMembersList();
+    }
   }catch(e){
     showToast('Löschen fehlgeschlagen');
   }
-}
-function renderAdminUsersScreen(){
-  if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
-  const users = state.tmp.adminUsers;
-  const q = (state.tmp.adminSearch||'').toLowerCase().trim();
-  const filtered = users==null ? null : (q ? users.filter(u=>(u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)) : users);
-  return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
-    <div class="card">
-      <h2 class="small">Mitglieder-Administration</h2>
-      <div class="field"><label>Suche</label>
-        <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
-      </div>
-      ${users==null ? '<div class="note">Lädt …</div>' : (filtered.length ? filtered.map(u=>`
-        <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
-          <span class="row" style="align-items:center;gap:10px;width:auto;flex:1;">
-            <span class="box-avatar" style="width:32px;height:32px;font-size:12px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
-            <span style="display:flex;flex-direction:column;overflow:hidden;">
-              <span class="val">${escapeHtml(u.name||'—')}</span>
-              <span class="note" style="margin:0;">${escapeHtml(u.email||'')}</span>
-            </span>
-          </span>
-          <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
-            ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
-            ${u.isProStandalone?'<span class="chip">Pro</span>':''}
-            ${u.disabled?'<span class="chip">Deaktiviert</span>':''}
-          </span>
-        </div>
-      `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
-    </div>
-  `;
 }
 function renderAdminUserDetail(){
   const u = (state.tmp.adminUsers||[]).find(x=>x.id===state.tmp.adminSelectedUserId);
@@ -9710,7 +9787,7 @@ function renderAdminUserDetail(){
       </div>
       <div class="row" style="align-items:center;gap:14px;margin-bottom:10px;">
         <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
-        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isProStandalone?'checked':''}> Pro (ohne Box)</label>
+        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}> Pro</label>
       </div>
       <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
       <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
