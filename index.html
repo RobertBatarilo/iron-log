@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="WOD Ledger">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.25.1/dist/pocketbase.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
@@ -641,7 +642,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, boxScheduleEditorDay: new Date().getDay(), loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -2661,6 +2662,7 @@ function render(){
     }
   }
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
+  if(state.tmp.photoImport?.loading) setTimeout(mountMuscleUpLottie, 0);
   window.scrollTo(0, scrollY);
 }
 
@@ -3126,6 +3128,7 @@ function cleanupPhotoImportImage(){
 }
 function closePhotoImportModal(){
   cleanupPhotoImportImage();
+  teardownMuscleUpLottie();
   state.tmp.photoImport = null;
   render();
 }
@@ -3179,13 +3182,19 @@ async function runOcrOnSource(source){
   cleanupPhotoImportImage();
   pi.loading = true; pi.error = '';
   render();
+  mountMuscleUpLottie();
   try{
     await loadTesseractIfNeeded();
-    const result = await Tesseract.recognize(source, 'deu+eng');
+    const result = await Tesseract.recognize(source, 'deu+eng', {
+      logger: m => { if(m.status==='recognizing text' && typeof m.progress==='number') setMuscleUpProgress(m.progress); }
+    });
     pi.rawText = (result.data.text || '').trim();
+    await playMuscleUpFinishAndWait();
   } catch(err){
     pi.error = (err && err.message) ? err.message : 'Texterkennung fehlgeschlagen — bitte Text unten manuell eingeben.';
+    stopMuscleUpForError();
   }
+  teardownMuscleUpLottie();
   pi.stage = 'review';
   pi.loading = false;
   render();
@@ -3229,12 +3238,17 @@ async function runAiParseOnSource(source){
   cleanupPhotoImportImage();
   pi.loading = true; pi.error = '';
   render();
+  mountMuscleUpLottie();
   try{
     const { mimeType, base64 } = await sourceToBase64(source);
     const result = await pb.send('/ai-photo-parse', { method:'POST', body:{ imageBase64: base64, mimeType } });
     if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Erkennung fehlgeschlagen');
+    await playMuscleUpFinishAndWait();
+    teardownMuscleUpLottie();
     applyParsedWorkout(result);
   } catch(err){
+    stopMuscleUpForError();
+    teardownMuscleUpLottie();
     pi.error = (err && err.message) ? err.message : 'KI-Erkennung fehlgeschlagen — bitte Text unten manuell eingeben.';
     pi.stage = 'review';
     pi.loading = false;
@@ -3245,11 +3259,16 @@ async function runAiTextParse(text){
   const pi = state.tmp.photoImport;
   pi.loading = true; pi.error = '';
   render();
+  mountMuscleUpLottie();
   try{
     const result = await pb.send('/ai-photo-parse', { method:'POST', body:{ text } });
     if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Erkennung fehlgeschlagen');
+    await playMuscleUpFinishAndWait();
+    teardownMuscleUpLottie();
     applyParsedWorkout(result);
   } catch(err){
+    stopMuscleUpForError();
+    teardownMuscleUpLottie();
     pi.loading = false;
     applyParsedWorkout(text);
   }
@@ -3367,20 +3386,92 @@ function renderScalingTierPicker(pi){
 function renderMuscleUpLoader(label){
   return `
     <div class="muscleup-loader" style="padding:20px 0;">
-      <svg viewBox="0 0 120 130" width="110" height="120">
-        <line x1="10" y1="26" x2="110" y2="26" stroke="var(--chalk-yellow)" stroke-width="4" stroke-linecap="round"/>
-        <g class="mu-figure">
-          <circle cx="60" cy="34" r="9" fill="var(--chalk-50)"/>
-          <line x1="60" y1="43" x2="60" y2="78" stroke="var(--chalk-50)" stroke-width="4" stroke-linecap="round"/>
-          <line x1="60" y1="46" x2="42" y2="26" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
-          <line x1="60" y1="46" x2="78" y2="26" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
-          <line x1="60" y1="78" x2="48" y2="102" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
-          <line x1="60" y1="78" x2="72" y2="102" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
-        </g>
-      </svg>
+      <div style="width:140px;height:140px;margin:0 auto;border-radius:16px;background:#F1EDE4;display:flex;align-items:center;justify-content:center;">
+        <div id="muscleUpLottie" style="width:120px;height:120px;"></div>
+        <svg id="muscleUpFallbackSvg" viewBox="0 0 120 130" width="110" height="120" style="display:none;">
+          <line x1="10" y1="26" x2="110" y2="26" stroke="#296EFA" stroke-width="4" stroke-linecap="round"/>
+          <g class="mu-figure">
+            <circle cx="60" cy="34" r="9" fill="#172438"/>
+            <line x1="60" y1="43" x2="60" y2="78" stroke="#172438" stroke-width="4" stroke-linecap="round"/>
+            <line x1="60" y1="46" x2="42" y2="26" stroke="#172438" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="60" y1="46" x2="78" y2="26" stroke="#172438" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="60" y1="78" x2="48" y2="102" stroke="#172438" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="60" y1="78" x2="72" y2="102" stroke="#172438" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+        </svg>
+      </div>
       <div class="note" style="margin-top:10px;">${escapeHtml(label)}</div>
     </div>
   `;
+}
+/* ---- Muscle-Up-Lottie-Steuerung (Foto-Import-Ladebildschirm) ---- */
+let _muscleUpLottie = null;
+let _muscleUpTargetFrame = 0;
+let _muscleUpCrawlTimer = null;
+function prefersReducedMotion(){
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function mountMuscleUpLottie(){
+  const container = document.getElementById('muscleUpLottie');
+  const fallback = document.getElementById('muscleUpFallbackSvg');
+  if(!container || _muscleUpLottie) return;
+  if(typeof lottie==='undefined'){ if(fallback) fallback.style.display='block'; return; }
+  try{
+    _muscleUpTargetFrame = 0;
+    _muscleUpLottie = lottie.loadAnimation({
+      container, renderer:'svg', loop:false, autoplay:false, path:'muscle-up-upload.json'
+    });
+    _muscleUpLottie.addEventListener('data_failed', ()=>{
+      if(fallback) fallback.style.display='block';
+      container.style.display='none';
+    });
+    _muscleUpLottie.addEventListener('DOMLoaded', ()=>{
+      if(!_muscleUpLottie) return;
+      _muscleUpLottie.goToAndStop(0, true);
+      if(!prefersReducedMotion()) startMuscleUpCrawl();
+    });
+  }catch(e){
+    if(fallback) fallback.style.display='block';
+  }
+}
+function startMuscleUpCrawl(){
+  clearInterval(_muscleUpCrawlTimer);
+  _muscleUpCrawlTimer = setInterval(()=>{
+    if(!_muscleUpLottie || _muscleUpTargetFrame>=120){ clearInterval(_muscleUpCrawlTimer); return; }
+    _muscleUpTargetFrame = Math.min(120, _muscleUpTargetFrame+2);
+    _muscleUpLottie.goToAndStop(_muscleUpTargetFrame, true);
+  }, 90);
+}
+function setMuscleUpProgress(frac){
+  if(!_muscleUpLottie || prefersReducedMotion()) return;
+  const target = Math.max(_muscleUpTargetFrame, Math.min(120, Math.round(frac*120)));
+  if(target>_muscleUpTargetFrame){
+    _muscleUpTargetFrame = target;
+    _muscleUpLottie.goToAndStop(target, true);
+  }
+}
+function playMuscleUpFinishAndWait(){
+  return new Promise(resolve=>{
+    clearInterval(_muscleUpCrawlTimer);
+    if(!_muscleUpLottie){ resolve(); return; }
+    if(prefersReducedMotion()){
+      _muscleUpLottie.goToAndStop(179, true);
+      resolve();
+      return;
+    }
+    const onComplete = ()=>{ if(_muscleUpLottie) _muscleUpLottie.removeEventListener('complete', onComplete); resolve(); };
+    _muscleUpLottie.addEventListener('complete', onComplete);
+    _muscleUpLottie.playSegments([_muscleUpTargetFrame, 179], true);
+  });
+}
+function stopMuscleUpForError(){
+  clearInterval(_muscleUpCrawlTimer);
+  if(_muscleUpLottie) _muscleUpLottie.stop();
+}
+function teardownMuscleUpLottie(){
+  clearInterval(_muscleUpCrawlTimer);
+  if(_muscleUpLottie){ _muscleUpLottie.destroy(); _muscleUpLottie=null; }
+  _muscleUpTargetFrame = 0;
 }
 function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
@@ -6307,12 +6398,20 @@ function renderBoxScheduleTab(){
   const editorCard = isBoxAdminView() ? (()=>{
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-    const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
+    const editorDay = state.tmp.boxScheduleEditorDay;
+    const formSlot = editId==='new' ? {weekday: editorDay ?? 1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
     const weekdayOrder = [1,2,3,4,5,6,0];
     const sortedSlots = state.box.scheduleSlots.slice().sort((a,b)=> a.weekday-b.weekday || a.startTime.localeCompare(b.startTime));
     const byWeekday = {};
     sortedSlots.forEach(s=>{ (byWeekday[s.weekday] = byWeekday[s.weekday]||[]).push(s); });
-    const groupedHtml = weekdayOrder.filter(wd=>byWeekday[wd]).map(wd=>`
+    const daysToShow = editorDay===null ? weekdayOrder.filter(wd=>byWeekday[wd]) : (byWeekday[editorDay] ? [editorDay] : []);
+    const dayTabsHtml = `
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+        <button class="btn-sm ${editorDay===null?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="state.tmp.boxScheduleEditorDay=null; render();">Alle</button>
+        ${weekdayOrder.map(wd=>`<button class="btn-sm ${editorDay===wd?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="state.tmp.boxScheduleEditorDay=${wd}; render();">${WEEKDAY_NAMES[wd]}${byWeekday[wd]?` (${byWeekday[wd].length})`:''}</button>`).join('')}
+      </div>
+    `;
+    const groupedHtml = daysToShow.map(wd=>`
       <div class="note" style="margin-top:10px;margin-bottom:4px;font-weight:600;">${WEEKDAY_NAMES[wd]}</div>
       ${byWeekday[wd].map(s=>`
         <div class="history-item">
@@ -6328,7 +6427,8 @@ function renderBoxScheduleTab(){
     return `
       <div class="card">
         <h2 class="small">Termine verwalten</h2>
-        ${groupedHtml}
+        ${dayTabsHtml}
+        ${daysToShow.length ? groupedHtml : `<div class="note">Keine Termine an diesem Tag.</div>`}
         ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
       </div>
     `;
