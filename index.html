@@ -255,6 +255,12 @@
   .checkbox-row input[type="checkbox"]{width:auto;accent-color:var(--chalk-yellow);}
   .checkbox-row input[type="checkbox"]:checked{animation:checkPop 0.22s ease;}
   @keyframes checkPop{0%{transform:scale(1);}40%{transform:scale(1.25);}100%{transform:scale(1);}}
+  .toggle-switch{ position:relative; display:inline-block; width:44px; height:26px; flex:0 0 auto; }
+  .toggle-switch input{ opacity:0; width:0; height:0; }
+  .toggle-switch .toggle-slider{ position:absolute; inset:0; cursor:pointer; background:var(--iron-700); border-radius:26px; transition:background 0.2s ease; }
+  .toggle-switch .toggle-slider::before{ content:""; position:absolute; height:20px; width:20px; left:3px; top:3px; background:var(--chalk-50); border-radius:50%; transition:transform 0.2s ease; }
+  .toggle-switch input:checked + .toggle-slider{ background:var(--chalk-yellow); }
+  .toggle-switch input:checked + .toggle-slider::before{ transform:translateX(18px); background:var(--graphite-900); }
   @keyframes muscleUpMotion{
     0%,100%{ transform:translateY(22px); }
     35%{ transform:translateY(-4px); }
@@ -518,9 +524,13 @@ function renderNotificationSettings(){
   return `
     <div class="note" style="margin-bottom:6px;">Einzelne Kategorien abschalten:</div>
     ${NOTIFICATION_CATEGORIES.map(c=>`
-      <label class="row" style="align-items:center;gap:8px;margin:6px 0;">
-        <input type="checkbox" style="flex:0 0 auto;width:auto;" ${prefs[c.key]!==false?'checked':''} onchange="toggleNotificationPref('${c.key}',this.checked)"> ${c.label}
-      </label>
+      <div class="row" style="align-items:center;justify-content:space-between;margin:10px 0;">
+        <span>${c.label}</span>
+        <label class="toggle-switch">
+          <input type="checkbox" ${prefs[c.key]!==false?'checked':''} onchange="toggleNotificationPref('${c.key}',this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     `).join('')}
   `;
 }
@@ -685,7 +695,8 @@ function defaultTmp(){
     mpPickerCandidates:null, mpPickerConfirmFn:null, mpPickerContext:null,
     mpMembersOpen:false, mpMembersList:null, mpMemberSearch:'',
     mpMemberDetailId:null, mpMemberDetailPlans:null, mpMemberDetailBookings:null, mpNewPlanType:'recurring',
-    mpArchivedPlansOpen:false, mpAllUsersMode:false, mpMemberDetailUser:null
+    mpArchivedPlansOpen:false, mpAllUsersMode:false, mpMemberDetailUser:null,
+    mpTemplatesOpen:false, mpTemplates:null, mpTemplateEditId:null, mpMyArchivedPlansOpen:false
   };
 }
 
@@ -4969,6 +4980,7 @@ function isConsumingBooking(b){
   return b.status==='attended' || (b.status==='cancelled' && b.lateCancel===true);
 }
 function planLabel(plan){
+  if(plan.name) return plan.name;
   return plan.type==='recurring' ? 'Laufende Buchung' : 'Einmalige Buchung';
 }
 function computePlanQuota(plan, bookings){
@@ -4993,6 +5005,22 @@ function isPlanArchived(plan, bookings){
   const notStartedYet = plan.startDate && plan.startDate.slice(0,10) > todayStr();
   if(notStartedYet) return false;
   return computePlanQuota(plan, bookings).remaining===0;
+}
+function splitPlansByArchived(plans, bookings){
+  return { active: plans.filter(p=>!isPlanArchived(p,bookings)), archived: plans.filter(p=>isPlanArchived(p,bookings)) };
+}
+function renderPlanRow(p, bookings, opts){
+  opts = opts || {};
+  const q = computePlanQuota(p, bookings);
+  const statusChip = p.status==='cancelled' ? '<span class="chip chip-full">Gekündigt</span>' : '<span class="chip chip-reserved">Aktiv</span>';
+  return `
+    <div class="history-item">
+      <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <span class="val">${escapeHtml(planLabel(p))} ${statusChip}</span>
+        <span class="note" style="margin:0;">${q.remaining} / ${q.grant} übrig${p.note?' · '+escapeHtml(p.note):''}</span>
+      </span>
+      ${(opts.showCancelButton && p.status==='active') ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="cancelMembershipPlan('${p.id}','${opts.membershipId}')">Kündigen</button>` : ''}
+    </div>`;
 }
 function getNextUpcomingBooking(bookings){
   const todayD = todayStr();
@@ -5551,10 +5579,12 @@ function openBoxMembersScreen(){
   state.tmp.mpMembersList = null;
   render();
   loadBoxMembersList();
+  loadPlanTemplates();
 }
 function closeBoxMembersScreen(){
   state.tmp.mpMembersOpen = false;
   state.tmp.mpMemberDetailId = null;
+  state.tmp.mpTemplatesOpen = false;
   render();
 }
 async function loadBoxMembersList(){
@@ -5568,6 +5598,95 @@ async function loadBoxMembersList(){
     showToast('Mitgliederliste konnte nicht geladen werden');
   }
   render();
+}
+async function loadPlanTemplates(){
+  try{
+    state.tmp.mpTemplates = await pb.collection('membership_plan_templates').getFullList({
+      filter: pb.filter('box = {:box}', {box: state.box.membership.box}), sort:'name'
+    });
+  }catch(e){
+    state.tmp.mpTemplates = [];
+  }
+  render();
+}
+function openPlanTemplatesScreen(){
+  state.tmp.mpTemplatesOpen = true;
+  state.tmp.mpTemplateEditId = null;
+  render();
+}
+function closePlanTemplatesScreen(){
+  state.tmp.mpTemplatesOpen = false;
+  state.tmp.mpTemplateEditId = null;
+  render();
+}
+async function savePlanTemplate(id){
+  const name = (document.getElementById('mpTplName')?.value||'').trim();
+  const type = document.getElementById('mpTplType')?.value || 'recurring';
+  const amount = parseInt(document.getElementById('mpTplAmount')?.value)||0;
+  if(!name){ showToast('Bitte einen Namen eingeben'); return; }
+  if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
+  try{
+    if(id){
+      await pb.collection('membership_plan_templates').update(id, {name, type, amount});
+    } else {
+      await pb.collection('membership_plan_templates').create({box: state.box.membership.box, name, type, amount});
+    }
+    showToast('Standardpaket gespeichert');
+    state.tmp.mpTemplateEditId = null;
+    await loadPlanTemplates();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+async function deletePlanTemplate(id){
+  try{
+    await pb.collection('membership_plan_templates').delete(id);
+    showToast('Standardpaket gelöscht');
+    await loadPlanTemplates();
+  }catch(e){
+    showToast('Löschen fehlgeschlagen');
+  }
+}
+function renderPlanTemplatesScreen(){
+  const templates = state.tmp.mpTemplates;
+  const editId = state.tmp.mpTemplateEditId;
+  const editing = editId && editId!=='new' ? (templates||[]).find(t=>t.id===editId) : null;
+  const formTpl = editId==='new' ? {name:'', type:'recurring', amount:''} : editing;
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closePlanTemplatesScreen()">← Zurück</button>
+    <div class="card">
+      <h2>Standardpakete</h2>
+      <div class="note" style="margin-bottom:10px;">Wiederverwendbare Vorlagen, z.B. "Laufende Mitgliedschaft" oder "10er Block CrossFit" — beim Zuteilen an einen Athleten wählbar.</div>
+      ${templates===null ? `<div class="note">Lädt …</div>` : (templates.length ? templates.map(t=>`
+        <div class="history-item">
+          <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+            <span class="val">${escapeHtml(t.name)}</span>
+            <span class="note" style="margin:0;">${t.type==='recurring'?'Laufend':'Einmalig'} · ${t.amount}</span>
+          </span>
+          <span>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.mpTemplateEditId='${t.id}'; render();">✎</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="deletePlanTemplate('${t.id}')">✕</button>
+          </span>
+        </div>
+      `).join('') : `<div class="note">Noch keine Standardpakete angelegt.</div>`)}
+      ${formTpl ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
+          <div class="field"><label>Name</label><input type="text" id="mpTplName" value="${escapeHtml(formTpl.name||'')}" placeholder="z.B. 10er Block CrossFit"></div>
+          <div class="field"><label>Typ</label>
+            <select id="mpTplType">
+              <option value="recurring" ${formTpl.type==='recurring'?'selected':''}>Laufende Buchung (pro Monat)</option>
+              <option value="one-time" ${formTpl.type==='one-time'?'selected':''}>Einmalige Buchung (fester Block)</option>
+            </select>
+          </div>
+          <div class="field"><label>Menge</label><input type="number" id="mpTplAmount" min="1" value="${formTpl.amount||''}"></div>
+          <div class="row">
+            <button class="btn btn-ghost" onclick="state.tmp.mpTemplateEditId=null; render();">Abbrechen</button>
+            <button class="btn btn-primary" onclick="savePlanTemplate('${editId==='new'?'':editId}')">Speichern</button>
+          </div>
+        </div>
+      ` : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.mpTemplateEditId='new'; render();">+ Standardpaket anlegen</button>`}
+    </div>
+  `;
 }
 function openBoxMemberDetail(membershipId){
   state.tmp.mpMemberDetailId = membershipId;
@@ -5602,15 +5721,28 @@ async function loadBoxMemberDetail(membershipId){
   }
   render();
 }
+function applyPlanTemplateSelection(templateId){
+  const select = document.getElementById('mpNewTemplateId');
+  const nameEl = document.getElementById('mpNewName');
+  const typeEl = document.getElementById('mpNewType');
+  const amountEl = document.getElementById('mpNewAmount');
+  if(!templateId){ if(nameEl) nameEl.value=''; return; }
+  const opt = select?.querySelector(`option[value="${templateId}"]`);
+  if(!opt) return;
+  if(nameEl) nameEl.value = opt.dataset.name || '';
+  if(typeEl) typeEl.value = opt.dataset.type || 'recurring';
+  if(amountEl) amountEl.value = opt.dataset.amount || '';
+}
 async function createMembershipPlan(membershipId, opts){
   opts = opts || {};
+  const name = opts.name!=null ? opts.name : (document.getElementById('mpNewName')?.value||'').trim();
   const type = opts.type || document.getElementById('mpNewType')?.value || 'recurring';
   const amount = opts.amount!=null ? opts.amount : parseInt(document.getElementById('mpNewAmount')?.value)||0;
   const startDate = opts.startDate || document.getElementById('mpNewStart')?.value || todayStr();
   const note = opts.note!=null ? opts.note : (document.getElementById('mpNewNote')?.value||'');
   if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
   try{
-    await pb.collection('membership_plans').create({membership:membershipId, type, amount, startDate, status:'active', note});
+    await pb.collection('membership_plans').create({membership:membershipId, type, amount, startDate, status:'active', note, name});
     showToast('Kontingent angelegt');
     await loadBoxMemberDetail(membershipId);
   }catch(e){
@@ -5620,7 +5752,7 @@ async function createMembershipPlan(membershipId, opts){
 async function grantGoodwillCredit(membershipId){
   const amount = parseInt(document.getElementById('mpGiftAmount')?.value)||1;
   const note = document.getElementById('mpGiftNote')?.value || 'Kulanz';
-  await createMembershipPlan(membershipId, {type:'one-time', amount, startDate: todayStr(), note});
+  await createMembershipPlan(membershipId, {type:'one-time', amount, startDate: todayStr(), note, name:'Kulanz-Guthaben'});
 }
 async function cancelMembershipPlan(planId, membershipId){
   try{
@@ -5646,6 +5778,7 @@ function setMpAllUsersMode(on){
 function renderBoxMembersScreen(box){
   if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
+  if(state.tmp.mpTemplatesOpen) return renderPlanTemplatesScreen();
   const isAdmin = !!pb.authStore.record?.isAppAdmin;
   const toggleHtml = isAdmin ? `
     <div class="row" style="margin-bottom:14px;">
@@ -5715,6 +5848,7 @@ function renderBoxMembersScreen(box){
       <div class="field" style="margin-bottom:0;">
         <input type="text" id="mpMemberSearchInput" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
       </div>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="openPlanTemplatesScreen()">📦 Standardpakete verwalten</button>
       <div class="invite-box">
         <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
         ${state.tmp.inviteLinkOpen ? `
@@ -5745,31 +5879,29 @@ function renderBoxMemberDetail(){
   const name = m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied';
   const plans = state.tmp.mpMemberDetailPlans;
   const bookings = state.tmp.mpMemberDetailBookings || [];
-  const activePlans = plans===null ? null : plans.filter(p=>!isPlanArchived(p, bookings));
-  const archivedPlans = plans===null ? [] : plans.filter(p=>isPlanArchived(p, bookings));
+  const split = plans===null ? {active:null, archived:[]} : splitPlansByArchived(plans, bookings);
+  const activePlans = split.active;
+  const archivedPlans = split.archived;
   const u = state.tmp.mpMemberDetailUser;
-  const renderPlanRow = (p) => {
-    const q = computePlanQuota(p, bookings);
-    return `
-    <div class="history-item">
-      <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
-        <span class="val">${planLabel(p)}${p.status==='cancelled'?' (gekündigt)':''}</span>
-        <span class="note" style="margin:0;">${q.remaining} / ${q.grant} übrig${p.note?' · '+escapeHtml(p.note):''}</span>
-      </span>
-      ${p.status==='active' ? `<button class="btn-sm btn-ghost" style="width:auto;" onclick="cancelMembershipPlan('${p.id}','${m.id}')">Kündigen</button>` : ''}
-    </div>`;
-  };
+  const templates = state.tmp.mpTemplates || [];
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMemberDetail()">← Zurück</button>
     <div class="card">
       <h2>${escapeHtml(name)}</h2>
       <h2 class="small" style="margin-top:14px;">Kontingente</h2>
-      ${activePlans===null ? `<div class="note">Lädt …</div>` : (activePlans.length ? activePlans.map(renderPlanRow).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
+      ${activePlans===null ? `<div class="note">Lädt …</div>` : (activePlans.length ? activePlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
       ${archivedPlans.length ? `
         <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpArchivedPlansOpen=!state.tmp.mpArchivedPlansOpen; render();">Abgelaufene Buchungen (${archivedPlans.length}) ${state.tmp.mpArchivedPlansOpen?'▾':'▸'}</h2>
-        ${state.tmp.mpArchivedPlansOpen ? archivedPlans.map(renderPlanRow).join('') : ''}
+        ${state.tmp.mpArchivedPlansOpen ? archivedPlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : ''}
       ` : ''}
       <h2 class="small" style="margin-top:14px;">Kontingent anlegen</h2>
+      <div class="field"><label>Standardpaket</label>
+        <select id="mpNewTemplateId" onchange="applyPlanTemplateSelection(this.value)">
+          <option value="">— Frei eingeben —</option>
+          ${templates.map(t=>`<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Name</label><input type="text" id="mpNewName" placeholder="z.B. 10er Block CrossFit"></div>
       <div class="field"><label>Typ</label>
         <select id="mpNewType">
           <option value="recurring">Laufende Buchung (pro Monat)</option>
@@ -5788,9 +5920,13 @@ function renderBoxMemberDetail(){
       ${u ? `
         <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
         <h2 class="small">Rolle & Zugang · ${userTierLabel(u, true)}</h2>
-        <div class="row" style="align-items:center;gap:14px;margin-bottom:10px;">
-          <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
-          <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}> Pro</label>
+        <div class="row" style="align-items:center;gap:20px;margin-bottom:10px;">
+          <div class="row" style="align-items:center;gap:8px;width:auto;">Admin
+            <label class="toggle-switch"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="row" style="align-items:center;gap:8px;width:auto;">Pro
+            <label class="toggle-switch"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}><span class="toggle-slider"></span></label>
+          </div>
         </div>
         <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
         <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
@@ -6267,16 +6403,19 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
-    ${state.box.membershipPlans.length ? `
+    ${state.box.membershipPlans.length ? (()=>{
+      const mySplit = splitPlansByArchived(state.box.membershipPlans, state.box.myBookings);
+      return `
     <div class="card">
       <h2 class="small">Mein Kontingent</h2>
-      ${state.box.membershipPlans
-        .map(p=>({p, q: computePlanQuota(p, state.box.myBookings)}))
-        .filter(({p,q})=>p.status==='active' || q.usable)
-        .map(({p,q})=>`<div class="history-item"><span class="val">${planLabel(p)}</span><span class="note" style="margin:0;">${q.usable ? q.remaining+' / '+q.grant+' übrig' : 'Kontingent aufgebraucht'}</span></div>`)
-        .join('')}
+      ${mySplit.active.length ? mySplit.active.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : `<div class="note">Kein aktives Kontingent.</div>`}
+      ${mySplit.archived.length ? `
+        <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpMyArchivedPlansOpen=!state.tmp.mpMyArchivedPlansOpen; render();">Abgelaufene Kontingente (${mySplit.archived.length}) ${state.tmp.mpMyArchivedPlansOpen?'▾':'▸'}</h2>
+        ${state.tmp.mpMyArchivedPlansOpen ? mySplit.archived.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : ''}
+      ` : ''}
     </div>
-    ` : ''}
+      `;
+    })() : ''}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
@@ -10124,9 +10263,13 @@ function renderAdminUserDetail(){
           <div class="note" style="margin:0;">${escapeHtml(u.email||'')}</div>
         </div>
       </div>
-      <div class="row" style="align-items:center;gap:14px;margin-bottom:10px;">
-        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}> Admin</label>
-        <label class="row" style="align-items:center;gap:6px;width:auto;"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}> Pro</label>
+      <div class="row" style="align-items:center;gap:20px;margin-bottom:10px;">
+        <div class="row" style="align-items:center;gap:8px;width:auto;">Admin
+          <label class="toggle-switch"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}><span class="toggle-slider"></span></label>
+        </div>
+        <div class="row" style="align-items:center;gap:8px;width:auto;">Pro
+          <label class="toggle-switch"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}><span class="toggle-slider"></span></label>
+        </div>
       </div>
       <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
       <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
