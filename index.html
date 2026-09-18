@@ -4456,11 +4456,21 @@ async function uploadBoxLogo(file){
     showToast('Upload fehlgeschlagen');
   }
 }
-async function saveDisplayName(){
+async function savePersonalInfo(){
   const name = (document.getElementById('displayNameInput')?.value || '').trim();
+  const lastName = (document.getElementById('lastNameInput')?.value || '').trim();
+  if(!lastName){
+    showToast('Nachname ist ein Pflichtfeld');
+    return;
+  }
+  const phone = (document.getElementById('phoneInput')?.value || '').trim();
+  const address = (document.getElementById('addressInput')?.value || '').trim();
+  const postalCode = (document.getElementById('postalCodeInput')?.value || '').trim();
+  const city = (document.getElementById('cityInput')?.value || '').trim();
+  const country = (document.getElementById('countryInput')?.value || '').trim();
   try{
-    await pb.collection('users').update(pb.authStore.record.id, {name});
-    showToast('Name gespeichert');
+    await pb.collection('users').update(pb.authStore.record.id, {name, lastName, phone, address, postalCode, city, country});
+    showToast('Gespeichert');
     render();
   }catch(e){
     showToast('Speichern fehlgeschlagen');
@@ -9998,14 +10008,20 @@ function renderProgress(){
 function renderProgressMenu(){
   return `
     <div class="card">
-      <h2>Fortschritt</h2>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">🏆 Strength Records</button>
-      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('discipline')">🏅 Consistency</button>` : ''}
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('times')">⏱️ Workout Records</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('body')">📏 Körpermaße</button>
+      <h2 class="small">Ruhmeshalle</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">💪 Stärke</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;${state.box.membership?.status==='active' ? 'margin-bottom:10px;' : ''}" onclick="setProgressSection('times')">⏱️ Schnelligkeit</button>
+      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('discipline')">🏅 Disziplin</button>` : ''}
+    </div>
+    <div class="card">
+      <h2 class="small">Meine Fortschritte</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('history')">📋 Verlauf</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('search')">🔍 Suche</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('load')">📊 Belastung</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('load')">📊 Belastung</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('body')">📏 Körpermaße</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Suche</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('search')">🔍 Suche</button>
     </div>
   `;
 }
@@ -10265,10 +10281,8 @@ function renderProfileMenu(){
     <div class="card">
       <h2>Profil</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('account')">👤 Persönliche Daten</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen</button>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
     </div>
   `;
 }
@@ -10408,12 +10422,21 @@ function renderProfileAccount(){
           <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'avatar')"></div>
         </div>
         ${state.tmp.avatarEdit?.kind!=='boxLogo' ? renderAvatarEditor() : ''}`; })()}
-      <div class="field"><label>Name</label>
-        <div class="row">
-          <input type="text" id="displayNameInput" value="${escapeHtml(me?.name||'')}" placeholder="Wie sollen dich andere sehen?">
-          <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;" onclick="saveDisplayName()">Speichern</button>
-        </div>
+      <div class="field"><label>Vorname</label>
+        <input type="text" id="displayNameInput" value="${escapeHtml(me?.name||'')}" placeholder="Wie sollen dich andere sehen?">
       </div>
+      <div class="field"><label>Nachname <span style="color:var(--plate-red);">*</span></label>
+        <input type="text" id="lastNameInput" value="${escapeHtml(me?.lastName||'')}" placeholder="Nachname (Pflichtfeld)">
+      </div>
+      <div class="note" style="margin-bottom:10px;">Kontaktdaten (optional)</div>
+      <div class="field"><label>Telefonnummer</label><input type="text" id="phoneInput" value="${escapeHtml(me?.phone||'')}" placeholder="z.B. +43 660 1234567"></div>
+      <div class="field"><label>Adresse</label><input type="text" id="addressInput" value="${escapeHtml(me?.address||'')}" placeholder="Straße und Hausnummer"></div>
+      <div class="row">
+        <div class="field"><label>PLZ</label><input type="text" id="postalCodeInput" value="${escapeHtml(me?.postalCode||'')}"></div>
+        <div class="field"><label>Ort</label><input type="text" id="cityInput" value="${escapeHtml(me?.city||'')}"></div>
+      </div>
+      <div class="field"><label>Land</label><input type="text" id="countryInput" value="${escapeHtml(me?.country||'')}"></div>
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="savePersonalInfo()">Speichern</button>
       ${adminView ? '' : `
       <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
       <div class="field"><label>Geschlecht</label>
@@ -10483,11 +10506,16 @@ function renderProfileAppSettings(){
       <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
     </div>
     `}
+    <div class="card">
+      <h2 class="small">Mehr</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen →</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung →</button>
+    </div>
   `;
 }
 function renderProfileNotificationsPage(){
   return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection('appsettings')">← Zurück</button>
     <div class="card">
       <h2 class="small">Benachrichtigungen</h2>
       <div class="note" style="margin-bottom:10px;">Erhalte Push-Benachrichtigungen zu deiner Box — auch wenn die App gerade geschlossen ist.</div>
@@ -10499,7 +10527,7 @@ function renderProfileNotificationsPage(){
 }
 function renderProfileData(){
   return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection('appsettings')">← Zurück</button>
     <div class="card">
       <h2>Daten-Verwaltung</h2>
       <div class="note" style="margin-bottom:10px;">Deine Daten werden ausschließlich für dich gespeichert.</div>
