@@ -618,6 +618,19 @@ const DEFAULT_EXERCISES_RAW = [
   {name:'Row', type:'cardio', pattern:'row'}, {name:'Air Bike', type:'cardio', pattern:'cardio'}, {name:'Bike', type:'cardio', pattern:'cardio'}, {name:'Ski Erg', type:'cardio', pattern:'cardio'}, {name:'Run', type:'cardio', pattern:'run'}
 ];
 const MOVEMENT_PATTERN_LABELS = { squat:'Kniebeuge', hinge:'Hüftstreckung', push:'Push', pull:'Pull', olympic:'Olympisches Heben', row:'Rudern', cardio:'Cardio-Maschine', run:'Laufen', core:'Core', gymnastics:'Gymnastics' };
+const MUSCLE_GROUP_LABELS = { arme:'Arme', brust:'Brust', bauch:'Bauch', beine:'Beine', ruecken:'Rücken' };
+const PATTERN_TO_MUSCLE_GROUP = {
+  squat:      'beine',   // Kniebeugen/Thruster: quaddominant
+  hinge:      'beine',   // Kreuzheben/KB Swing: hintere Kette, bewusst bei Beinen statt Rücken gebündelt
+  push:       'brust',   // Bankdrücken/Liegestütz/Dips: primär Brust+Trizeps
+  pull:       'ruecken', // Klimmzug/Rudern/Latzug: Rücken/Lats
+  olympic:    'beine',   // Umsetzen/Reißen: beindominante Streckung
+  row:        'ruecken', // Rudergerät: ziehend, rückendominant
+  cardio:     'beine',   // Bike/Ski Erg: beindominant
+  run:        'beine',   // Laufen
+  core:       'bauch',   // Sit-up/Plank/Toes-to-Bar
+  gymnastics: 'arme'     // Muscle-up/HSPU/Rope Climb/Pistol: griff-/armlastige Skill-Moves
+};
 function guessMovementPattern(name){
   const n = (name||'').toLowerCase();
   if(/squat|thruster/.test(n)) return 'squat';
@@ -6829,41 +6842,72 @@ function setHistoryNameFilter(name){
   state.tmp.historyNameFilter = name || null;
   render();
 }
-function computeMovementPatternLoad(days){
+function computeMuscleGroupLoad(days){
   const cutoff = (()=>{ const d=new Date(todayStr()+'T00:00:00'); d.setDate(d.getDate()-days); return localDateStr(d); })();
-  const counts = {};
+  const counts = { arme:0, brust:0, bauch:0, beine:0, ruecken:0 };
   state.workouts.filter(w=>w.date>=cutoff).forEach(w=>{
-    const patterns = new Set();
-    if(w.format==='run') patterns.add('run');
+    const groups = new Set();
+    if(w.format==='run') groups.add(PATTERN_TO_MUSCLE_GROUP.run);
     workoutExerciseIds(w).forEach(exId=>{
       const ex = state.exercises.find(e=>e.id===exId);
-      if(ex?.movementPattern) patterns.add(ex.movementPattern);
+      const group = ex?.movementPattern ? PATTERN_TO_MUSCLE_GROUP[ex.movementPattern] : null;
+      if(group) groups.add(group);
     });
-    patterns.forEach(p=>{ counts[p] = (counts[p]||0)+1; });
+    groups.forEach(g=>{ counts[g] = counts[g]+1; });
   });
   return counts;
 }
-function renderLoadAnalysisScreen(){
+function muscleLoadColor(count){
+  if(count<=0) return 'var(--iron-700)';
+  if(count<=2) return 'var(--iron-500)';
+  if(count<=4) return 'var(--chalk-yellow)';
+  return 'var(--success-green)';
+}
+function renderMuscleLoadSvg(counts, gender){
+  const c = { arme: muscleLoadColor(counts.arme), brust: muscleLoadColor(counts.brust),
+              bauch: muscleLoadColor(counts.bauch), beine: muscleLoadColor(counts.beine),
+              ruecken: muscleLoadColor(counts.ruecken) };
+  const p = SILHOUETTE_PATHS[gender] || SILHOUETTE_PATHS.m;
+  const stroke = 'stroke="var(--iron-600)" stroke-width="1.5"';
+  return `<svg viewBox="0 0 300 380" style="width:100%;max-width:320px;height:auto;display:block;margin:0 auto;">
+    <ellipse cx="75" cy="27" rx="16" ry="18" fill="var(--iron-600)"/>
+    <path d="${p.frontChest}" fill="${c.brust}" ${stroke}/>
+    <path d="${p.frontBelly}" fill="${c.bauch}" ${stroke}/>
+    <path d="${p.frontArmL}" fill="${c.arme}" ${stroke}/>
+    <path d="${p.frontArmR}" fill="${c.arme}" ${stroke}/>
+    <path d="${p.frontLegL}" fill="${c.beine}" ${stroke}/>
+    <path d="${p.frontLegR}" fill="${c.beine}" ${stroke}/>
+    <text x="75" y="378" text-anchor="middle" font-size="11" fill="var(--iron-500)">Vorne</text>
+    <ellipse cx="225" cy="27" rx="16" ry="18" fill="var(--iron-600)"/>
+    <path d="${p.backTorso}" fill="${c.ruecken}" ${stroke}/>
+    <path d="${p.backArmL}" fill="${c.arme}" ${stroke}/>
+    <path d="${p.backArmR}" fill="${c.arme}" ${stroke}/>
+    <path d="${p.backLegL}" fill="${c.beine}" ${stroke}/>
+    <path d="${p.backLegR}" fill="${c.beine}" ${stroke}/>
+    <text x="225" y="378" text-anchor="middle" font-size="11" fill="var(--iron-500)">Hinten</text>
+  </svg>`;
+}
+function renderMuscleLoadScreen(){
   const days = 14;
-  const counts = computeMovementPatternLoad(days);
-  const maxCount = Math.max(1, ...Object.values(counts));
-  const order = ['squat','hinge','push','pull','olympic','row','cardio','run','core','gymnastics'];
-  const rows = order.filter(p=>counts[p]).sort((a,b)=>counts[b]-counts[a]);
+  const counts = computeMuscleGroupLoad(days);
+  const gender = state.profile?.gender || 'm';
+  const groups = ['arme','brust','bauch','beine','ruecken'];
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
-    <div class="note" style="margin-bottom:14px;">Wie oft welches Bewegungsmuster in den letzten ${days} Tagen vorkam — hilft zu sehen, was zuletzt zu kurz kam.</div>
+    <div class="note" style="margin-bottom:14px;">Welche Muskelgruppen in den letzten ${days} Tagen trainiert wurden — grau heißt lange nicht belastet, dunkelgrün heißt ausreichend trainiert.</div>
+    <div class="card" style="text-align:center;">${renderMuscleLoadSvg(counts, gender)}</div>
     <div class="card">
-      ${rows.length ? rows.map(p=>`
+      ${groups.map(g=>`
         <div style="margin-bottom:10px;">
           <div class="row" style="justify-content:space-between;margin-bottom:4px;">
-            <span class="val">${MOVEMENT_PATTERN_LABELS[p]||p}</span>
-            <span class="note" style="margin:0;">${counts[p]}×</span>
+            <span class="val">${MUSCLE_GROUP_LABELS[g]}</span>
+            <span class="note" style="margin:0;">${counts[g]}×</span>
           </div>
           <div style="background:var(--iron-700);border-radius:6px;height:8px;overflow:hidden;">
-            <div style="background:var(--chalk-yellow);height:100%;width:${Math.round(counts[p]/maxCount*100)}%;"></div>
+            <div style="background:${muscleLoadColor(counts[g])};height:100%;width:${Math.round(Math.min(1,counts[g]/5)*100)}%;"></div>
           </div>
         </div>
-      `).join('') : `<div class="note">Noch keine Trainingsdaten in diesem Zeitraum.</div>`}
+      `).join('')}
     </div>
   `;
 }
@@ -9898,6 +9942,34 @@ function mountNutritionChart(){
 }
 
 /* ---------- PROGRESS TAB ---------- */
+const SILHOUETTE_PATHS = {
+  m: {
+    frontChest:"M50,50 Q75,42 100,50 L98,108 Q75,116 52,108 Z",
+    frontBelly:"M52,108 Q75,116 98,108 L94,178 Q75,186 56,178 Z",
+    frontArmL:"M50,54 Q34,60 30,110 Q28,150 34,188 L48,186 Q44,150 46,112 Q48,70 60,56 Z",
+    frontArmR:"M100,54 Q116,60 120,110 Q122,150 116,188 L102,186 Q106,150 104,112 Q102,70 90,56 Z",
+    frontLegL:"M56,178 Q52,220 50,270 Q48,320 52,368 L68,368 Q66,320 68,270 Q70,220 72,178 Z",
+    frontLegR:"M94,178 Q98,220 100,270 Q102,320 98,368 L82,368 Q84,320 82,270 Q80,220 78,178 Z",
+    backTorso:"M200,50 Q225,42 250,50 L246,178 Q225,186 206,178 Z",
+    backArmL:"M200,54 Q184,60 180,110 Q178,150 184,188 L198,186 Q194,150 196,112 Q198,70 210,56 Z",
+    backArmR:"M250,54 Q266,60 270,110 Q272,150 266,188 L252,186 Q256,150 254,112 Q252,70 240,56 Z",
+    backLegL:"M206,178 Q202,220 200,270 Q198,320 202,368 L218,368 Q216,320 218,270 Q220,220 222,178 Z",
+    backLegR:"M244,178 Q248,220 250,270 Q252,320 248,368 L232,368 Q234,320 232,270 Q230,220 228,178 Z"
+  },
+  w: {
+    frontChest:"M53,50 Q75,43 97,50 L94,106 Q75,113 56,106 Z",
+    frontBelly:"M56,106 Q75,113 94,106 L88,178 Q75,188 62,178 Z",
+    frontArmL:"M53,54 Q37,60 32,110 Q30,150 36,188 L50,186 Q46,150 48,112 Q50,70 62,56 Z",
+    frontArmR:"M97,54 Q113,60 118,110 Q120,150 114,188 L100,186 Q104,150 102,112 Q100,70 88,56 Z",
+    frontLegL:"M62,178 Q54,220 50,270 Q47,320 52,368 L68,368 Q66,320 68,270 Q70,220 74,178 Z",
+    frontLegR:"M88,178 Q96,220 100,270 Q103,320 98,368 L82,368 Q84,320 82,270 Q80,220 76,178 Z",
+    backTorso:"M203,50 Q225,43 247,50 L244,178 Q225,188 206,178 Z",
+    backArmL:"M203,54 Q187,60 182,110 Q180,150 186,188 L200,186 Q196,150 198,112 Q200,70 212,56 Z",
+    backArmR:"M247,54 Q263,60 268,110 Q270,150 264,188 L250,186 Q254,150 252,112 Q250,70 238,56 Z",
+    backLegL:"M212,178 Q204,220 200,270 Q197,320 202,368 L218,368 Q216,320 218,270 Q220,220 224,178 Z",
+    backLegR:"M238,178 Q246,220 250,270 Q253,320 248,368 L232,368 Q234,320 232,270 Q230,220 226,178 Z"
+  }
+};
 const BODY_METRICS = [
   {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC'},
   {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C'},
@@ -9917,7 +9989,7 @@ function renderProgress(){
   if(section==='body') return renderProgressBody();
   if(section==='history') return renderProgressHistory();
   if(section==='search') return renderWorkoutSearchScreen();
-  if(section==='load') return renderLoadAnalysisScreen();
+  if(section==='load') return renderMuscleLoadScreen();
   return renderProgressMenu();
 }
 function renderProgressMenu(){
