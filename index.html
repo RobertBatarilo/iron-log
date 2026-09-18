@@ -254,6 +254,13 @@
   .checkbox-row input[type="checkbox"]{width:auto;accent-color:var(--chalk-yellow);}
   .checkbox-row input[type="checkbox"]:checked{animation:checkPop 0.22s ease;}
   @keyframes checkPop{0%{transform:scale(1);}40%{transform:scale(1.25);}100%{transform:scale(1);}}
+  @keyframes muscleUpMotion{
+    0%,100%{ transform:translateY(22px); }
+    35%{ transform:translateY(-4px); }
+    55%{ transform:translateY(-20px) rotate(-8deg); }
+    75%{ transform:translateY(-16px) rotate(4deg); }
+  }
+  .mu-figure{ animation:muscleUpMotion 1.6s ease-in-out infinite; transform-origin:60px 26px; }
   .wod-result{
     font-family:var(--font-mono);
     color:var(--plate-red);
@@ -634,7 +641,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:'strength',
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -2630,6 +2637,10 @@ function debounceRender(key, delay=300){
 function render(){
   if(!document.getElementById('bottomNav')) return;
   const scrollY = window.scrollY;
+  const active = document.activeElement;
+  const focusInfo = (active && active.id && document.getElementById('content')?.contains(active))
+    ? {id: active.id, start: active.selectionStart, end: active.selectionEnd}
+    : null;
   document.getElementById('bottomNav').innerHTML = bottomNavHtml();
   const content = document.getElementById('content');
   if(state.activeTab==='today') content.innerHTML = renderToday();
@@ -2638,8 +2649,17 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal() + renderEditWorkoutModalRoot();
 
+  if(focusInfo){
+    const el = document.getElementById(focusInfo.id);
+    if(el){
+      el.focus();
+      if(focusInfo.start!=null && typeof el.setSelectionRange==='function'){
+        try{ el.setSelectionRange(focusInfo.start, focusInfo.end); }catch(e){}
+      }
+    }
+  }
   if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
   window.scrollTo(0, scrollY);
 }
@@ -3344,9 +3364,38 @@ function renderScalingTierPicker(pi){
     </div>
   `;
 }
+function renderMuscleUpLoader(label){
+  return `
+    <div class="muscleup-loader" style="padding:20px 0;">
+      <svg viewBox="0 0 120 130" width="110" height="120">
+        <line x1="10" y1="26" x2="110" y2="26" stroke="var(--chalk-yellow)" stroke-width="4" stroke-linecap="round"/>
+        <g class="mu-figure">
+          <circle cx="60" cy="34" r="9" fill="var(--chalk-50)"/>
+          <line x1="60" y1="43" x2="60" y2="78" stroke="var(--chalk-50)" stroke-width="4" stroke-linecap="round"/>
+          <line x1="60" y1="46" x2="42" y2="26" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
+          <line x1="60" y1="46" x2="78" y2="26" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
+          <line x1="60" y1="78" x2="48" y2="102" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
+          <line x1="60" y1="78" x2="72" y2="102" stroke="var(--chalk-50)" stroke-width="3.5" stroke-linecap="round"/>
+        </g>
+      </svg>
+      <div class="note" style="margin-top:10px;">${escapeHtml(label)}</div>
+    </div>
+  `;
+}
 function renderPhotoImportModal(){
   const pi = state.tmp.photoImport;
   if(!pi || !pi.open) return '';
+  if(pi.loading){
+    const label = pi.stage==='review' ? 'KI analysiert deinen Text …' : (pi.aiMode ? 'KI analysiert dein Foto …' : 'Texterkennung läuft …');
+    return `
+      <div class="modal-overlay">
+        <div class="modal-box" style="text-align:center;">
+          <h2>Workout aus Foto</h2>
+          ${renderMuscleUpLoader(label)}
+        </div>
+      </div>
+    `;
+  }
   const pickBody = `
     ${state.profile?.hasPro ? `
     <div class="row" style="margin-bottom:10px;">
@@ -3364,7 +3413,6 @@ function renderPhotoImportModal(){
     <div class="field"><label>Oder Foto aufnehmen</label>
       <input type="file" accept="image/*" capture="environment" onchange="handlePhotoImportFile(this)">
     </div>
-    ${pi.loading ? `<div class="note" style="margin-top:10px;">${pi.aiMode?'KI analysiert dein Foto …':'Texterkennung läuft …'}</div>` : ''}
     <button type="button" class="btn btn-ghost" style="margin-top:14px;" onclick="state.tmp.photoImport.stage='review'; render();">✏️ Stattdessen Text eingeben</button>
   `;
   const reviewBody = `
@@ -3373,7 +3421,6 @@ function renderPhotoImportModal(){
     <div class="field"><label>Erkannter Text (bitte prüfen und korrigieren)</label>
       <textarea rows="10" oninput="updatePhotoImportText(this.value)" placeholder="z.B.&#10;150 Double Unders&#10;100 Air Squats&#10;50 Alt. DB Snatches&#10;x2 Runden&#10;Time Cap 18:00">${escapeHtml(pi.rawText||'')}</textarea>
     </div>
-    ${pi.loading ? `<div class="note">KI analysiert deinen Text …</div>` : ''}
   `;
   const cropBody = `
     <div class="field"><label>Trainingsbereich markieren — oben/unten ziehen</label></div>
@@ -3390,7 +3437,6 @@ function renderPhotoImportModal(){
         <div style="width:100%;height:4px;background:var(--chalk-yellow);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,0.5);"></div>
       </div>
     </div>
-    ${pi.loading ? `<div class="note" style="margin-top:10px;">Texterkennung läuft …</div>` : ''}
     <div class="row" style="margin-top:14px;gap:8px;">
       <button type="button" class="btn btn-ghost" style="flex:1;" onclick="backToPhotoImportPick()">◀ Anderes Foto</button>
       <button type="button" class="btn btn-ghost" style="flex:1;" onclick="skipCropAndRunOcr()">Ganzes Bild</button>
@@ -3408,7 +3454,7 @@ function renderPhotoImportModal(){
   const body = pi.stage==='pick' ? pickBody : pi.stage==='crop' ? cropBody : pi.stage==='chooseOption' ? chooseOptionBody : reviewBody;
   const footer = pi.stage==='chooseOption'
     ? `<button class="btn btn-ghost" onclick="state.tmp.photoImport.stage='review'; render();">Zurück</button>`
-    : (pi.stage==='review' ? `<button class="btn btn-primary" ${pi.loading?'disabled':''} onclick="confirmPhotoImport()">Übernehmen</button>` : '');
+    : (pi.stage==='review' ? `<button class="btn btn-primary" onclick="confirmPhotoImport()">Übernehmen</button>` : '');
   return `
     <div class="modal-overlay" onclick="if(event.target===this) closePhotoImportModal()">
       <div class="modal-box">
@@ -5133,9 +5179,10 @@ async function openNachbuchenPicker(instanceId){
   render();
 }
 function resolveAdminPlanChoice(plans, bookings){
-  if(!plans.length) return {mode:'none'};
-  if(plans.length===1) return {mode:'single', planId:plans[0].id};
-  const candidates = plans.map(p=>{
+  const eligible = plans.filter(p=>!isPlanArchived(p, bookings));
+  if(!eligible.length) return {mode:'none'};
+  if(eligible.length===1) return {mode:'single', planId:eligible[0].id};
+  const candidates = eligible.map(p=>{
     const q = computePlanQuota(p, bookings);
     return {id:p.id, label: planLabel(p)+' · '+q.remaining+' übrig'};
   });
@@ -5328,7 +5375,7 @@ function renderBoxWorkoutArchive(){
   return `
     <div class="card">
       <h2 class="small">Trainingsarchiv</h2>
-      <div class="field"><input type="text" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; debounceRender('boxArchiveSearch');" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
+      <div class="field"><input type="text" id="boxArchiveSearchInput" value="${escapeHtml(state.tmp.boxArchiveSearch||'')}" oninput="state.tmp.boxArchiveSearch=this.value; debounceRender('boxArchiveSearch');" placeholder="Name oder Übung suchen, z.B. Bench Press"></div>
       ${!templates.length ? `<div class="note">Noch keine Workouts veröffentlicht.</div>`
         : !matches.length ? `<div class="note">Keine Treffer.</div>`
         : matches.map(renderArchivedWorkoutCard).join('')}
@@ -5525,7 +5572,7 @@ function renderBoxMembersScreen(box){
       <div class="card">
         <h2>Alle Nutzer</h2>
         <div class="field" style="margin-bottom:0;">
-          <input type="text" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
+          <input type="text" id="adminSearchInput" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
         </div>
       </div>
       ${users===null ? `<div class="note">Lädt …</div>` : (filteredUsers.length ? filteredUsers.map(u=>`
@@ -5575,7 +5622,7 @@ function renderBoxMembersScreen(box){
     <div class="card">
       <h2>Mitglieder & Kontingente</h2>
       <div class="field" style="margin-bottom:0;">
-        <input type="text" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
+        <input type="text" id="mpMemberSearchInput" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
       </div>
       <div class="invite-box">
         <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
@@ -6083,7 +6130,7 @@ function renderCoachLeaderboardCard(){
       <h2 class="small">🏅 Hall of Discipline</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="field" style="margin-bottom:10px;">
-        <input type="text" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; debounceRender('leaderboardSearch');">
+        <input type="text" id="leaderboardSearchInput" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; debounceRender('leaderboardSearch');">
       </div>
       ${!filtered.length ? `<div class="note">${search?'Kein Athlet gefunden.':'Noch keine Check-ins in diesem Zeitraum.'}</div>` : filtered.map(r=>`
         <div class="history-item">
@@ -6261,24 +6308,36 @@ function renderBoxScheduleTab(){
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
     const formSlot = editId==='new' ? {weekday:1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
+    const weekdayOrder = [1,2,3,4,5,6,0];
+    const sortedSlots = state.box.scheduleSlots.slice().sort((a,b)=> a.weekday-b.weekday || a.startTime.localeCompare(b.startTime));
+    const byWeekday = {};
+    sortedSlots.forEach(s=>{ (byWeekday[s.weekday] = byWeekday[s.weekday]||[]).push(s); });
+    const groupedHtml = weekdayOrder.filter(wd=>byWeekday[wd]).map(wd=>`
+      <div class="note" style="margin-top:10px;margin-bottom:4px;font-weight:600;">${WEEKDAY_NAMES[wd]}</div>
+      ${byWeekday[wd].map(s=>`
+        <div class="history-item">
+          <span class="date">${escapeHtml(s.startTime)}</span>
+          <span class="val">${escapeHtml(s.label)}</span>
+          <span>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
+          </span>
+        </div>
+      `).join('')}
+    `).join('');
     return `
       <div class="card">
         <h2 class="small">Termine verwalten</h2>
-        ${state.box.scheduleSlots.map(s=>`
-          <div class="history-item">
-            <span class="date">${WEEKDAY_NAMES[s.weekday]} ${escapeHtml(s.startTime)}</span>
-            <span class="val">${escapeHtml(s.label)}</span>
-            <span>
-              <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
-              <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
-            </span>
-          </div>
-        `).join('')}
+        ${groupedHtml}
         ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
       </div>
     `;
   })() : '';
-  return `<div class="card">${weekNav}<div class="row" style="gap:4px;margin-bottom:10px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftScheduleWeek(1), ()=>shiftScheduleWeek(-1))">${strip}</div>${body}</div>${editorCard}`;
+  return `
+    <div class="card">${weekNav}<div class="row" style="gap:4px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftScheduleWeek(1), ()=>shiftScheduleWeek(-1))">${strip}</div></div>
+    <div class="card"><h2 class="small">Termine</h2>${body}</div>
+    ${editorCard}
+  `;
 }
 function openClassDetailModal(instanceId){
   state.tmp.classDetailInstanceId = instanceId;
@@ -6558,6 +6617,10 @@ function workoutWeightsForExercise(w, exerciseId){
 function parseWorkoutSearchQuery(query){
   const q = query.toLowerCase().trim();
   const exerciseIds = new Set();
+  (state.profile?.exerciseAliases||[]).forEach(a=>{
+    const aliasLower = (a.alias||'').toLowerCase();
+    if(aliasLower && q.includes(aliasLower) && state.exercises.some(e=>e.id===a.exerciseId)) exerciseIds.add(a.exerciseId);
+  });
   state.exercises.forEach(e=>{
     const nameLower = e.name.toLowerCase();
     if(q.includes(nameLower)){ exerciseIds.add(e.id); return; }
@@ -6618,7 +6681,7 @@ function renderWorkoutSearchScreen(){
     <div class="note" style="margin-bottom:14px;">Frag in eigenen Worten, z.B. "Workouts mit Thrusters und Pull-ups" oder "Fran mit mindestens 40kg".</div>
     <div class="card">
       <div class="field" style="margin-bottom:0;">
-        <input type="text" value="${escapeHtml(query)}" oninput="state.tmp.workoutSearchQuery=this.value; debounceRender('workoutSearchQuery');" placeholder="Was möchtest du wissen?">
+        <input type="text" id="workoutSearchInput" value="${escapeHtml(query)}" oninput="state.tmp.workoutSearchQuery=this.value; debounceRender('workoutSearchQuery');" placeholder="Was möchtest du wissen?">
       </div>
     </div>
     ${trimmed ? (results.length ? results.map(renderWorkoutHistoryEntry).join('') : `<div class="note">Keine Treffer.</div>`) : ''}
@@ -6844,7 +6907,10 @@ function renderWorkoutHistoryEntry(w){
         <button type="button" style="background:none;border:none;color:#fff;font-weight:600;font-size:12px;width:100%;height:100%;cursor:pointer;line-height:1.4;" onclick="deleteWorkout('${w.id}')">🗑️<br>Löschen</button>
       </div>
       <div class="swipe-content wod-card" style="position:relative;background:var(--graphite-800);margin-bottom:0;transform:translateX(${swipeOffset}px);transition:transform 0.2s ease;">
-        <div class="wname">${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></div>
+        <div class="wname" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span>${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></span>
+          <button type="button" class="remove-row" style="flex:0 0 auto;" onclick="event.stopPropagation(); editWorkout('${w.id}')">✎</button>
+        </div>
         ${body}
         ${autoSummary ? `<div class="note" style="color:var(--chalk-yellow);">${escapeHtml(autoSummary)}</div>` : ''}
         ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
@@ -9135,7 +9201,7 @@ function renderPrCards(){
   const hofOptions = hofFiltered.map(e=>`<option value="${e.id}" ${e.id===hofSelectedId?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
 
   const listHtml = !exercisesWithData.length ? `<div class="note">Noch keine 1RM-Werte vorhanden.</div>` : `
-    <div class="field"><label>Suche</label><input type="text" value="${escapeHtml(state.tmp.hallOfFameSearch||'')}" oninput="state.tmp.hallOfFameSearch=this.value; debounceRender('hallOfFameSearch');" placeholder="Übung suchen …"></div>
+    <div class="field"><label>Suche</label><input type="text" id="hallOfFameSearchInput" value="${escapeHtml(state.tmp.hallOfFameSearch||'')}" oninput="state.tmp.hallOfFameSearch=this.value; debounceRender('hallOfFameSearch');" placeholder="Übung suchen …"></div>
     ${hofFiltered.length ? `
       <div class="field"><select onchange="state.tmp.hallOfFameExercise=this.value; render();">${hofOptions}</select></div>
       ${hofSelectedEx ? renderHallOfFameEntry(hofSelectedEx) : ''}
@@ -9297,6 +9363,179 @@ async function deleteWorkout(id){
   state.workouts = state.workouts.filter(w=>w.id!==id);
   await saveKey('workouts', state.workouts);
   showToast('Workout gelöscht');
+  render();
+}
+/* ---------- Workout bearbeiten ---------- */
+function editWorkout(id){
+  state.tmp.dayDetailDate = null;
+  state.tmp.swipedWorkoutId = null;
+  state.tmp.editingWorkoutId = id;
+  render();
+}
+function closeEditWorkout(){
+  state.tmp.editingWorkoutId = null;
+  render();
+}
+function renderEditForTimeFields(w){
+  const ft = w.forTime || {};
+  const movesHtml = (ft.movements||[]).map((m,i)=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    if(getExerciseType(ex)!=='weighted') return '';
+    return `<div class="field"><label>${escapeHtml(ex?ex.name:'—')} – Gewicht (${weightUnitLabel()})</label>
+      <input type="number" step="0.5" id="edit_ft_weight_${i}" value="${toDisplayWeight(m.weight)}"></div>`;
+  }).join('');
+  return `
+    <div class="row">
+      <div class="field"><label>Zeit</label><input type="text" id="edit_ft_time" value="${ft.elapsedSec!=null?fmtClock(ft.elapsedSec*1000,false):''}" placeholder="mm:ss"></div>
+      <div class="field" style="flex:0 0 auto;"><label>Time Cap</label>
+        <label style="display:flex;align-items:center;gap:6px;height:38px;"><input type="checkbox" id="edit_ft_capped" ${ft.capped?'checked':''}> erreicht</label>
+      </div>
+    </div>
+    ${ft.roundsCompleted>0 ? `<div class="field"><label>Runden</label><input type="number" id="edit_ft_rounds" value="${ft.roundsCompleted}"></div>` : ''}
+    ${movesHtml}
+  `;
+}
+function renderEditAmrapFields(w){
+  const am = w.amrap || {};
+  const movesHtml = (am.movements||[]).map((m,i)=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    if(getExerciseType(ex)!=='weighted') return '';
+    return `<div class="field"><label>${escapeHtml(ex?ex.name:'—')} – Gewicht (${weightUnitLabel()})</label>
+      <input type="number" step="0.5" id="edit_am_weight_${i}" value="${toDisplayWeight(m.weight)}"></div>`;
+  }).join('');
+  return `
+    <div class="row">
+      <div class="field"><label>Runden</label><input type="number" id="edit_am_rounds" value="${am.roundsCompleted||0}"></div>
+      <div class="field"><label>+ Wdh.</label><input type="number" id="edit_am_extra" value="${am.extraReps||0}"></div>
+    </div>
+    ${movesHtml}
+  `;
+}
+function renderEditForLoadFields(w){
+  const fl = w.forLoad || {};
+  const ex = state.exercises.find(e=>e.id===fl.exerciseId);
+  if(fl.unit){
+    const label = fl.unit==='m' ? `Distanz (${distanceUnitLabel()})` : fl.unit==='sec' ? 'Sekunden' : fl.unit==='reps' ? 'Wiederholungen' : 'Kalorien';
+    const val = fl.unit==='m' ? toDisplayDistance(fl.achievedWeight) : (fl.achievedWeight||0);
+    return `<div class="field"><label>${escapeHtml(ex?ex.name:'—')} – ${label}</label><input type="number" step="0.5" id="edit_fl_qty" value="${val}"></div>`;
+  }
+  return `
+    <div class="row">
+      <div class="field"><label>${escapeHtml(ex?ex.name:'—')} – Gewicht (${weightUnitLabel()})</label><input type="number" step="0.5" id="edit_fl_weight" value="${toDisplayWeight(fl.achievedWeight)}"></div>
+      <div class="field"><label>Ziel-Wdh.</label><input type="number" id="edit_fl_reps" value="${fl.targetReps||''}"></div>
+    </div>
+  `;
+}
+function renderEditRunFields(w){
+  const r = w.run || {};
+  return `
+    <div class="row">
+      <div class="field"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="0.01" id="edit_run_distance" value="${toDisplayDistance(r.distanceM)}"></div>
+      <div class="field"><label>Zeit</label><input type="text" id="edit_run_time" value="${r.elapsedSec!=null?fmtClock(r.elapsedSec*1000,false):''}" placeholder="mm:ss"></div>
+    </div>
+  `;
+}
+function renderEditStrengthFields(w){
+  return (w.movements||[]).map((m,mi)=>{
+    const ex = state.exercises.find(e=>e.id===m.exerciseId);
+    const type = getExerciseType(ex);
+    const isQty = type==='cardio' || type==='mobility';
+    const qtyLabel = type==='cardio' ? (m.unit==='m'?`Distanz (${distanceUnitLabel()})`:'Kalorien') : (m.unit==='sec'?'Sekunden':'Wiederholungen');
+    return `
+      <div class="wod-move-row" style="margin-bottom:10px;">
+        <div class="wname" style="font-size:14px;margin-bottom:6px;">${escapeHtml(ex?ex.name:'—')}</div>
+        ${(m.sets||[]).map((s,si)=>`
+          <div class="row" style="gap:8px;align-items:flex-end;">
+            <div class="field" style="flex:1;"><label>${isQty?qtyLabel:'Wdh.'} (Satz ${si+1})</label>
+              <input type="number" step="${m.unit==='m'?'0.01':'1'}" id="edit_st_reps_${mi}_${si}" value="${isQty && m.unit==='m' ? toDisplayDistance(s.reps) : (s.reps??'')}"></div>
+            ${!isQty ? `<div class="field" style="flex:1;"><label>Gewicht (${weightUnitLabel()})</label>
+              <input type="number" step="0.5" id="edit_st_weight_${mi}_${si}" value="${toDisplayWeight(s.weight)}"></div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }).join('');
+}
+function renderEditWorkoutModalRoot(){
+  const w = state.tmp.editingWorkoutId ? state.workouts.find(x=>x.id===state.tmp.editingWorkoutId) : null;
+  if(!w) return '';
+  const format = w.format || 'strength';
+  const body = format==='for-time' ? renderEditForTimeFields(w)
+    : format==='amrap' ? renderEditAmrapFields(w)
+    : format==='for-load' ? renderEditForLoadFields(w)
+    : format==='run' ? renderEditRunFields(w)
+    : renderEditStrengthFields(w);
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closeEditWorkout()">
+      <div class="modal-box">
+        <h2>Workout bearbeiten</h2>
+        <div class="note" style="margin-bottom:10px;">${escapeHtml(w.name)||'Workout'} · ${fmtDate(w.date)}</div>
+        ${body}
+        <div class="field"><label>Notiz</label><textarea id="editWorkoutNote" rows="2">${escapeHtml(w.note||'')}</textarea></div>
+        <button class="btn btn-primary" onclick="saveEditWorkout()">Aktualisieren</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" onclick="closeEditWorkout()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+}
+async function saveEditWorkout(){
+  const w = state.workouts.find(x=>x.id===state.tmp.editingWorkoutId);
+  if(!w) return;
+  const format = w.format || 'strength';
+  if(format==='for-time'){
+    const ft = w.forTime;
+    const sec = parseClockToSec(document.getElementById('edit_ft_time').value);
+    if(sec!=null) ft.elapsedSec = sec;
+    ft.capped = !!document.getElementById('edit_ft_capped').checked;
+    const roundsEl = document.getElementById('edit_ft_rounds');
+    if(roundsEl) ft.roundsCompleted = parseInt(roundsEl.value)||0;
+    (ft.movements||[]).forEach((m,i)=>{
+      const el = document.getElementById(`edit_ft_weight_${i}`);
+      if(el) m.weight = fromDisplayWeight(el.value);
+    });
+  } else if(format==='amrap'){
+    const am = w.amrap;
+    am.roundsCompleted = parseInt(document.getElementById('edit_am_rounds').value)||0;
+    am.extraReps = parseInt(document.getElementById('edit_am_extra').value)||0;
+    (am.movements||[]).forEach((m,i)=>{
+      const el = document.getElementById(`edit_am_weight_${i}`);
+      if(el) m.weight = fromDisplayWeight(el.value);
+    });
+  } else if(format==='for-load'){
+    const fl = w.forLoad;
+    if(fl.unit){
+      const val = parseFloat(document.getElementById('edit_fl_qty').value)||0;
+      fl.achievedWeight = fl.unit==='m' ? fromDisplayDistance(val) : val;
+    } else {
+      fl.achievedWeight = fromDisplayWeight(document.getElementById('edit_fl_weight').value);
+      fl.targetReps = parseInt(document.getElementById('edit_fl_reps').value)||fl.targetReps;
+    }
+  } else if(format==='run'){
+    const r = w.run;
+    r.distanceM = fromDisplayDistance(document.getElementById('edit_run_distance').value);
+    const sec = parseClockToSec(document.getElementById('edit_run_time').value);
+    if(sec!=null) r.elapsedSec = sec;
+  } else {
+    (w.movements||[]).forEach((m,mi)=>{
+      const ex = state.exercises.find(e=>e.id===m.exerciseId);
+      const isQty = getExerciseType(ex)==='cardio' || getExerciseType(ex)==='mobility';
+      (m.sets||[]).forEach((s,si)=>{
+        const repsEl = document.getElementById(`edit_st_reps_${mi}_${si}`);
+        if(repsEl){
+          const v = parseFloat(repsEl.value)||0;
+          s.reps = (isQty && m.unit==='m') ? fromDisplayDistance(v) : v;
+        }
+        if(!isQty){
+          const wEl = document.getElementById(`edit_st_weight_${mi}_${si}`);
+          if(wEl) s.weight = fromDisplayWeight(wEl.value);
+        }
+      });
+    });
+  }
+  w.note = document.getElementById('editWorkoutNote').value;
+  state.tmp.editingWorkoutId = null;
+  await saveKey('workouts', state.workouts);
+  showToast('Workout aktualisiert');
   render();
 }
 
