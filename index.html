@@ -696,7 +696,8 @@ function defaultTmp(){
     mpMembersOpen:false, mpMembersList:null, mpMemberSearch:'',
     mpMemberDetailId:null, mpMemberDetailPlans:null, mpMemberDetailBookings:null, mpNewPlanType:'recurring',
     mpArchivedPlansOpen:false, mpAllUsersMode:false, mpMemberDetailUser:null,
-    mpTemplatesOpen:false, mpTemplates:null, mpTemplateEditId:null, mpMyArchivedPlansOpen:false
+    mpTemplatesOpen:false, mpTemplates:null, mpTemplateEditId:null, mpMyArchivedPlansOpen:false,
+    myPlansOpen:false
   };
 }
 
@@ -6393,6 +6394,22 @@ function renderBoxHomeMember(box){
   const next = getNextUpcomingBooking(bookings);
   return `
     ${renderBoxIdentityCard(box)}
+    ${(()=>{
+      const mySplit = splitPlansByArchived(state.box.membershipPlans, state.box.myBookings);
+      const totalRemaining = mySplit.active.reduce((sum,p)=>sum+computePlanQuota(p, state.box.myBookings).remaining, 0);
+      return `
+    <div class="card" style="cursor:pointer;" onclick="openMyPlansScreen()">
+      <h2 class="small">Mein Kontingent</h2>
+      ${mySplit.active.length ? `
+        <div class="row" style="align-items:baseline;gap:8px;">
+          <span class="stat-num" style="font-size:28px;">${totalRemaining}</span>
+          <span class="note" style="margin:0;">Einheiten übrig in ${mySplit.active.length} aktiven Paket${mySplit.active.length===1?'':'en'}</span>
+        </div>
+      ` : `<div class="note">Kein aktives Kontingent.</div>`}
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="event.stopPropagation(); openMyPlansScreen();">Alle Pakete ansehen →</button>
+    </div>
+      `;
+    })()}
     <div class="card">
       <h2 class="small">Nächster Termin</h2>
       ${next ? `
@@ -6403,19 +6420,6 @@ function renderBoxHomeMember(box){
       ` : `<div class="note">Keine Buchung vorgemerkt.</div>`}
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="setBoxSubTab('schedule')">Zum Kursplan</button>
     </div>
-    ${state.box.membershipPlans.length ? (()=>{
-      const mySplit = splitPlansByArchived(state.box.membershipPlans, state.box.myBookings);
-      return `
-    <div class="card">
-      <h2 class="small">Mein Kontingent</h2>
-      ${mySplit.active.length ? mySplit.active.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : `<div class="note">Kein aktives Kontingent.</div>`}
-      ${mySplit.archived.length ? `
-        <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpMyArchivedPlansOpen=!state.tmp.mpMyArchivedPlansOpen; render();">Abgelaufene Kontingente (${mySplit.archived.length}) ${state.tmp.mpMyArchivedPlansOpen?'▾':'▸'}</h2>
-        ${state.tmp.mpMyArchivedPlansOpen ? mySplit.archived.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : ''}
-      ` : ''}
-    </div>
-      `;
-    })() : ''}
     <div class="card">
       <h2 class="small">Anwesenheit</h2>
       <div class="box-stat-grid">
@@ -6427,7 +6431,32 @@ function renderBoxHomeMember(box){
     </div>
   `;
 }
+function openMyPlansScreen(){
+  state.tmp.myPlansOpen = true;
+  render();
+}
+function closeMyPlansScreen(){
+  state.tmp.myPlansOpen = false;
+  render();
+}
+function renderMyPlansScreen(){
+  const mySplit = splitPlansByArchived(state.box.membershipPlans, state.box.myBookings);
+  return `
+    <div class="row" style="align-items:center;margin-bottom:10px;">
+      <button class="btn-sm btn-ghost" style="width:auto;" onclick="closeMyPlansScreen()">← Zurück</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Meine Kontingente</h2>
+      ${mySplit.active.length ? mySplit.active.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : `<div class="note">Kein aktives Kontingent.</div>`}
+      ${mySplit.archived.length ? `
+        <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpMyArchivedPlansOpen=!state.tmp.mpMyArchivedPlansOpen; render();">Abgelaufene Kontingente (${mySplit.archived.length}) ${state.tmp.mpMyArchivedPlansOpen?'▾':'▸'}</h2>
+        ${state.tmp.mpMyArchivedPlansOpen ? mySplit.archived.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : ''}
+      ` : ''}
+    </div>
+  `;
+}
 function renderBoxHome(box){
+  if(!isBoxAdminView() && state.tmp.myPlansOpen) return renderMyPlansScreen();
   return isBoxAdminView() ? renderBoxHomeAdmin(box) : renderBoxHomeMember(box);
 }
 function shiftScheduleWeek(delta){
