@@ -305,6 +305,14 @@
     background:linear-gradient(135deg, rgba(232,185,63,0.12), rgba(232,185,63,0.04)), var(--graphite-800);
     border:1px solid var(--chalk-yellow);
   }
+  .reaction-btn{
+    display:inline-flex;align-items:center;gap:4px;
+    border:none;border-radius:999px;
+    padding:6px 12px;font-size:13px;
+    background:var(--iron-700);color:var(--chalk-50);
+    cursor:pointer;
+  }
+  .reaction-btn.active{background:var(--chalk-yellow);color:var(--graphite-900);font-weight:700;}
   .chip{
     display:inline-block;
     font-size:10px;
@@ -664,7 +672,7 @@ function fmtDate(d){
 
 function defaultTmp(){
   return {
-    wodFormat:'strength',
+    wodFormat:null,
     wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, boxScheduleEditorDay: new Date().getDay(), loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
@@ -687,6 +695,9 @@ function defaultTmp(){
     prExerciseSelection:null,
     confirmReset:false,
     historyCollapsed:false,
+    pr1rmFormOpen:false, confirmDeletePrId:null,
+    timeFormOpen:false, expandedTimeName:null, confirmDeleteTimeId:null,
+    expandedMeasurementId:null,
     dayDetailDate:null,
     workoutMenu:'formats',
     boxScheduleEditId:null,
@@ -4456,11 +4467,14 @@ async function uploadBoxLogo(file){
     showToast('Upload fehlgeschlagen');
   }
 }
-async function savePersonalInfo(){
+async function saveAllPersonalData(){
+  const adminView = isBoxAdminView();
   const name = (document.getElementById('displayNameInput')?.value || '').trim();
   const lastName = (document.getElementById('lastNameInput')?.value || '').trim();
-  if(!lastName){
-    showToast('Nachname ist ein Pflichtfeld');
+  const birthDateEl = document.getElementById('pBirthDate');
+  const birthDate = birthDateEl ? birthDateEl.value : '';
+  if(!name || !lastName || (!adminView && !birthDate)){
+    showToast('Vorname, Nachname und Geburtsdatum sind Pflichtfelder');
     return;
   }
   const phone = (document.getElementById('phoneInput')?.value || '').trim();
@@ -4470,6 +4484,10 @@ async function savePersonalInfo(){
   const country = (document.getElementById('countryInput')?.value || '').trim();
   try{
     await pb.collection('users').update(pb.authStore.record.id, {name, lastName, phone, address, postalCode, city, country});
+    if(birthDateEl){
+      state.profile = { ...state.profile, birthDate: birthDateEl.value };
+      await saveKey('profile', state.profile);
+    }
     showToast('Gespeichert');
     render();
   }catch(e){
@@ -4892,7 +4910,7 @@ function renderSocialPoll(post){
         </div>
       `;
     }
-    return `<label class="row" style="align-items:center;gap:8px;margin:4px 0;"><input type="${inputType}" name="pollOpt_${post.id}" value="${opt.id}" ${checked?'checked':''} ${closed?'disabled':''}> ${escapeHtml(opt.label)}</label>`;
+    return `<label class="row" style="align-items:center;gap:8px;margin:4px 0;"><input type="${inputType}" name="pollOpt_${post.id}" value="${opt.id}" ${checked?'checked':''} ${closed?'disabled':''} style="flex:0 0 auto;width:auto;"><span style="flex:1;">${escapeHtml(opt.label)}</span></label>`;
   }).join('');
   const footer = closed ? `<div class="note">Umfrage beendet${total?` · ${total} Stimme${total>1?'n':''}`:''}</div>`
     : showResults ? `<div class="note">${total} Stimme${total!==1?'n':''}</div>`
@@ -4940,7 +4958,7 @@ function renderSocialPostCard(post){
       ${SOCIAL_REACTION_EMOJIS.map(e=>{
         const count = reactionBucket.counts[e]||0;
         const active = reactionBucket.mine?.emoji===e;
-        return `<button class="btn-sm ${active?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="toggleSocialReaction('${post.id}','${e}')">${e}${count?` ${count}`:''}</button>`;
+        return `<button class="reaction-btn ${active?'active':''}" onclick="toggleSocialReaction('${post.id}','${e}')">${e}${count?` ${count}`:''}</button>`;
       }).join('')}
     </div>
   `;
@@ -6355,9 +6373,9 @@ function renderAthleteAttendanceCard(){
   const isAttendanceRecord = !!(periodDef?.days && count>0 && count>=computeAttendanceRecordForPeriod(periodDef.days));
   return `
     <div class="card">
-      <h2 class="small">🏅 Consistency</h2>
+      <h2 class="small">🏅 Disziplin</h2>
       ${renderLeaderboardPeriodSelect()}
-      <div class="history-item" style="background:var(--iron-700);border-radius:8px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
+      <div class="history-item" style="background:var(--iron-700);border-radius:8px;padding:10px 12px;cursor:pointer;" onclick="toggleLeaderboardDetail()">
         <span class="val">Check-ins${isAttendanceRecord?' 🏆':''}</span>
         <span class="note" style="margin:0;">${count}×</span>
       </div>
@@ -7254,7 +7272,6 @@ function renderWorkout(){
 }
 function renderWorkoutInner(){
   if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
-  if(!state.tmp.wodFormat) state.tmp.wodFormat = 'strength';
   const historyHtml = ''; // Verlauf ist jetzt unter Fortschritt zu finden
   const inProgress = isWodInProgress();
   const formatSelector = inProgress ? '' : renderFormatSelector();
@@ -7262,6 +7279,8 @@ function renderWorkoutInner(){
   if(!inProgress && state.tmp.workoutMenu==='timer'){
     return formatSelector + renderTimer() + historyHtml;
   }
+
+  if(!inProgress && !state.tmp.wodFormat) return formatSelector;
 
   if(state.tmp.wodFormat==='for-time') return formatSelector + renderForTimeFlow(historyHtml);
   if(state.tmp.wodFormat==='amrap') return formatSelector + renderAmrapFlow(historyHtml);
@@ -7406,7 +7425,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         </select>
       </div>` : '';
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
-    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH${isWeighted?' (pro Satz, z.B. 7,5,3)':''}</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
+    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH (pro Satz)</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
     const pctField = isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
     const e1rmSuggestion = isWeighted && !isDistanceWeighted ? bestE1RM(t.exerciseId) : null;
     const weightSuggestionNote = e1rmSuggestion ? `
@@ -9504,23 +9523,15 @@ function renderHallOfFameEntry(e){
           <span class="date">${fmtDate(p.date)}</span>
           <span class="val">${p.value}kg manuell</span>
           <button class="remove-row" onclick="editPrEntry('${p.id}')">✎</button>
-          <button class="remove-row" onclick="deletePrEntry('${p.id}')">✕</button>
+          ${state.tmp.confirmDeletePrId===p.id ? `
+            <button class="btn-sm btn-danger" style="width:auto;" onclick="deletePrEntry('${p.id}')">Wirklich löschen?</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.confirmDeletePrId=null; render();">Abbrechen</button>
+          ` : `<button class="remove-row" onclick="state.tmp.confirmDeletePrId='${p.id}'; render();">✕</button>`}
         </div>`).join('') : ''}
     </div>`;
 }
-function renderPrCards(){
+function renderHallOfFameCard(){
   const exercisesWithData = state.exercises.filter(e => computedBest(e.id)!=null || prEntriesFor(e.id).length>0);
-  const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
-  const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
-  const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
-  const prVariantSelector = prVariantMatch ? `
-    <div class="field"><label>Variante wechseln</label>
-      <select onchange="updatePrExerciseVariant(this.value)">
-        ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
-          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.id===prVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
-      </select>
-    </div>` : '';
-
   const hofSearch = (state.tmp.hallOfFameSearch||'').toLowerCase().trim();
   const hofFiltered = hofSearch ? exercisesWithData.filter(e=>e.name.toLowerCase().includes(hofSearch)) : exercisesWithData;
   const hofSelectedId = (state.tmp.hallOfFameExercise && hofFiltered.some(e=>e.id===state.tmp.hallOfFameExercise))
@@ -9539,7 +9550,28 @@ function renderPrCards(){
 
   return `
     <div class="card">
-      <h2>${editingPr ? '1RM bearbeiten' : 'Neuer 1RM-Rekord'}</h2>
+      <h2 class="small">🏆 Kraft Rekorde</h2>
+      ${listHtml}
+    </div>
+  `;
+}
+function toggleNewPrForm(){ state.tmp.pr1rmFormOpen = !state.tmp.pr1rmFormOpen; render(); }
+function renderNewPrCard(){
+  const editingPr = state.tmp.editingPrId ? state.prEntries.find(p=>p.id===state.tmp.editingPrId) : null;
+  const open = state.tmp.pr1rmFormOpen || !!editingPr;
+  const selectedPrExerciseId = editingPr ? editingPr.exerciseId : (state.tmp.prExerciseSelection || (state.exercises[0] && state.exercises[0].id));
+  const prVariantMatch = matchLibraryVariant(state.exercises.find(e=>e.id===selectedPrExerciseId));
+  const prVariantSelector = prVariantMatch ? `
+    <div class="field"><label>Variante wechseln</label>
+      <select onchange="updatePrExerciseVariant(this.value)">
+        ${prVariantMatch.base.variants.filter(v=>!v.details || !v.details.length || v.id===prVariantMatch.variant.id)
+          .map(v=>`<option value="${v.id}" ${v.id===prVariantMatch.variant.id?'selected':''}>${v.id===prVariantMatch.variant.id?'✓ '+v.label:v.label}</option>`).join('')}
+      </select>
+    </div>` : '';
+  return `
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleNewPrForm()">${editingPr ? '1RM bearbeiten' : 'Neues 1RM eintragen'} <span>${open?'▾':'▸'}</span></h2>
+      ${open ? `
       <div class="field">
         <label>Übung</label>
         <div style="display:flex;gap:8px;">
@@ -9557,41 +9589,60 @@ function renderPrCards(){
       <button class="btn btn-primary" onclick="savePrEntry()">${editingPr ? 'Aktualisieren' : 'Eintragen'}</button>
       ${editingPr ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditPr()">Abbrechen</button>` : ''}
       <div class="note" style="margin-top:8px;">Trägst du hier einen Wert ein, gilt er als dein 1RM für diese Übung — auch für die %-Berechnung im Workout-Bereich, sofern er höher als der aus dem Training errechnete Wert ist.</div>
-    </div>
-    <div class="card">
-      <h2 class="small">🏆 Strength Records</h2>
-      ${listHtml}
+      ` : ''}
     </div>
   `;
 }
-function renderTimeCards(){
-  const editingTime = state.tmp.editingTimeId ? state.timeRecords.find(t=>t.id===state.tmp.editingTimeId) : null;
-  const uniqueTimeNames = [...new Set([
-    ...state.workouts.map(w=>w.name),
-    ...state.timeRecords.map(t=>t.name)
-  ].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+function toggleTimeRecordExpand(name){
+  state.tmp.expandedTimeName = state.tmp.expandedTimeName===name ? null : name;
+  render();
+}
+function renderTimeRecordsCard(){
   const timesByName = {};
   state.timeRecords.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(t=>{
     (timesByName[t.name] = timesByName[t.name]||[]).push(t);
   });
-  const timesHtml = Object.keys(timesByName).length ? Object.keys(timesByName).map(name=>`
-    <div class="wod-move-row">
-      <div class="wname" style="font-size:16px;margin-bottom:4px;">${escapeHtml(name)}</div>
-      ${timesByName[name].map(t=>`
+  const names = Object.keys(timesByName).sort((a,b)=>a.localeCompare(b,'de'));
+  const rowsHtml = names.length ? names.map(name=>{
+    const records = timesByName[name];
+    const open = state.tmp.expandedTimeName === name;
+    return `
+      <div class="history-item" style="background:var(--iron-700);border-radius:8px;padding:10px 12px;cursor:pointer;margin-bottom:8px;" onclick="toggleTimeRecordExpand('${escapeHtml(name)}')">
+        <span class="val">${escapeHtml(name)}</span>
+        <span class="note" style="margin:0;">${escapeHtml(records[0].time)}</span>
+      </div>
+      ${open ? records.map(t=>`
         <div class="history-item">
-          <span class="date">${fmtDate(t.date)}</span>
-          <span class="val">${escapeHtml(t.time)}</span>
-          <button class="remove-row" onclick="editTimeRecord('${t.id}')">✎</button>
-          <button class="remove-row" onclick="deleteTimeRecord('${t.id}')">✕</button>
+          <span class="date">${escapeHtml(t.time)} am ${fmtDate(t.date)}</span>
+          <button class="remove-row" onclick="event.stopPropagation();editTimeRecord('${t.id}')">✎</button>
+          ${state.tmp.confirmDeleteTimeId===t.id ? `
+            <button class="btn-sm btn-danger" style="width:auto;" onclick="event.stopPropagation();deleteTimeRecord('${t.id}')">Wirklich löschen?</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="event.stopPropagation();state.tmp.confirmDeleteTimeId=null;render();">Abbrechen</button>
+          ` : `<button class="remove-row" onclick="event.stopPropagation();state.tmp.confirmDeleteTimeId='${t.id}';render();">✕</button>`}
+          ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
         </div>
-        ${t.note ? `<div class="note">${escapeHtml(t.note)}</div>` : ''}
-      `).join('')}
-    </div>
-  `).join('') : `<div class="note">Noch keine Zeiten vorhanden.</div>`;
-
+      `).join('') : ''}
+    `;
+  }).join('') : `<div class="note">Noch keine Zeiten vorhanden.</div>`;
   return `
     <div class="card">
-      <h2>${editingTime ? 'Bestzeit bearbeiten' : 'Neue Bestzeit'}</h2>
+      <h2 class="small">⏱️ Schnelligkeit Rekorde</h2>
+      ${rowsHtml}
+    </div>
+  `;
+}
+function toggleNewTimeForm(){ state.tmp.timeFormOpen = !state.tmp.timeFormOpen; render(); }
+function renderNewTimeCard(){
+  const editingTime = state.tmp.editingTimeId ? state.timeRecords.find(t=>t.id===state.tmp.editingTimeId) : null;
+  const open = state.tmp.timeFormOpen || !!editingTime;
+  const uniqueTimeNames = [...new Set([
+    ...state.workouts.map(w=>w.name),
+    ...state.timeRecords.map(t=>t.name)
+  ].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
+  return `
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleNewTimeForm()">${editingTime ? 'Bestzeit bearbeiten' : 'Neue Bestzeit eintragen'} <span>${open?'▾':'▸'}</span></h2>
+      ${open ? `
       <div class="field">
         <label>Name</label>
         <input type="text" id="timeName" list="timeNameList" value="${editingTime?escapeHtml(editingTime.name):''}" placeholder="z.B. Fran">
@@ -9604,10 +9655,7 @@ function renderTimeCards(){
       <div class="field"><label>Notiz</label><input type="text" id="timeNote" value="${editingTime?escapeHtml(editingTime.note||''):''}"></div>
       <button class="btn btn-primary" onclick="saveTimeRecord()">${editingTime ? 'Aktualisieren' : 'Eintragen'}</button>
       ${editingTime ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelEditTime()">Abbrechen</button>` : ''}
-    </div>
-    <div class="card">
-      <h2 class="small">⏱️ Workout Records</h2>
-      ${timesHtml}
+      ` : ''}
     </div>
   `;
 }
@@ -9652,6 +9700,7 @@ function cancelEditPr(){
 async function deletePrEntry(id){
   state.prEntries = state.prEntries.filter(p=>p.id!==id);
   if(state.tmp.editingPrId===id) state.tmp.editingPrId = null;
+  state.tmp.confirmDeletePrId = null;
   await saveKey('prEntries', state.prEntries);
   showToast('Eintrag gelöscht');
   render();
@@ -9684,6 +9733,7 @@ function cancelEditTime(){
 async function deleteTimeRecord(id){
   state.timeRecords = state.timeRecords.filter(t=>t.id!==id);
   if(state.tmp.editingTimeId===id) state.tmp.editingTimeId = null;
+  state.tmp.confirmDeleteTimeId = null;
   await saveKey('timeRecords', state.timeRecords);
   showToast('Eintrag gelöscht');
   render();
@@ -10043,14 +10093,11 @@ function renderProgressDiscipline(){
     ${renderAthleteAttendanceCard()}
   `;
 }
-function renderProgress1RM(){
+function renderE1rmChartCard(){
   const exWithLogs = state.exercises.filter(e=>exerciseLogs(e.id).length>0).sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const selectedEx = state.tmp.progressExercise || (exWithLogs[0] && exWithLogs[0].id);
   const exOptions = exWithLogs.map(e=>`<option value="${e.id}" ${e.id===selectedEx?'selected':''}>${e.name}</option>`).join('');
-
   return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
-    <div class="note" style="margin-bottom:14px;">Persönliche Maximalgewichte, 1RM und andere Kraftrekorde.</div>
     <div class="card">
       <h2>1RM-Fortschritt</h2>
       ${exWithLogs.length ? `
@@ -10058,26 +10105,46 @@ function renderProgress1RM(){
       <div class="chart-wrap"><canvas id="e1rmChart"></canvas></div>
       ` : `<div class="empty-state"><div class="watermark">${iconBarbell()}</div>Noch keine Trainingsdaten vorhanden.</div>`}
     </div>
-    ${renderPrCards()}
+  `;
+}
+function renderProgress1RM(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
+    ${renderHallOfFameCard()}
+    ${renderE1rmChartCard()}
+    ${renderNewPrCard()}
   `;
 }
 function renderProgressTimes(){
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProgressSection(null)">← Zurück</button>
-    <div class="note" style="margin-bottom:14px;">Persönliche Bestzeiten bei "For Time"-Workouts.</div>
-    ${renderTimeCards()}
+    ${renderTimeRecordsCard()}
+    ${renderNewTimeCard()}
   `;
 }
+function toggleMeasurementExpand(id){
+  state.tmp.expandedMeasurementId = state.tmp.expandedMeasurementId===id ? null : id;
+  render();
+}
 function renderProgressBody(){
-  const measurementsHtml = state.measurements.slice().reverse().slice(0,6).map(m=>`
-    <div class="history-item">
-      <span class="date">${fmtDate(m.date)}</span>
-      <span class="val">${escapeHtml(formatMeasurementLine(m))}</span>
-      <button class="remove-row" onclick="deleteMeasurement('${m.id}')">✕</button>
-    </div>`).join('') || `<div class="note">Noch keine Einträge.</div>`;
-
   const selectedMetric = state.tmp.progressMetric || 'weight';
   const selectedBm = BODY_METRICS.find(bm=>bm.key===selectedMetric);
+  const measurementsHtml = state.measurements.slice().reverse().slice(0,6).map(m=>{
+    const open = state.tmp.expandedMeasurementId === m.id;
+    const compact = m[selectedMetric]!=null ? `${m[selectedMetric]}${selectedBm.unit}` : '—';
+    return `
+      <div class="history-item" style="cursor:pointer;" onclick="toggleMeasurementExpand('${m.id}')">
+        <span class="date">${fmtDate(m.date)}</span>
+        <span class="val">${escapeHtml(compact)}</span>
+        <button class="remove-row" onclick="event.stopPropagation();deleteMeasurement('${m.id}')">✕</button>
+      </div>
+      ${open ? `<div style="padding:2px 0 8px 0;">${BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`
+        <div class="row" style="justify-content:space-between;font-size:13px;padding:2px 0;">
+          <span class="note" style="margin:0;">${bm.label}</span><span class="val">${m[bm.key]}${bm.unit}</span>
+        </div>`).join('')}</div>` : ''}
+    `;
+  }).join('') || `<div class="note">Noch keine Einträge.</div>`;
+
   const hasDataForSelected = state.measurements.some(m=>m[selectedMetric]!=null);
   const metricButtons = BODY_METRICS.map(bm=>`<button class="btn ${bm.key===selectedMetric?'btn-primary':'btn-ghost'}" style="flex:1 1 30%;" onclick="setProgressMetric('${bm.key}')">${bm.label}</button>`).join('');
 
@@ -10422,12 +10489,21 @@ function renderProfileAccount(){
           <div class="field" style="margin:0;flex:1;"><label>Profilbild ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'avatar')"></div>
         </div>
         ${state.tmp.avatarEdit?.kind!=='boxLogo' ? renderAvatarEditor() : ''}`; })()}
-      <div class="field"><label>Vorname</label>
+      <div class="field"><label>Vorname <span style="color:var(--plate-red);">*</span></label>
         <input type="text" id="displayNameInput" value="${escapeHtml(me?.name||'')}" placeholder="Wie sollen dich andere sehen?">
       </div>
       <div class="field"><label>Nachname <span style="color:var(--plate-red);">*</span></label>
-        <input type="text" id="lastNameInput" value="${escapeHtml(me?.lastName||'')}" placeholder="Nachname (Pflichtfeld)">
+        <input type="text" id="lastNameInput" value="${escapeHtml(me?.lastName||'')}" placeholder="Nachname">
       </div>
+      ${adminView ? '' : `
+      <div class="field"><label>Geburtsdatum <span style="color:var(--plate-red);">*</span></label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
+      <div class="field"><label>Geschlecht</label>
+        <div class="row">
+          <button type="button" class="btn ${p.gender==='m'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
+          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
+        </div>
+      </div>
+      `}
       <div class="note" style="margin-bottom:10px;">Kontaktdaten (optional)</div>
       <div class="field"><label>Telefonnummer</label><input type="text" id="phoneInput" value="${escapeHtml(me?.phone||'')}" placeholder="z.B. +43 660 1234567"></div>
       <div class="field"><label>Adresse</label><input type="text" id="addressInput" value="${escapeHtml(me?.address||'')}" placeholder="Straße und Hausnummer"></div>
@@ -10436,17 +10512,7 @@ function renderProfileAccount(){
         <div class="field"><label>Ort</label><input type="text" id="cityInput" value="${escapeHtml(me?.city||'')}"></div>
       </div>
       <div class="field"><label>Land</label><input type="text" id="countryInput" value="${escapeHtml(me?.country||'')}"></div>
-      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="savePersonalInfo()">Speichern</button>
-      ${adminView ? '' : `
-      <div class="field"><label>Geburtsdatum</label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
-      <div class="field"><label>Geschlecht</label>
-        <div class="row">
-          <button type="button" class="btn ${p.gender==='m'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
-          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
-        </div>
-      </div>
-      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="saveProfile()">Speichern</button>
-      `}
+      <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="saveAllPersonalData()">Speichern</button>
       <div class="note" style="margin-bottom:10px;">${renderIdentityLine()}</div>
       ${me && !me.verified ? `
         <div class="note" style="color:var(--plate-red);margin-bottom:10px;">E-Mail-Adresse noch nicht bestätigt.</div>
@@ -10462,17 +10528,14 @@ function renderProfileAppSettings(){
   const adminView = isBoxAdminView();
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
-    ${adminView ? '' : `
-    <div class="card">
-      <h2 class="small">Hilfe</h2>
-      <button class="btn btn-ghost" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>
-    </div>
-    `}
     <div class="card">
       <h2>Darstellung</h2>
-      <div class="row">
-        <button class="btn ${theme==='dark'?'btn-primary':'btn-ghost'}" onclick="setTheme('dark')">Dunkel</button>
-        <button class="btn ${theme==='light'?'btn-primary':'btn-ghost'}" onclick="setTheme('light')">Hell</button>
+      <div class="row" style="align-items:center;justify-content:space-between;">
+        <span>${theme==='light' ? 'Helles Design' : 'Dunkles Design'}</span>
+        <label class="toggle-switch">
+          <input type="checkbox" ${theme==='light'?'checked':''} onchange="setTheme(this.checked?'light':'dark')">
+          <span class="toggle-slider"></span>
+        </label>
       </div>
     </div>
     <div class="card">
@@ -10508,6 +10571,7 @@ function renderProfileAppSettings(){
     `}
     <div class="card">
       <h2 class="small">Mehr</h2>
+      ${adminView ? '' : `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>`}
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen →</button>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung →</button>
     </div>
