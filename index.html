@@ -7425,7 +7425,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         </select>
       </div>` : '';
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
-    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Ziel-WH (pro Satz)</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
+    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label style="white-space:nowrap;">Ziel-WH (pro Satz)</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
     const pctField = isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
     const e1rmSuggestion = isWeighted && !isDistanceWeighted ? bestE1RM(t.exerciseId) : null;
     const weightSuggestionNote = e1rmSuggestion ? `
@@ -7468,7 +7468,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       ${state.tmp.newlyCreatedExerciseIds?.includes(t.exerciseId) ? `<span class="chip chip-waitlist">🆕 Neue Übung</span>${renderSimilarExerciseHint(t.exerciseId)}` : ''}
       ${variantSelector}
       ${isEmom ? '' : `<div class="field"><label>Zeitliche Angabe</label><input type="text" value="${escapeHtml(t.timing)}" onchange="updateTemplateField(${mi},'timing',this.value)" placeholder="z.B. Every 2:30"></div>`}
-      <div class="row">
+      <div class="row" style="margin-bottom:14px;">
         ${setsField}
         ${pctField}
         ${!isWeighted ? repsTargetField : ''}
@@ -10034,13 +10034,21 @@ const SILHOUETTE_PATHS = {
   }
 };
 const BODY_METRICS = [
-  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC'},
-  {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C'},
-  {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF'},
-  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F'},
-  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63'},
-  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C'}
+  {key:'arms', label:'Arme', unit:'cm', color:'#B57EDC', goodDirection:'up'},
+  {key:'belly', label:'Bauch', unit:'cm', color:'#E0793C', goodDirection:'down'},
+  {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF', goodDirection:'up'},
+  {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F', goodDirection:null},
+  {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63', goodDirection:'down'},
+  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C', goodDirection:'down'}
 ];
+function previousMeasurementValue(m, key){
+  const sorted = state.measurements.slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const idx = sorted.findIndex(x=>x.id===m.id);
+  for(let i=idx-1; i>=0; i--){
+    if(sorted[i][key]!=null) return sorted[i][key];
+  }
+  return null;
+}
 function formatMeasurementLine(m){
   return BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`${bm.label} ${m[bm.key]}${bm.unit}`).join(' · ') || '—';
 }
@@ -10138,10 +10146,24 @@ function renderProgressBody(){
         <span class="val">${escapeHtml(compact)}</span>
         <button class="remove-row" onclick="event.stopPropagation();deleteMeasurement('${m.id}')">✕</button>
       </div>
-      ${open ? `<div style="padding:2px 0 8px 0;">${BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>`
+      ${open ? `<div style="padding:2px 0 8px 0;">${BODY_METRICS.filter(bm=>m[bm.key]!=null).map(bm=>{
+        const prev = previousMeasurementValue(m, bm.key);
+        let deltaHtml = '';
+        if(prev!=null){
+          const diff = Math.round((m[bm.key]-prev)*10)/10;
+          if(diff!==0){
+            const sign = diff>0?'+':'';
+            let color = 'var(--iron-500)';
+            if(bm.goodDirection==='up') color = diff>0 ? 'var(--success-green)' : 'var(--plate-red)';
+            else if(bm.goodDirection==='down') color = diff<0 ? 'var(--success-green)' : 'var(--plate-red)';
+            deltaHtml = ` <span style="color:${color};">(${sign}${diff}${bm.unit})</span>`;
+          }
+        }
+        return `
         <div class="row" style="justify-content:space-between;font-size:13px;padding:2px 0;">
-          <span class="note" style="margin:0;">${bm.label}</span><span class="val">${m[bm.key]}${bm.unit}</span>
-        </div>`).join('')}</div>` : ''}
+          <span class="note" style="margin:0;">${bm.label}</span><span class="val">${m[bm.key]}${bm.unit}${deltaHtml}</span>
+        </div>`;
+      }).join('')}</div>` : ''}
     `;
   }).join('') || `<div class="note">Noch keine Einträge.</div>`;
 
@@ -10571,9 +10593,9 @@ function renderProfileAppSettings(){
     `}
     <div class="card">
       <h2 class="small">Mehr</h2>
-      ${adminView ? '' : `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>`}
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen →</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung →</button>
+      <button class="btn btn-ghost" style="justify-content:space-between;${adminView ? '' : 'margin-bottom:10px;'}" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung →</button>
+      ${adminView ? '' : `<button class="btn btn-ghost" style="justify-content:space-between;" onclick="reopenOnboarding()">📖 Kurzanleitung erneut zeigen</button>`}
     </div>
   `;
 }
