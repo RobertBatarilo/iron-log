@@ -4396,7 +4396,7 @@ function setBoxViewMode(mode){
   state.profile.boxViewMode = mode;
   saveKey('profile', state.profile);
   applyTheme(state.profile.themeByMode?.[mode] || 'dark');
-  setTab(mode==='box' ? 'box' : 'today');
+  render();
 }
 function addMinutesToTime(hhmm, minutes){
   const parts = (hhmm||'00:00').split(':').map(Number);
@@ -6281,7 +6281,7 @@ function renderScheduleSlotForm(s, editId, selectedDate){
   `;
   return `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
-      <div class="checkbox-row">
+      <div class="checkbox-row" style="margin-bottom:14px;">
         <input type="checkbox" id="slotOneTime" ${isOneTime?'checked':''} onchange="toggleSlotOneTimeFields(this.checked)">
         Einmaliger Termin (statt wöchentlich wiederkehrend)
       </div>
