@@ -673,7 +673,7 @@ function fmtDate(d){
 function defaultTmp(){
   return {
     wodFormat:null,
-    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, boxScheduleEditorDay: new Date().getDay(), loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
+    wodPhase:'template', wodTemplate:null, wodMoves:null, wodDate:null, wodName:null, wodNameMatch:null, wodFeeling:null, wodNote:null, missing1RMWarning:null, newlyCreatedExerciseIds:null, editingPrId:null, editingTimeId:null, editingWorkoutId:null, loadedDraftId:null, confirmCancelWod:false, swipedWorkoutId:null, workoutSearchQuery:'',
     adminUsers:null, adminSearch:'', adminSelectedUserId:null, adminDeleteConfirmId:null, showNachbuchenPicker:false, bookableAthletes:null,
     hallOfFameSearch:'', hallOfFameExercise:null,
     live:null,
@@ -698,6 +698,8 @@ function defaultTmp(){
     pr1rmFormOpen:false, confirmDeletePrId:null,
     timeFormOpen:false, expandedTimeName:null, confirmDeleteTimeId:null,
     expandedMeasurementId:null,
+    profileGenderDraft:null,
+    socialAnnouncementDraft:null,
     dayDetailDate:null,
     workoutMenu:'formats',
     boxScheduleEditId:null,
@@ -2166,6 +2168,9 @@ function migrateToWorkouts(oldTrainingLogs, oldWods){
 }
 
 /* ---------- Init ---------- */
+function currentViewMode(){
+  return state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
+}
 function applyTheme(theme){
   document.documentElement.dataset.theme = theme;
   const meta = document.querySelector('meta[name="theme-color"]');
@@ -2174,7 +2179,8 @@ function applyTheme(theme){
 }
 async function setTheme(theme){
   state.profile = state.profile || {};
-  state.profile.theme = theme;
+  state.profile.themeByMode = state.profile.themeByMode || {};
+  state.profile.themeByMode[currentViewMode()] = theme;
   applyTheme(theme);
   await saveKey('profile', state.profile);
   render();
@@ -2218,7 +2224,8 @@ function deriveAccentPair(baseHex){
   return { dark: hslToHex(h,s,darkL), light: hslToHex(h,s,lightL) };
 }
 function resolveAccentPair(){
-  if(state.profile?.accentColor) return deriveAccentPair(state.profile.accentColor);
+  const hex = state.profile?.accentColorByMode?.[currentViewMode()];
+  if(hex) return deriveAccentPair(hex);
   return state.box.membership?.role==='member' ? ACCENT_DEFAULTS.member : ACCENT_DEFAULTS.owner;
 }
 function applyAccentColor(theme){
@@ -2233,14 +2240,15 @@ function previewAccentColor(hex){
 }
 async function setAccentColor(hex){
   state.profile = state.profile || {};
-  state.profile.accentColor = hex;
+  state.profile.accentColorByMode = state.profile.accentColorByMode || {};
+  state.profile.accentColorByMode[currentViewMode()] = hex;
   applyAccentColor();
   await saveKey('profile', state.profile);
   render();
 }
 async function resetAccentColor(){
   state.profile = state.profile || {};
-  delete state.profile.accentColor;
+  if(state.profile.accentColorByMode) delete state.profile.accentColorByMode[currentViewMode()];
   applyAccentColor();
   await saveKey('profile', state.profile);
   render();
@@ -2393,6 +2401,7 @@ async function confirmMigration(upload){
   await initApp();
 }
 function logout(){
+  SYNC_KEYS.forEach(key=>localStorage.removeItem('ironlog:'+key));
   pb.authStore.clear();
 }
 async function resendVerification(){
@@ -2585,7 +2594,7 @@ async function initApp(){
     loadKey('drafts', [])
   ]);
   state.profile = profile || {};
-  applyTheme(state.profile.theme || 'dark');
+  applyTheme(state.profile.themeByMode?.[currentViewMode()] || 'dark');
   if(!state.profile.onboardingSeen) state.tmp.onboarding = {open:true, step:0};
   state.trainingPlan = trainingPlan;
   if(exercises && exercises.length){
@@ -2630,10 +2639,11 @@ function bottomNavHtml(){
       navBtn('profile','Profil', iconUser())
     ].join('');
   }
+  const showBoxTab = !state.box.loaded || state.box.membership?.status==='active';
   return [
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
-    navBtn('box','Box', iconBuilding()),
+    ...(showBoxTab ? [navBtn('box','Box', iconBuilding())] : []),
     navBtn('progress','Fortschritt', iconChart()),
     navBtn('profile','Profil', iconUser())
   ].join('');
@@ -4362,6 +4372,7 @@ function userTierLabel(user, hasActiveBox){
 function setBoxViewMode(mode){
   state.profile.boxViewMode = mode;
   saveKey('profile', state.profile);
+  applyTheme(state.profile.themeByMode?.[mode] || 'dark');
   setTab(mode==='box' ? 'box' : 'today');
 }
 function addMinutesToTime(hhmm, minutes){
@@ -4486,8 +4497,10 @@ async function saveAllPersonalData(){
     await pb.collection('users').update(pb.authStore.record.id, {name, lastName, phone, address, postalCode, city, country});
     if(birthDateEl){
       state.profile = { ...state.profile, birthDate: birthDateEl.value };
+      if(state.tmp.profileGenderDraft!=null) state.profile.gender = state.tmp.profileGenderDraft;
       await saveKey('profile', state.profile);
     }
+    state.tmp.profileGenderDraft = null;
     showToast('Gespeichert');
     render();
   }catch(e){
@@ -4673,7 +4686,26 @@ function cancelSocialComposer(){
   state.tmp.socialComposerText = '';
   state.tmp.socialComposerImages = [];
   state.tmp.socialPollDraft = null;
+  state.tmp.socialAnnouncementDraft = null;
   render();
+}
+function startSocialAnnouncementDraft(){
+  state.tmp.socialComposerOpen = true;
+  state.tmp.socialAnnouncementDraft = '';
+  render();
+}
+async function submitBoxAnnouncement(){
+  const text = (state.tmp.socialAnnouncementDraft||'').trim();
+  if(!text){ showToast('Bitte einen Text eingeben'); return; }
+  const boxId = state.box.membership.box;
+  try{
+    await pb.collection('social_posts').create({ box: boxId, author: pb.authStore.record.id, text, postType:'announcement' });
+    cancelSocialComposer();
+    await loadSocialFeed(boxId);
+    showToast('Ankündigung gesendet 📣');
+  }catch(e){
+    showToast('Senden fehlgeschlagen');
+  }
 }
 function startSocialPollDraft(){
   state.tmp.socialComposerOpen = true;
@@ -4838,12 +4870,26 @@ async function deleteSocialPost(postId){
 function renderSocialComposer(){
   const open = state.tmp.socialComposerOpen;
   const poll = state.tmp.socialPollDraft;
+  const announcement = state.tmp.socialAnnouncementDraft;
   if(!open){
     return `
       <div class="card">
         <div class="row" style="gap:8px;">
           <button class="btn btn-ghost" style="flex:1;" onclick="state.tmp.socialComposerOpen=true; render();">+ Beitrag erstellen</button>
           ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1;" onclick="startSocialPollDraft()">+ Umfrage erstellen</button>` : ''}
+          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1;" onclick="startSocialAnnouncementDraft()">+ 📣 Ankündigung</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  if(announcement!=null){
+    return `
+      <div class="card">
+        <h2 class="small">Ankündigung senden</h2>
+        <div class="field"><textarea rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen" oninput="state.tmp.socialAnnouncementDraft=this.value">${escapeHtml(announcement)}</textarea></div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn btn-ghost" onclick="cancelSocialComposer()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="submitBoxAnnouncement()">Ankündigung senden</button>
         </div>
       </div>
     `;
@@ -4945,6 +4991,7 @@ function renderSocialPostCard(post){
   const avatarUrl = boxAvatarUrl(author, '80x80');
   const initials = (author?.name||author?.email||'?').slice(0,2).toUpperCase();
   const canManage = me && (post.author===me.id || isBoxOwner());
+  const isAnnouncement = post.postType==='announcement';
   const isPoll = Array.isArray(post.pollOptions) && post.pollOptions.length>0;
   const images = Array.isArray(post.images) ? post.images : [];
   const imagesHtml = images.length ? `
@@ -4965,7 +5012,8 @@ function renderSocialPostCard(post){
   const pollHtml = isPoll ? renderSocialPoll(post) : '';
   const commentsOpen = state.tmp.socialOpenCommentsPostId===post.id;
   return `
-    <div class="wod-card" style="margin-bottom:12px;">
+    <div class="wod-card" style="margin-bottom:12px;${isAnnouncement?'border:1px solid var(--chalk-yellow);':''}">
+      ${isAnnouncement ? `<span class="chip chip-owner" style="margin-left:0;margin-bottom:8px;display:inline-block;">📣 Ankündigung</span>` : ''}
       <div class="row" style="align-items:center;gap:10px;">
         <div class="box-avatar" style="width:36px;height:36px;font-size:13px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
         <div style="flex:1;">
@@ -6000,19 +6048,6 @@ async function regenerateInviteCode(){
     showToast('Fehlgeschlagen');
   }
 }
-async function sendBoxAnnouncement(){
-  if(!isBoxOwner()) return;
-  const input = document.getElementById('announceText');
-  const text = (input?.value || '').trim();
-  if(!text){ showToast('Bitte einen Text eingeben'); return; }
-  try{
-    await pb.send('/box-announce', {method:'POST', body:{box: state.box.membership.box, text}});
-    if(input) input.value = '';
-    showToast('Ankündigung gesendet 📣');
-  }catch(e){
-    showToast('Senden fehlgeschlagen');
-  }
-}
 async function saveScheduleSlot(id){
   const startTime = document.getElementById('slotStartTime').value.trim();
   const label = document.getElementById('slotLabel').value.trim();
@@ -6261,30 +6296,43 @@ function renderBoxIdentityCard(box){
   const me = pb.authStore.record;
   const avatarUrl = boxAvatarUrl(me, '100x100');
   const initials = (me?.name || me?.email || '?').slice(0,2).toUpperCase();
-  const boxUrl = boxLogoUrl(box, '100x100');
-  const boxInitial = (box?.name||'Box').slice(0,1).toUpperCase();
-  const boxLogoCircle = `<div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${boxUrl?`background-image:url('${boxUrl}');`:''}">${boxUrl?'':boxInitial}</div>`;
-  const admin = isBoxAdminView();
   return `
     <div class="card">
       <div class="row" style="align-items:center;gap:12px;">
         <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${avatarUrl?`background-image:url('${avatarUrl}');`:''}">${avatarUrl?'':initials}</div>
         <div style="flex:1;font-family:var(--font-display);font-weight:700;font-size:16px;">${renderIdentityLine()}</div>
       </div>
-      ${admin ? `
-        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
+    </div>
+  `;
+}
+function renderProfileBoxSettings(){
+  const m = state.box.membership;
+  let body;
+  if(!m){
+    body = renderBoxJoinOrCreate();
+  } else if(m.status==='pending'){
+    const boxName = m.expand?.box?.name || 'Box';
+    body = `<div class="card" style="text-align:center;"><h2>Beitrittsanfrage gesendet</h2><div class="note">Deine Anfrage für "${escapeHtml(boxName)}" wartet auf Bestätigung durch den Box-Betreiber.</div></div>`;
+  } else if(isBoxOwner()){
+    const box = m.expand?.box;
+    const boxUrl = boxLogoUrl(box, '100x100');
+    const boxInitial = (box?.name||'Box').slice(0,1).toUpperCase();
+    body = `
+      <div class="card">
+        <h2 class="small">Box-Einstellungen</h2>
         <div class="row" style="align-items:center;gap:12px;margin-bottom:10px;">
-          ${boxLogoCircle}
+          <div class="box-avatar" style="width:56px;height:56px;font-size:18px;flex:0 0 auto;${boxUrl?`background-image:url('${boxUrl}');`:''}">${boxUrl?'':boxInitial}</div>
           <div class="field" style="margin:0;flex:1;"><label>Logo ändern</label><input type="file" accept="image/*" onchange="handleAvatarFileSelect(this,'boxLogo')"></div>
         </div>
         ${state.tmp.avatarEdit?.kind==='boxLogo' ? renderAvatarEditor() : ''}
-        <div class="field"><label>Box-Name</label>
-          <input type="text" id="boxNameInput" value="${escapeHtml(box?.name||'')}">
-        </div>
+        <div class="field"><label>Box-Name</label><input type="text" id="boxNameInput" value="${escapeHtml(box?.name||'')}"></div>
         <button class="btn btn-primary" onclick="saveBoxSettings()">Speichern</button>
-      ` : ''}
-    </div>
-  `;
+      </div>
+    `;
+  } else {
+    body = `<div class="card"><div class="note">${renderIdentityLine()}</div></div>`;
+  }
+  return `<button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>${body}`;
 }
 const LEADERBOARD_PERIODS = [
   {key:'week', label:'Letzte Woche', days:7},
@@ -6396,7 +6444,7 @@ function renderCoachLeaderboardCard(){
     .filter(r=>!search || r.name.toLowerCase().includes(search));
   return `
     <div class="card">
-      <h2 class="small">🏅 Hall of Discipline</h2>
+      <h2 class="small">🏅 Engagement der Athleten</h2>
       ${renderLeaderboardPeriodSelect()}
       <div class="field" style="margin-bottom:10px;">
         <input type="text" id="leaderboardSearchInput" placeholder="Athlet suchen …" value="${escapeHtml(state.tmp.leaderboardSearch||'')}" oninput="state.tmp.leaderboardSearch=this.value; debounceRender('leaderboardSearch');">
@@ -6415,18 +6463,12 @@ function renderBoxHomeAdmin(box){
   const pending = state.box.pendingMemberships;
   return `
     ${renderBoxIdentityCard(box)}
-    ${renderCoachLeaderboardCard()}
     <div class="card">
       <h2 class="small">Mitglieder</h2>
       <div class="note" style="margin-bottom:10px;">${pending.length ? `${pending.length} offene Beitrittsanfrage${pending.length===1?'':'n'} · ` : ''}Kontingente zuweisen, Beitrittsanfragen bestätigen, Einladungslink teilen.</div>
       <button class="btn btn-ghost" onclick="openBoxMembersScreen()">Verwalten →</button>
     </div>
-    <div class="card">
-      <h2 class="small">Box-Ankündigung</h2>
-      <div class="note" style="margin-bottom:10px;">Sendet eine Push-Benachrichtigung an alle aktiven Mitglieder.</div>
-      <div class="field"><textarea id="announceText" rows="3" placeholder="z.B. Morgen wegen Feiertag geschlossen"></textarea></div>
-      <button class="btn btn-primary" onclick="sendBoxAnnouncement()">📣 Ankündigung senden</button>
-    </div>
+    ${renderCoachLeaderboardCard()}
   `;
 }
 function renderBoxHomeMember(box){
@@ -6607,45 +6649,31 @@ function renderBoxScheduleTab(){
   const editorCard = isBoxAdminView() ? (()=>{
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
-    const editorDay = state.tmp.boxScheduleEditorDay;
-    const formSlot = editId==='new' ? {weekday: editorDay ?? 1,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
-    const weekdayOrder = [1,2,3,4,5,6,0];
-    const sortedSlots = state.box.scheduleSlots.slice().sort((a,b)=> a.weekday-b.weekday || a.startTime.localeCompare(b.startTime));
-    const byWeekday = {};
-    sortedSlots.forEach(s=>{ (byWeekday[s.weekday] = byWeekday[s.weekday]||[]).push(s); });
-    const daysToShow = editorDay===null ? weekdayOrder.filter(wd=>byWeekday[wd]) : (byWeekday[editorDay] ? [editorDay] : []);
-    const dayTabsHtml = `
-      <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;">
-        <button class="btn-sm ${editorDay===null?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="state.tmp.boxScheduleEditorDay=null; render();">Alle</button>
-        ${weekdayOrder.map(wd=>`<button class="btn-sm ${editorDay===wd?'btn-primary':'btn-ghost'}" style="width:auto;" onclick="state.tmp.boxScheduleEditorDay=${wd}; render();">${WEEKDAY_NAMES[wd]}${byWeekday[wd]?` (${byWeekday[wd].length})`:''}</button>`).join('')}
+    const editorWeekday = new Date(selected+'T00:00:00').getDay();
+    const formSlot = editId==='new' ? {weekday: editorWeekday,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
+    const daySlots = state.box.scheduleSlots.filter(s=>s.weekday===editorWeekday).sort((a,b)=>a.startTime.localeCompare(b.startTime));
+    const slotsHtml = daySlots.map(s=>`
+      <div class="history-item">
+        <span class="date">${escapeHtml(s.startTime)}</span>
+        <span class="val">${escapeHtml(s.label)}</span>
+        <span>
+          <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
+          <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
+        </span>
       </div>
-    `;
-    const groupedHtml = daysToShow.map(wd=>`
-      <div class="note" style="margin-top:10px;margin-bottom:4px;font-weight:600;">${WEEKDAY_NAMES[wd]}</div>
-      ${byWeekday[wd].map(s=>`
-        <div class="history-item">
-          <span class="date">${escapeHtml(s.startTime)}</span>
-          <span class="val">${escapeHtml(s.label)}</span>
-          <span>
-            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
-            <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
-          </span>
-        </div>
-      `).join('')}
-    `).join('');
+    `).join('') || `<div class="note">Keine Termine an diesem Tag.</div>`;
     return `
       <div class="card">
-        <h2 class="small">Termine verwalten</h2>
-        ${dayTabsHtml}
-        ${daysToShow.length ? groupedHtml : `<div class="note">Keine Termine an diesem Tag.</div>`}
+        <h2 class="small">Termine für ${WEEKDAY_NAMES[editorWeekday]}</h2>
+        ${slotsHtml}
         ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
       </div>
     `;
   })() : '';
   return `
     <div class="card">${weekNav}<div class="row" style="gap:4px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftScheduleWeek(1), ()=>shiftScheduleWeek(-1))">${strip}</div></div>
-    <div class="card"><h2 class="small">Termine</h2>${body}</div>
     ${editorCard}
+    <div class="card"><h2 class="small">Termine</h2>${body}</div>
   `;
 }
 function openClassDetailModal(instanceId){
@@ -10311,6 +10339,7 @@ async function createTrainingPlan(){
 function renderProfile(){
   const section = state.tmp.profileSection;
   if(section==='account') return renderProfileAccount();
+  if(section==='boxsettings') return renderProfileBoxSettings();
   if(section==='notifications') return renderProfileNotificationsPage();
   if(section==='appsettings') return renderProfileAppSettings();
   if(section==='data') return renderProfileData();
@@ -10357,21 +10386,30 @@ function renderMyExercisesScreen(){
 }
 function renderProfileMenu(){
   const mode = state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
+  const m = state.box.membership;
+  const showBoxSettings = !m || m.status==='pending' || isBoxOwner();
   return `
     ${isBoxOwner() ? `
     <div class="card">
       <h2 class="small">Rolle</h2>
-      <div class="row">
-        <button class="btn ${mode==='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('box')">Coach</button>
-        <button class="btn ${mode!=='box'?'btn-primary':'btn-ghost'}" onclick="setBoxViewMode('athlete')">Athlet</button>
+      <div class="row" style="align-items:center;justify-content:space-between;">
+        <span>${mode==='box' ? 'Coach' : 'Athlet'}</span>
+        <label class="toggle-switch">
+          <input type="checkbox" ${mode==='box'?'checked':''} onchange="setBoxViewMode(this.checked?'box':'athlete')">
+          <span class="toggle-slider"></span>
+        </label>
       </div>
     </div>
     ` : ''}
     <div class="card">
       <h2>Profil</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('account')">👤 Persönliche Daten</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('exercises')">📋 Meine Übungen</button>
+      ${showBoxSettings ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('boxsettings')">🏋️ Box-Einstellungen</button>` : ''}
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('appsettings')">⚙️ App-Einstellungen</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Meine Übungen</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('exercises')">📋 Verwalten →</button>
     </div>
   `;
 }
@@ -10497,12 +10535,21 @@ function renderAdminUserDetail(){
     </div>
   `;
 }
+function selectGenderDraft(g){
+  state.tmp.profileGenderDraft = g;
+  document.querySelectorAll('.gender-draft-btn').forEach(btn=>{
+    const active = btn.dataset.gender===g;
+    btn.classList.toggle('btn-primary', active);
+    btn.classList.toggle('btn-ghost', !active);
+  });
+}
 function renderProfileAccount(){
   const p = state.profile || {};
   const adminView = isBoxAdminView();
   const me = pb.authStore.record;
+  const genderValue = state.tmp.profileGenderDraft ?? p.gender;
   return `
-    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="state.tmp.profileGenderDraft=null; setProfileSection(null);">← Zurück</button>
     <div class="card">
       <h2 class="small">Persönliche Daten</h2>
       ${(()=>{ const url=boxAvatarUrl(me,'100x100'); const initials=(me?.name || me?.email || '?').slice(0,2).toUpperCase();
@@ -10521,8 +10568,8 @@ function renderProfileAccount(){
       <div class="field"><label>Geburtsdatum <span style="color:var(--plate-red);">*</span></label><input type="date" id="pBirthDate" value="${p.birthDate||''}"></div>
       <div class="field"><label>Geschlecht</label>
         <div class="row">
-          <button type="button" class="btn ${p.gender==='m'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('m')">Männlich</button>
-          <button type="button" class="btn ${p.gender==='w'?'btn-primary':'btn-ghost'}" onclick="setGenderChoice('w')">Weiblich</button>
+          <button type="button" class="gender-draft-btn btn ${genderValue==='m'?'btn-primary':'btn-ghost'}" data-gender="m" onclick="selectGenderDraft('m')">Männlich</button>
+          <button type="button" class="gender-draft-btn btn ${genderValue==='w'?'btn-primary':'btn-ghost'}" data-gender="w" onclick="selectGenderDraft('w')">Weiblich</button>
         </div>
       </div>
       `}
@@ -10546,7 +10593,8 @@ function renderProfileAccount(){
 }
 function renderProfileAppSettings(){
   const p = state.profile || {};
-  const theme = p.theme || 'dark';
+  const viewMode = currentViewMode();
+  const theme = p.themeByMode?.[viewMode] || 'dark';
   const adminView = isBoxAdminView();
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
@@ -10564,7 +10612,7 @@ function renderProfileAppSettings(){
       <h2 class="small">Akzentfarbe</h2>
       <div class="note" style="margin-bottom:10px;">Persönliche Hervorhebungsfarbe der App.</div>
       <div class="row" style="align-items:center;gap:12px;">
-        <input type="color" value="${escapeHtml(p.accentColor || defaultAccentBase())}"
+        <input type="color" value="${escapeHtml(p.accentColorByMode?.[viewMode] || defaultAccentBase())}"
                oninput="previewAccentColor(this.value)" onchange="setAccentColor(this.value)"
                style="width:52px;height:40px;padding:2px;">
         <button class="btn btn-ghost" onclick="resetAccentColor()">Zurücksetzen auf Standard</button>

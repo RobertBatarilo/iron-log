@@ -35,11 +35,6 @@ onRecordAfterCreateSuccess((e) => {
   try {
     const notify = require(`${__hooks}/notify_helper.js`);
     const post = e.record;
-    const pollOptions = post.get("pollOptions");
-    if (!pollOptions || !Array.isArray(pollOptions) || !pollOptions.length) {
-      e.next();
-      return;
-    }
     const boxId = post.getString("box");
     const authorId = post.getString("author");
     const members = $app.findRecordsByFilter(
@@ -49,6 +44,25 @@ onRecordAfterCreateSuccess((e) => {
       0, 0,
       { box: boxId }
     );
+
+    if (post.getString("postType") === "announcement") {
+      const box = $app.findRecordById("boxes", boxId);
+      const title = `📣 ${box.getString("name")}`;
+      const body = post.getString("text") || "";
+      for (const m of members) {
+        const userId = m.getString("user");
+        if (userId === authorId) continue;
+        notify.sendPushToUser(userId, "announcement", title, body);
+      }
+      e.next();
+      return;
+    }
+
+    const pollOptions = post.get("pollOptions");
+    if (!pollOptions || !Array.isArray(pollOptions) || !pollOptions.length) {
+      e.next();
+      return;
+    }
     const title = "Neue Umfrage 🗳️";
     const body = post.getString("text") || "Es gibt eine neue Umfrage.";
     for (const m of members) {
