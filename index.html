@@ -261,6 +261,29 @@
   .toggle-switch .toggle-slider::before{ content:""; position:absolute; height:20px; width:20px; left:3px; top:3px; background:var(--chalk-50); border-radius:50%; transition:transform 0.2s ease; }
   .toggle-switch input:checked + .toggle-slider{ background:var(--chalk-yellow); }
   .toggle-switch input:checked + .toggle-slider::before{ transform:translateX(18px); background:var(--graphite-900); }
+  .role-switch{
+    display:flex;
+    background:var(--iron-700);
+    border-radius:999px;
+    padding:4px;
+    gap:4px;
+  }
+  .role-switch-option{
+    flex:1;
+    border:none;
+    background:transparent;
+    color:var(--iron-500);
+    font-weight:700;
+    font-size:14px;
+    padding:10px 0;
+    border-radius:999px;
+    cursor:pointer;
+    transition:background 0.2s ease, color 0.2s ease;
+  }
+  .role-switch-option.active{
+    background:var(--success-green);
+    color:var(--chalk-50);
+  }
   @keyframes muscleUpMotion{
     0%,100%{ transform:translateY(22px); }
     35%{ transform:translateY(-4px); }
@@ -4874,10 +4897,10 @@ function renderSocialComposer(){
   if(!open){
     return `
       <div class="card">
-        <div class="row" style="gap:8px;">
-          <button class="btn btn-ghost" style="flex:1;" onclick="state.tmp.socialComposerOpen=true; render();">+ Beitrag erstellen</button>
-          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1;" onclick="startSocialPollDraft()">+ Umfrage erstellen</button>` : ''}
-          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1;" onclick="startSocialAnnouncementDraft()">+ 📣 Ankündigung</button>` : ''}
+        <div class="row" style="gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" style="flex:1 1 auto;min-width:0;" onclick="state.tmp.socialComposerOpen=true; render();">+ Beitrag erstellen</button>
+          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1 1 auto;min-width:0;" onclick="startSocialPollDraft()">+ Umfrage erstellen</button>` : ''}
+          ${isBoxOwner() ? `<button class="btn btn-ghost" style="flex:1 1 auto;min-width:0;" onclick="startSocialAnnouncementDraft()">+ 📣 Ankündigung</button>` : ''}
         </div>
       </div>
     `;
@@ -5124,7 +5147,7 @@ async function ensureClassInstancesForDate(boxId, dateStr){
   if(state.tmp.scheduleEnsuredDates.has(key)) return;
   try{
     const weekday = new Date(dateStr+'T00:00:00').getDay();
-    const slotsForWeekday = state.box.scheduleSlots.filter(s=>s.weekday===weekday);
+    const slotsForWeekday = state.box.scheduleSlots.filter(s=>s.oneTimeDate ? s.oneTimeDate===dateStr : s.weekday===weekday);
     const existing = await pb.collection('class_instances').getFullList({filter: pb.filter('box = {:box} && date = {:date}', {box:boxId, date:dateStr}), requestKey:null});
     const existingBySlot = new Map(existing.map(ci=>[ci.scheduleSlot, ci]));
 
@@ -5541,7 +5564,7 @@ function renderArchivedWorkoutCard(w){
 function renderArchiveAssignForm(w){
   const selected = state.tmp.workoutsSelectedDate || todayStr();
   const weekday = new Date(selected+'T00:00:00').getDay();
-  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.weekday===weekday).map(s=>s.label))];
+  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.oneTimeDate ? s.oneTimeDate===selected : s.weekday===weekday).map(s=>s.label))];
   return `
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--iron-700);">
       <div class="note" style="margin-bottom:6px;">Für ${fmtDate(selected)} übernehmen:</div>
@@ -6060,15 +6083,23 @@ async function saveScheduleSlot(id){
   const cancellationCutoffHours = cutoffRaw==='' ? null : parseInt(cutoffRaw);
   if(!startTime || !label){ showToast('Bitte Uhrzeit und Bezeichnung angeben'); return; }
   const boxId = state.box.membership.box;
+  const isOneTime = document.getElementById('slotOneTime')?.checked;
   try{
-    if(id){
+    if(isOneTime){
+      const oneTimeDate = document.getElementById('slotOneTimeDate')?.value;
+      if(!oneTimeDate){ showToast('Bitte ein Datum wählen'); return; }
+      const weekday = new Date(oneTimeDate+'T00:00:00').getDay();
+      const payload = {weekday, oneTimeDate, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours};
+      if(id) await pb.collection('schedule_slots').update(id, payload);
+      else await pb.collection('schedule_slots').create({box:boxId, ...payload});
+    } else if(id){
       const weekday = parseInt(document.getElementById('slotWeekday').value);
-      await pb.collection('schedule_slots').update(id, {weekday, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
+      await pb.collection('schedule_slots').update(id, {weekday, oneTimeDate:null, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
     } else {
       const weekdays = Array.from(document.querySelectorAll('.slotWeekdayCheck:checked')).map(el=>parseInt(el.value));
       if(!weekdays.length){ showToast('Bitte mindestens einen Wochentag wählen'); return; }
       for(const weekday of weekdays){
-        await pb.collection('schedule_slots').create({box:boxId, weekday, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
+        await pb.collection('schedule_slots').create({box:boxId, weekday, oneTimeDate:null, startTime, label, coachName, durationMin, capacity, minParticipants, cancellationCutoffHours});
       }
     }
     state.tmp.boxScheduleEditId = null;
@@ -6223,9 +6254,14 @@ function renderBoxJoinOrCreate(){
     </div>
   `;
 }
-function renderScheduleSlotForm(s, editId){
+function toggleSlotOneTimeFields(checked){
+  document.getElementById('slotRecurringFields').style.display = checked ? 'none' : '';
+  document.getElementById('slotOneTimeFields').style.display = checked ? '' : 'none';
+}
+function renderScheduleSlotForm(s, editId, selectedDate){
   const isNew = editId==='new';
-  const weekdayField = isNew ? `
+  const isOneTime = !!s.oneTimeDate;
+  const recurringFields = isNew ? `
     <div class="field"><label>Wochentag(e)</label>
       <div class="row" style="flex-wrap:wrap;gap:10px;">
         ${[1,2,3,4,5,6,0].map(d=>`
@@ -6234,22 +6270,26 @@ function renderScheduleSlotForm(s, editId){
           </label>
         `).join('')}
       </div>
-      <div class="note" style="margin-top:4px;">Mehrere Tage wählbar — legt für jeden gewählten Tag einen eigenen Termin mit derselben Uhrzeit an.</div>
+      <div class="note" style="margin-top:4px;">Mehrere Tage wählbar — legt für jeden gewählten Tag einen eigenen, wöchentlich wiederkehrenden Termin mit derselben Uhrzeit an.</div>
     </div>
-    <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
   ` : `
-    <div class="row">
-      <div class="field"><label>Wochentag</label>
-        <select id="slotWeekday">
-          ${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${s.weekday===d?'selected':''}>${WEEKDAY_NAMES[d]}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
+    <div class="field"><label>Wochentag</label>
+      <select id="slotWeekday">
+        ${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${s.weekday===d?'selected':''}>${WEEKDAY_NAMES[d]}</option>`).join('')}
+      </select>
     </div>
   `;
   return `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
-      ${weekdayField}
+      <div class="checkbox-row">
+        <input type="checkbox" id="slotOneTime" ${isOneTime?'checked':''} onchange="toggleSlotOneTimeFields(this.checked)">
+        Einmaliger Termin (statt wöchentlich wiederkehrend)
+      </div>
+      <div id="slotRecurringFields" style="${isOneTime?'display:none;':''}">${recurringFields}</div>
+      <div id="slotOneTimeFields" class="field" style="${isOneTime?'':'display:none;'}">
+        <label>Datum</label><input type="date" id="slotOneTimeDate" value="${s.oneTimeDate || (isNew ? selectedDate : '')}">
+      </div>
+      <div class="field"><label>Uhrzeit</label><input type="text" id="slotStartTime" value="${escapeHtml(s.startTime||'')}" placeholder="06:00"></div>
       <div class="field"><label>Bezeichnung</label><input type="text" id="slotLabel" value="${escapeHtml(s.label||'')}" placeholder="CrossFit"></div>
       <div class="field"><label>Coach (optional)</label><input type="text" id="slotCoachName" value="${escapeHtml(s.coachName||'')}"></div>
       <div class="row">
@@ -6650,12 +6690,12 @@ function renderBoxScheduleTab(){
     const editId = state.tmp.boxScheduleEditId;
     const editing = editId && editId!=='new' ? state.box.scheduleSlots.find(s=>s.id===editId) : null;
     const editorWeekday = new Date(selected+'T00:00:00').getDay();
-    const formSlot = editId==='new' ? {weekday: editorWeekday,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
-    const daySlots = state.box.scheduleSlots.filter(s=>s.weekday===editorWeekday).sort((a,b)=>a.startTime.localeCompare(b.startTime));
+    const formSlot = editId==='new' ? {weekday: editorWeekday,oneTimeDate:null,startTime:'',label:'',coachName:'',durationMin:60,capacity:12,minParticipants:null,cancellationCutoffHours:null} : editing;
+    const daySlots = state.box.scheduleSlots.filter(s=>s.oneTimeDate ? s.oneTimeDate===selected : s.weekday===editorWeekday).sort((a,b)=>a.startTime.localeCompare(b.startTime));
     const slotsHtml = daySlots.map(s=>`
       <div class="history-item">
         <span class="date">${escapeHtml(s.startTime)}</span>
-        <span class="val">${escapeHtml(s.label)}</span>
+        <span class="val">${escapeHtml(s.label)}${s.oneTimeDate ? ' <span class="chip">Einmalig</span>' : ''}</span>
         <span>
           <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.boxScheduleEditId='${s.id}'; render();">✎</button>
           <button class="btn-sm btn-ghost" style="width:auto;" onclick="deleteScheduleSlot('${s.id}')">✕</button>
@@ -6666,7 +6706,7 @@ function renderBoxScheduleTab(){
       <div class="card">
         <h2 class="small">Termine für ${WEEKDAY_NAMES[editorWeekday]}</h2>
         ${slotsHtml}
-        ${formSlot ? renderScheduleSlotForm(formSlot, editId) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
+        ${formSlot ? renderScheduleSlotForm(formSlot, editId, selected) : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.boxScheduleEditId='new'; render();">+ Termin hinzufügen</button>`}
       </div>
     `;
   })() : '';
@@ -6837,7 +6877,7 @@ function renderBoxWorkoutsTab(){
         <div class="field"><label>Workout-Art (optional)</label>
           <select id="freeformCategory">
             <option value="">— Keine Zuordnung —</option>
-            ${[...new Set(state.box.scheduleSlots.filter(s=>s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>s.label))].map(c=>`<option value="${escapeHtml(c)}" ${editing?.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+            ${[...new Set(state.box.scheduleSlots.filter(s=>s.oneTimeDate ? s.oneTimeDate===selected : s.weekday===new Date(selected+'T00:00:00').getDay()).map(s=>s.label))].map(c=>`<option value="${escapeHtml(c)}" ${editing?.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div class="row">
@@ -7405,7 +7445,7 @@ function buildHeaderFields(uniqueNames){
 function renderBoxCategoryPicker(){
   const date = state.tmp.wodDate || todayStr();
   const weekday = new Date(date+'T00:00:00').getDay();
-  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.weekday===weekday).map(s=>s.label))];
+  const categories = [...new Set(state.box.scheduleSlots.filter(s=>s.oneTimeDate ? s.oneTimeDate===date : s.weekday===weekday).map(s=>s.label))];
   return `<div class="field"><label>Workout-Art (optional)</label>
     <select onchange="state.tmp.wodCategory=this.value">
       <option value="">— Keine Zuordnung —</option>
@@ -10392,12 +10432,9 @@ function renderProfileMenu(){
     ${isBoxOwner() ? `
     <div class="card">
       <h2 class="small">Rolle</h2>
-      <div class="row" style="align-items:center;justify-content:space-between;">
-        <span>${mode==='box' ? 'Coach' : 'Athlet'}</span>
-        <label class="toggle-switch">
-          <input type="checkbox" ${mode==='box'?'checked':''} onchange="setBoxViewMode(this.checked?'box':'athlete')">
-          <span class="toggle-slider"></span>
-        </label>
+      <div class="role-switch">
+        <button class="role-switch-option ${mode!=='box'?'active':''}" onclick="setBoxViewMode('athlete')">Athlet</button>
+        <button class="role-switch-option ${mode==='box'?'active':''}" onclick="setBoxViewMode('box')">Coach</button>
       </div>
     </div>
     ` : ''}
