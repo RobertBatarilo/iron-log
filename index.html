@@ -7258,13 +7258,18 @@ function generateWorkoutAutoSummary(w){
   const improved = perfBetter(score.type, score.value, compareTarget.score.value);
   return `${improved?'📈':'📉'} ${deltaLabel} ${improved?'besser':'schwächer'} als beim letzten Versuch am ${fmtDate(compareTarget.w.date)}.`;
 }
+function toggleWorkoutExpanded(id){
+  state.tmp.expandedWorkoutId = state.tmp.expandedWorkoutId===id ? null : id;
+  render();
+}
 function renderWorkoutHistoryEntry(w){
   const format = w.format || 'strength';
   const autoSummary = generateWorkoutAutoSummary(w);
-  let body;
+  let body, summaryLine;
   if(format==='for-time'){
     const ft = w.forTime || {};
     const timeLabel = ft.elapsedSec!=null ? fmtClock(ft.elapsedSec*1000,false) : '—';
+    summaryLine = `${timeLabel}${ft.capped?' (Time Cap)':''}${(ft.movements||[]).length ? ' · '+(ft.movements||[]).length+' Übungen' : ''}`;
     body = `<div class="moves">
       <div><span>Zeit</span><span>${timeLabel}${ft.capped?' (Time Cap)':''}</span></div>
       ${ft.roundsCompleted>0 ? `<div><span>Runden</span><span>${ft.roundsCompleted}</span></div>` : ''}
@@ -7279,6 +7284,7 @@ function renderWorkoutHistoryEntry(w){
     </div>`;
   } else if(format==='amrap'){
     const am = w.amrap || {};
+    summaryLine = `${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}`;
     body = `<div class="moves">
       <div><span>Ergebnis</span><span>${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}</span></div>
       ${(am.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
@@ -7292,10 +7298,12 @@ function renderWorkoutHistoryEntry(w){
         : fl.unit==='sec' ? `${fl.achievedWeight||0}s`
         : fl.unit==='reps' ? `${fl.achievedWeight||0}x`
         : `${fl.achievedWeight||0} kcal`;
+      summaryLine = `${ex?ex.name:'—'}: ${qty}`;
       body = `<div class="moves">
         <div><span>${ex?ex.name:'—'}</span><span>${qty}</span></div>
       </div>`;
     } else {
+      summaryLine = `${ex?ex.name:'—'}: ${fmtWeight(fl.achievedWeight)}`;
       body = `<div class="moves">
         <div><span>${ex?ex.name:'—'}</span><span>${fmtWeight(fl.achievedWeight)}</span></div>
         <div><span>Ziel-Wdh.</span><span>${fl.targetReps||'—'}</span></div>
@@ -7303,12 +7311,28 @@ function renderWorkoutHistoryEntry(w){
     }
   } else if(format==='run'){
     const r = w.run || {};
+    summaryLine = `${toDisplayDistance(r.distanceM)}${distanceUnitLabel()} · ${r.elapsedSec!=null?fmtClock(r.elapsedSec*1000,false):'—'}`;
     body = `<div class="moves">
       <div><span>Distanz</span><span>${toDisplayDistance(r.distanceM)}${distanceUnitLabel()}</span></div>
       <div><span>Zeit</span><span>${r.elapsedSec!=null?fmtClock(r.elapsedSec*1000,false):'—'}</span></div>
       <div><span>Ø Pace</span><span>${formatPace(r.distanceM||0, (r.elapsedSec||0)*1000)}</span></div>
     </div>`;
+  } else if(w.roundsLog && w.roundsLog.length){
+    const totalSets = w.roundsLog.reduce((n,round)=>n+round.length,0);
+    summaryLine = `${w.movements.length} Übungen · ${totalSets} Sätze`;
+    body = `<div class="moves">
+      ${w.roundsLog.map((round,ri)=>{
+        const line = round.map(item=>{
+          const ex = state.exercises.find(e=>e.id===item.exerciseId);
+          const isWeighted = getExerciseType(ex)==='weighted';
+          return `${ex?ex.name:'—'} ${item.reps}${isWeighted?'×'+item.weight+'kg':'x'}`;
+        }).join(' + ');
+        return `<div><span>Runde ${ri+1}: ${escapeHtml(line)}</span></div>`;
+      }).join('')}
+    </div>`;
   } else {
+    const totalSets = w.movements.reduce((n,m)=>n+m.sets.length,0);
+    summaryLine = `${w.movements.length} Übungen · ${totalSets} Sätze`;
     body = `<div class="moves">
       ${w.movements.map(m=>{
         const ex = state.exercises.find(e=>e.id===m.exerciseId);
@@ -7333,17 +7357,21 @@ function renderWorkoutHistoryEntry(w){
     </div>`;
   }
   const swipeOffset = state.tmp.swipedWorkoutId===w.id ? -SWIPE_DELETE_WIDTH : 0;
+  const isExpanded = state.tmp.expandedWorkoutId === w.id;
   return `
     <div class="swipe-item" style="position:relative;overflow:hidden;touch-action:pan-y;margin-bottom:14px;" ontouchstart="cardSwipeStart(event,'${w.id}')" ontouchmove="cardSwipeMove(event)" ontouchend="cardSwipeEnd(event,'${w.id}')">
       <div style="position:absolute;top:0;right:0;bottom:0;width:${SWIPE_DELETE_WIDTH}px;background:var(--plate-red);border-radius:0 10px 10px 0;">
         <button type="button" style="background:none;border:none;color:#fff;font-weight:600;font-size:12px;width:100%;height:100%;cursor:pointer;line-height:1.4;" onclick="deleteWorkout('${w.id}')">🗑️<br>Löschen</button>
       </div>
       <div class="swipe-content wod-card" style="position:relative;background:var(--graphite-800);margin-bottom:0;transform:translateX(${swipeOffset}px);transition:transform 0.2s ease;">
-        <div class="wname" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div class="wname" style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;" onclick="toggleWorkoutExpanded('${w.id}')">
           <span>${escapeHtml(w.name)||'Workout'} <span class="wdate">${fmtDate(w.date)}</span></span>
-          <button type="button" class="remove-row" style="flex:0 0 auto;" onclick="event.stopPropagation(); editWorkout('${w.id}')">✎</button>
+          <span style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+            <span style="color:var(--chalk-60);">${isExpanded?'▾':'▸'}</span>
+            <button type="button" class="remove-row" style="flex:0 0 auto;" onclick="event.stopPropagation(); editWorkout('${w.id}')">✎</button>
+          </span>
         </div>
-        ${body}
+        ${isExpanded ? body : `<div class="note">${escapeHtml(summaryLine)}</div>`}
         ${autoSummary ? `<div class="note" style="color:var(--chalk-yellow);">${escapeHtml(autoSummary)}</div>` : ''}
         ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
       </div>
@@ -7709,6 +7737,7 @@ function renderLiveGroupBlocks(group){
 function goToPreviousLiveRound(){
   const live = state.tmp.live;
   if(!live || live.pos<=0) return;
+  captureLiveGroupValues(live.flat[live.pos]);
   live.pos -= 1;
   live.resting = false;
   live.restRunning = false;
@@ -7722,6 +7751,7 @@ function goToPreviousLiveRound(){
 function goToNextLiveRound(){
   const live = state.tmp.live;
   if(!live || live.pos>=live.flat.length-1) return;
+  captureLiveGroupValues(live.flat[live.pos]);
   live.pos += 1;
   live.resting = false;
   live.restRunning = false;
@@ -7950,8 +7980,9 @@ function renderWodSummaryPhase(){
 }
 function finishAndSaveWorkout(){
   stopTicking();
+  const liveFlat = state.tmp.live?.flat || null;
   state.tmp.live = null;
-  saveWod();
+  saveWod(liveFlat);
 }
 
 /* ---------- FOR TIME ---------- */
@@ -9163,7 +9194,7 @@ function removeWodSet(mi, si){
   }
   render();
 }
-async function saveWod(){
+async function saveWod(liveFlat){
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
@@ -9171,14 +9202,23 @@ async function saveWod(){
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const type = getExerciseType(ex);
     const isQtyBased = type==='cardio' || type==='mobility';
+    const isWeighted = type==='weighted';
     const sets = isQtyBased
       ? mv.sets.filter(s=>s.reps).map(s=>({ reps: parseFloat(s.reps), weight: null, pct: null }))
-      : mv.sets.filter(s=>s.reps && s.weight).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }));
+      : isWeighted
+        ? mv.sets.filter(s=>s.reps && s.weight).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }))
+        : mv.sets.filter(s=>s.reps).map(s=>({ reps: parseInt(s.reps), weight: null, pct: null }));
     return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isQtyBased ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
   if(!movements.length){ showToast('Bitte mindestens einen Satz mit gültigen Werten eingeben'); return; }
   showPRToastIfAny(movements);
-  state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements});
+  const roundsLog = (state.tmp.wodFormat==='emom' && liveFlat && liveFlat.length)
+    ? liveFlat.map(group => group.map(({mi,si})=>{
+        const mv = state.tmp.wodMoves[mi];
+        return { exerciseId: mv.exerciseId, reps: mv.sets[si].reps, weight: mv.sets[si].weight };
+      }).filter(e=>e.reps!=='' && e.reps!=null)).filter(round=>round.length>0)
+    : null;
+  state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements, roundsLog});
   await saveKey('workouts', state.workouts);
   if(state.tmp.loadedDraftId){
     state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
