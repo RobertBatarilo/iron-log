@@ -5541,7 +5541,7 @@ function renderArchivedWorkoutCard(w){
   const bodyHtml = w.mode==='freeform'
     ? `<div class="note" style="white-space:pre-wrap;">${escapeHtml(w.bodyText||'')}</div>`
     : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div>
-       <div class="note" style="margin-top:4px;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>`;
+       <div class="note" style="margin-top:4px;white-space:pre-wrap;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>`;
   const manageHtml = isBoxAdminView() ? `
     <div class="row" style="gap:8px;margin-top:8px;">
       <button class="btn-sm btn-ghost" style="width:auto;" onclick="editBoxWorkout('${w.id}')">✎ Bearbeiten</button>
@@ -6811,7 +6811,7 @@ function renderBoxWorkoutCard(w, opts){
   const bodyHtml = w.mode==='freeform'
     ? `<div class="note" style="white-space:pre-wrap;">${escapeHtml(w.bodyText||'')}</div>`
     : `<div class="note">${WOD_FORMAT_LABELS[w.format]||w.format}</div>
-       <div class="note" style="margin-top:4px;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>
+       <div class="note" style="margin-top:4px;white-space:pre-wrap;">${escapeHtml(formatBoxWorkoutPreview(w))}</div>
        <button class="btn-sm btn-primary" style="margin-top:8px;" onclick="importBoxWorkout('${w.id}')">In meinen Log übernehmen</button>`;
   const resultsFormOpen = state.tmp.boxResultFormId===w.id;
   const manageHtml = (showManage && isBoxAdminView()) ? `
@@ -7171,8 +7171,25 @@ function formatBoxWorkoutPreview(w){
   const lines = (p.wodTemplate||[]).map(m=>{
     return `${m.setsCount||''}x${m.repsTarget||''} ${exerciseDisplayName(m.exerciseId)}`.trim();
   });
-  const emomLabel = w.format==='emom' ? `EMOM ${p.emomMin||0}:${String(p.emomSec||0).padStart(2,'0')} × ${p.emomRounds||1} — ` : '';
-  return emomLabel + lines.join(', ');
+  if(w.format==='emom'){
+    const totalSec = ((p.emomMin||0)*60 + (p.emomSec||0)) *
+      (p.emomAlternateCycles>1
+        ? (p.wodTemplate||[]).filter((t,i)=>i===0 || !p.wodTemplate[i-1].groupWithNext).length * p.emomAlternateCycles
+        : (p.emomRounds||1));
+    const header = `EMOM ${Math.floor(totalSec/60)}:${String(totalSec%60).padStart(2,'0')}`;
+    if(p.emomAlternateCycles>1){
+      const blocks = [];
+      let cur = [];
+      (p.wodTemplate||[]).forEach(m=>{
+        cur.push(`${m.setsCount||''}x${m.repsTarget||''} ${exerciseDisplayName(m.exerciseId)}`.trim());
+        if(!m.groupWithNext){ blocks.push(cur.join(' + ')); cur = []; }
+      });
+      return `${header} (alternierend, ${p.emomAlternateCycles}× je Block)\n` +
+        blocks.map((b,i)=>`Minute ${i+1}: ${b}`).join('\n');
+    }
+    return `${header} × ${p.emomRounds||1} — ${lines.join(', ')}`;
+  }
+  return lines.join(', ');
 }
 function workoutPerfScore(w){
   if(w.format==='for-time'){
@@ -7457,6 +7474,10 @@ function renderBoxCategoryPicker(){
 function getEmomIntervalSec(){
   return (parseInt(state.tmp.emomMin)||0)*60 + (parseInt(state.tmp.emomSec)||0);
 }
+function toggleEmomAlternate(checked){
+  state.tmp.emomAlternateCycles = checked ? (parseInt(state.tmp.emomAlternateCycles)>0 ? state.tmp.emomAlternateCycles : (state.tmp.emomRounds || 1)) : 0;
+  render();
+}
 function renderWodTemplatePhase(headerFields, historyHtml){
   const isEmom = state.tmp.wodFormat==='emom';
   const refNote = state.tmp.wodNameMatch
@@ -7468,12 +7489,26 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       <button type="button" class="btn-sm btn-ghost" style="margin-top:6px;" onclick="state.tmp.missing1RMWarning=null; render();">Verstanden</button>
     </div>` : '';
 
+  const emomGroupCount = isEmom ? state.tmp.wodTemplate.filter((t,i)=>i===0 || !state.tmp.wodTemplate[i-1].groupWithNext).length : 0;
+  const isAlternating = isEmom && (parseInt(state.tmp.emomAlternateCycles)||0) > 0;
+  const totalEmomSec = ((parseInt(state.tmp.emomMin)||0)*60 + (parseInt(state.tmp.emomSec)||0)) *
+    (isAlternating ? emomGroupCount * (parseInt(state.tmp.emomAlternateCycles)||0) : (parseInt(state.tmp.emomRounds)||0));
+
   const emomFields = isEmom ? `
     <div class="row">
-      <div class="field"><label>Intervall Min.</label><input type="number" step="1" min="0" value="${state.tmp.emomMin}" onchange="state.tmp.emomMin=this.value"></div>
-      <div class="field"><label>Intervall Sek.</label><input type="number" step="1" min="0" max="59" value="${state.tmp.emomSec}" onchange="state.tmp.emomSec=this.value"></div>
+      <div class="field"><label>Intervall Min.</label><input type="number" step="1" min="0" value="${state.tmp.emomMin}" onchange="state.tmp.emomMin=this.value; render();"></div>
+      <div class="field"><label>Intervall Sek.</label><input type="number" step="1" min="0" max="59" value="${state.tmp.emomSec}" onchange="state.tmp.emomSec=this.value; render();"></div>
     </div>
-    <div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value"></div>
+    ${emomGroupCount>1 ? `
+    <div class="checkbox-row" style="margin-bottom:14px;">
+      <input type="checkbox" id="emomAlternate" ${isAlternating?'checked':''} onchange="toggleEmomAlternate(this.checked)">
+      Alternierend (Blöcke wechseln sich jede Runde ab, statt nacheinander)
+    </div>` : ''}
+    ${isAlternating
+      ? `<div class="field"><label>Wiederholungen je Block</label><input type="number" step="1" min="1" value="${state.tmp.emomAlternateCycles}" onchange="state.tmp.emomAlternateCycles=this.value; render();"></div>`
+      : `<div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value; render();"></div>`
+    }
+    ${totalEmomSec>0 ? `<div class="note" style="margin-top:-6px;margin-bottom:10px;">Gesamtdauer: ${Math.floor(totalEmomSec/60)}:${String(totalEmomSec%60).padStart(2,'0')} min</div>` : ''}
   ` : '';
 
   const moveBlocks = state.tmp.wodTemplate.map((t,mi)=>{
