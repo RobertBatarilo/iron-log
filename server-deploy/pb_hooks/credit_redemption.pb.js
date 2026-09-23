@@ -18,7 +18,7 @@ routerAdd("POST", "/credit/redemption/issue", (e) => {
   // Lokal statt Modul-Ebene (gleicher Grund wie in credit_checkout.pb.js dokumentiert -
   // dort live als ReferenceError aufgetreten): top-level Bindings einer .pb.js-Datei
   // koennen in einer anderen JSVM-Pool-Instanz fehlen.
-  const QR_REDEMPTION_TTL_SECONDS = 90;
+  const QR_REDEMPTION_TTL_SECONDS = 180;
   const user = e.auth;
   if (!user) return e.json(401, { ok: false, error: "unauthorized" });
 
@@ -38,8 +38,12 @@ routerAdd("POST", "/credit/redemption/issue", (e) => {
   if (card.getString("status") !== "active") {
     return e.json(400, { ok: false, error: "Karte ist nicht aktiv" });
   }
+  // Echter Date-Vergleich statt Text-Vergleich: PocketBase speichert Datumsfelder mit
+  // Leerzeichen statt "T" als Trenner (z.B. "2026-09-23 12:35:18.266Z"), das sortiert
+  // als Text IMMER "kleiner" als ein ISO-"T"-String - live beobachtet als Bug, bei dem
+  // ein Code sofort als abgelaufen galt, egal wie kurz die tatsaechliche Zeit war.
   const expiresAt = card.getString("expiresAt");
-  if (expiresAt && expiresAt < new Date().toISOString()) {
+  if (expiresAt && new Date(expiresAt).getTime() < Date.now()) {
     return e.json(400, { ok: false, error: "Karte ist abgelaufen" });
   }
 
@@ -93,7 +97,8 @@ routerAdd("POST", "/credit/redemption/confirm", (e) => {
     return e.json(403, { ok: false, error: "Nicht deine Box" });
   }
 
-  if (proof.getString("expiresAt") < new Date().toISOString()) {
+  // Echter Date-Vergleich, gleicher Grund wie oben bei card.expiresAt.
+  if (new Date(proof.getString("expiresAt")).getTime() < Date.now()) {
     if (proof.getString("status") === "issued") {
       proof.set("status", "expired");
       $app.save(proof);

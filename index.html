@@ -7004,7 +7004,8 @@ function renderMyCardsScreen(){
             <div class="note" style="margin-bottom:10px;">Dem Personal zeigen und scannen lassen.</div>
             <canvas id="myCreditQrCanvas" style="margin:0 auto;display:block;"></canvas>
             <div class="note" style="margin-top:10px;">${issued.unitsRequested}x ${escapeHtml(snap.unitLabel||'Einheit')} · gültig bis ${new Date(issued.expiresAt).toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'})}</div>
-            <button class="btn btn-ghost" style="margin-top:14px;" onclick="cancelCardRedemption()">Abbrechen</button>
+            <button class="btn btn-ghost" style="margin-top:14px;" onclick="startCardRedemption('${card.id}',${issued.unitsRequested})">🔄 Neuen Code erzeugen</button>
+            <button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelCardRedemption()">Abbrechen</button>
           </div>
         `;
       }

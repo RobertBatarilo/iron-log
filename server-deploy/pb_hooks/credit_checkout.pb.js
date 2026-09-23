@@ -122,7 +122,20 @@ routerAdd("POST", "/credit/order-fulfilled", (e) => {
       const freshOrder = txApp.findRecordById("credit_orders", order.id);
       if (freshOrder.getString("status") === "paid") return; // Race: parallele Zustellung war schneller
 
-      const snapshot = freshOrder.get("offerSnapshot") || {};
+      // Record.get() liefert bei JSON-Feldern im JSVM ein types.JSONMap-Objekt zurueck,
+      // das NUR per .get(key) lesbar ist, nicht per normalem objekt.feld-Zugriff (siehe
+      // /pb_data/types.d.ts Kommentar zu DynamicModel: "Objects are loaded into
+      // types.JSONMap..."). snapshot.unitsGranted war deshalb immer "undefined" -> 0 ->
+      // von PocketBase als "cannot be blank" abgelehnt. Fix: ueber JSON hin- und
+      // zurueckwandeln normalisiert JSONMap/String/Objekt zuverlässig zu einem echten,
+      // per Punktnotation lesbaren JS-Objekt.
+      // Record.get() liefert bei JSON-Feldern im JSVM ein Byte-Array-artiges Objekt
+      // zurueck (typeof "object", KEIN JSONMap mit .get(), JSON.stringify() zerlegt es
+      // faelschlich in einzelne Byte-Zahlen) - live per Debug-Log bestaetigt: nur
+      // String(rawSnapshot) liefert korrekt den eigentlichen JSON-Text zurueck.
+      let snapshot = {};
+      try { snapshot = JSON.parse(String(freshOrder.get("offerSnapshot") || "{}")); }
+      catch (parseErr) { snapshot = {}; }
       const cardsCollection = txApp.findCollectionByNameOrId("credit_cards");
       const card = new Record(cardsCollection);
       card.set("box", freshOrder.getString("box"));
@@ -157,10 +170,18 @@ routerAdd("POST", "/credit/order-fulfilled", (e) => {
       txApp.save(freshOrder);
     });
   } catch (err) {
-    // Unique-Index-Kollision (operationId) bedeutet: eine parallele Zustellung hat
-    // bereits gebucht - das ist der Idempotenz-Mechanismus, kein echter Fehler.
-    console.log("credit_checkout order-fulfilled Konflikt (vermutlich Doppel-Zustellung)", err);
-    return e.json(200, { ok: true, alreadyProcessed: true });
+    // NUR eine echte Unique-Index-Kollision auf operationId (= eine parallele Zustellung
+    // hat bereits gebucht) ist der beabsichtigte Idempotenz-Fall. Alles andere ist ein
+    // echter Fehler und MUSS als solcher (5xx) zurueckgegeben werden, sonst haelt Stripe
+    // die Zustellung faelschlich fuer erfolgreich und wiederholt sie nie (live erlebt:
+    // ein echter Bug wurde so verschluckt, keine Karte wurde angelegt).
+    const msg = String((err && err.message) || err);
+    if (/unique/i.test(msg) && /operationid/i.test(msg)) {
+      console.log("credit_checkout order-fulfilled: Doppel-Zustellung erkannt (operationId-Kollision), ignoriert", msg);
+      return e.json(200, { ok: true, alreadyProcessed: true });
+    }
+    console.log("credit_checkout order-fulfilled ECHTER FEHLER", err);
+    return e.json(500, { ok: false, error: "Verarbeitung fehlgeschlagen" });
   }
 
   return e.json(200, { ok: true });
