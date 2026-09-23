@@ -6298,11 +6298,40 @@ function stopCreditQrScan(keepResult){
 function vibrateIfSupported(pattern){
   try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){ /* z.B. iOS Safari ohne Vibration API */ }
 }
+// Erzeugter Ton statt Audiodatei: Mobile-Browser blockieren oft automatisch abgespielten
+// Ton, wenn er nicht von einem direkten Tastendruck ausgeloest wird. unlockAudioContext()
+// wird deshalb IM Klick-Handler von "Einlösen" aufgerufen (echte Nutzer-Geste), danach
+// kann derselbe AudioContext auch spaeter (z.B. aus dem Polling-Callback) zuverlaessig
+// Ton abspielen, ohne erneut vom Browser blockiert zu werden.
+function unlockAudioContext(){
+  try{
+    if(!state.tmp.audioCtx) state.tmp.audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(state.tmp.audioCtx.state==='suspended') state.tmp.audioCtx.resume();
+  }catch(e){ /* Web Audio API nicht verfuegbar */ }
+}
+function playSuccessSound(){
+  try{
+    const ctx = state.tmp.audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    state.tmp.audioCtx = ctx;
+    const now = ctx.currentTime;
+    [[880,now,0.12],[1320,now+0.1,0.18]].forEach(([freq,start,dur])=>{
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.2, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start+dur);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(start); osc.stop(start+dur);
+    });
+  }catch(e){ /* Web Audio API nicht verfuegbar/blockiert */ }
+}
 async function confirmCreditRedemption(token){
   try{
     const result = await pb.send('/credit/redemption/confirm', {method:'POST', body:{token}});
     if(!result || !result.ok) throw new Error((result&&result.error)||'Einlösung fehlgeschlagen');
     vibrateIfSupported(200);
+    playSuccessSound();
     state.tmp.creditScan = {active:false, result:null, success:result};
     render();
   }catch(e){
@@ -6985,6 +7014,7 @@ function startRedemptionPolling(proofId, cardId, expiresAt){
     if(proof.status==='consumed'){
       stopRedemptionPolling();
       vibrateIfSupported(200);
+      playSuccessSound();
       await loadBoxData();
       const txs = state.box.myCreditTransactions || [];
       const balance = computeCardBalance(cardId, txs);
@@ -7007,6 +7037,7 @@ async function buyCreditOffer(offerId){
   }
 }
 async function startCardRedemption(cardId, unitsRequested){
+  unlockAudioContext(); // muss synchron im Klick-Handler passieren, nicht erst nach dem await
   try{
     const result = await pb.send('/credit/redemption/issue', {method:'POST', body:{cardId, unitsRequested}});
     if(!result || !result.ok) throw new Error((result&&result.error)||'Einlösung konnte nicht gestartet werden');
