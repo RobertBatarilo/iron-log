@@ -2332,6 +2332,7 @@ function decodeJwtPayload(token){
 }
 let pendingJoinCode = null;
 let pendingStripeOnboardingRefresh = false;
+let pendingPurchaseSuccessCheck = null;
 function boot(){
   const joinCode = new URLSearchParams(location.search).get('join');
   if(joinCode){
@@ -2340,6 +2341,15 @@ function boot(){
   }
   if(new URLSearchParams(location.search).get('stripeOnboarding')==='done'){
     pendingStripeOnboardingRefresh = true;
+    history.replaceState(null, '', location.pathname);
+  }
+  const returnParams = new URLSearchParams(location.search);
+  const planOrderId = returnParams.get('planOrder');
+  const creditOrderId = returnParams.get('creditOrder');
+  if((planOrderId || creditOrderId) && returnParams.get('status')){
+    if(returnParams.get('status')==='success'){
+      pendingPurchaseSuccessCheck = planOrderId ? {type:'plan', id:planOrderId} : {type:'credit', id:creditOrderId};
+    }
     history.replaceState(null, '', location.pathname);
   }
   const token = new URLSearchParams(location.search).get('token');
@@ -2648,6 +2658,13 @@ async function initApp(){
   state.readinessLogs = readinessLogs;
   state.drafts = drafts || [];
 
+  // Beim Neuladen der Seite auf dem zuletzt besuchten Tab bleiben, statt immer auf
+  // "Today" zurueckzufallen - rein lokal (nicht ueber saveKey/Cloud-Sync), da es sich um
+  // eine geraetespezifische UI-Praeferenz handelt, keine "echten" Nutzerdaten.
+  let restoredTab = null;
+  try{ restoredTab = localStorage.getItem('ironlog:lastActiveTab'); }catch(e){}
+  if(restoredTab && ['today','workout','box','progress','profile'].includes(restoredTab)) state.activeTab = restoredTab;
+
   document.getElementById('app').innerHTML = appShell();
   render();
   loadBoxData(); // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist
@@ -2657,6 +2674,33 @@ async function initApp(){
     state.activeTab = 'box';
     render();
     joinBoxByCode(code);
+  }
+  if(pendingPurchaseSuccessCheck) checkPendingPurchaseSuccess();
+}
+// Nach Rueckkehr von Stripe (?planOrder=/?creditOrder=...&status=success): fragt kurz
+// nach, bis der Webhook die Bestellung als bezahlt markiert hat (Zustellung ist asynchron,
+// kann ein paar Sekunden dauern), dann Vibration + Ton + Bestaetigung + Datenaktualisierung.
+async function checkPendingPurchaseSuccess(){
+  const check = pendingPurchaseSuccessCheck;
+  pendingPurchaseSuccessCheck = null;
+  if(!check) return;
+  const collection = check.type==='plan' ? 'plan_orders' : 'credit_orders';
+  for(let i=0; i<20; i++){
+    let order;
+    try{ order = await pb.collection(collection).getOne(check.id); }
+    catch(e){ return; }
+    if(order.status==='paid'){
+      vibrateIfSupported(200);
+      playSuccessSound();
+      await loadBoxData();
+      const label = check.type==='plan'
+        ? (order.templateSnapshot?.name || 'Kontingent')
+        : (order.offerSnapshot?.name || order.offerSnapshot?.title || 'Karte');
+      showToast(`🎉 Kauf bestätigt: ${label}`);
+      return;
+    }
+    if(order.status==='expired' || order.status==='failed') return;
+    await new Promise(r=>setTimeout(r, 1500));
   }
 }
 
@@ -2701,6 +2745,7 @@ function setTab(tab){
     else if(activeTicker==='live') pauseLiveRest();
   }
   state.activeTab = tab;
+  try{ localStorage.setItem('ironlog:lastActiveTab', tab); }catch(e){}
   if(tab==='box') loadBoxData();
   render();
 }
@@ -7019,6 +7064,7 @@ function closeMyPlansScreen(){
   render();
 }
 async function buyMembershipPlan(planTemplateId){
+  unlockAudioContext(); // synchron im Klick-Handler, damit der Erfolgston bei Rueckkehr von Stripe zuverlaessig spielt
   try{
     const result = await pb.send('/credit/plan-checkout-session', {method:'POST', body:{planTemplateId}});
     if(!result || !result.ok) throw new Error((result&&result.error)||'Kauf konnte nicht gestartet werden');
@@ -7123,6 +7169,7 @@ function startRedemptionPolling(proofId, cardId, expiresAt){
   }, 2000);
 }
 async function buyCreditOffer(offerId){
+  unlockAudioContext(); // synchron im Klick-Handler, damit der Erfolgston bei Rueckkehr von Stripe zuverlaessig spielt
   try{
     const result = await pb.send('/credit/checkout-session', {method:'POST', body:{offerId}});
     if(!result || !result.ok) throw new Error((result&&result.error)||'Kauf konnte nicht gestartet werden');
