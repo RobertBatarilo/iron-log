@@ -2665,9 +2665,26 @@ async function initApp(){
   try{ restoredTab = localStorage.getItem('ironlog:lastActiveTab'); }catch(e){}
   if(restoredTab && ['today','workout','box','progress','profile'].includes(restoredTab)) state.activeTab = restoredTab;
 
+  let restoredBoxSubTab = null;
+  try{ restoredBoxSubTab = localStorage.getItem('ironlog:lastBoxSubTab'); }catch(e){}
+  if(restoredBoxSubTab && ['home','schedule','workouts','social'].includes(restoredBoxSubTab)) state.tmp.boxSubTab = restoredBoxSubTab;
+
   document.getElementById('app').innerHTML = appShell();
   render();
-  loadBoxData(); // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist
+  // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist -
+  // .then() holt danach die Datenlade-Seiteneffekte nach, die setBoxSubTab() beim Klick ausloest
+  // (state.box.membership existiert erst nach loadBoxData(), sonst haengt die wiederhergestellte
+  // Unteransicht dauerhaft bei "Laedt ...").
+  loadBoxData().then(()=>{
+    if(state.box.membership?.status !== 'active') return;
+    if(state.tmp.boxSubTab==='schedule'){
+      selectScheduleDate(state.tmp.scheduleSelectedDate || todayStr());
+    } else if(state.tmp.boxSubTab==='workouts'){
+      selectWorkoutsDate(state.tmp.workoutsSelectedDate || todayStr());
+    } else if(state.tmp.boxSubTab==='social' && !state.box.socialLoaded){
+      loadSocialFeed(state.box.membership.box);
+    }
+  });
   if(pendingJoinCode){
     const code = pendingJoinCode;
     pendingJoinCode = null;
@@ -4521,6 +4538,7 @@ async function loadBoxData(){
 }
 function setBoxSubTab(tab){
   state.tmp.boxSubTab = tab;
+  try{ localStorage.setItem('ironlog:lastBoxSubTab', tab); }catch(e){}
   render();
   if(tab==='schedule'){
     selectScheduleDate(state.tmp.scheduleSelectedDate || todayStr());
