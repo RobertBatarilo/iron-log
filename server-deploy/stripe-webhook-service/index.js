@@ -67,9 +67,16 @@ const server = http.createServer(async (req, res) => {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const creditOrderId = session.metadata && session.metadata.creditOrderId;
+      const planOrderId = session.metadata && session.metadata.planOrderId;
       if (creditOrderId) {
         await callPocketBase('/credit/order-fulfilled', {
           creditOrderId,
+          stripeSessionId: session.id,
+          stripePaymentIntentId: session.payment_intent || '',
+        });
+      } else if (planOrderId) {
+        await callPocketBase('/credit/plan-order-fulfilled', {
+          planOrderId,
           stripeSessionId: session.id,
           stripePaymentIntentId: session.payment_intent || '',
         });
@@ -77,8 +84,11 @@ const server = http.createServer(async (req, res) => {
     } else if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
       const creditOrderId = session.metadata && session.metadata.creditOrderId;
+      const planOrderId = session.metadata && session.metadata.planOrderId;
       if (creditOrderId) {
         await callPocketBase('/credit/order-expired', { creditOrderId, stripeSessionId: session.id });
+      } else if (planOrderId) {
+        await callPocketBase('/credit/plan-order-expired', { planOrderId, stripeSessionId: session.id });
       }
     } else if (event.type === 'account.updated') {
       const account = event.data.object;

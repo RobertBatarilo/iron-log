@@ -4427,18 +4427,20 @@ async function loadBoxData(){
     state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isPro);
     if(mine && mine.status==='active'){
       const boxId = mine.box;
-      const [slots, allAttended, membershipPlans, creditOffers, myCreditCards] = await Promise.all([
+      const [slots, allAttended, membershipPlans, creditOffers, myCreditCards, planTemplates] = await Promise.all([
         pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
         pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && status = "attended"', {box:boxId}), expand:'classInstance', requestKey:null}),
         pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:mine.id}), requestKey:null}),
         pb.collection('credit_offers').getFullList({filter: pb.filter('box = {:box} && status = "active"', {box:boxId}), requestKey:null}).catch(()=>[]),
-        pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box} && owner = {:u}', {box:boxId, u:userId}), requestKey:null}).catch(()=>[])
+        pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box} && owner = {:u}', {box:boxId, u:userId}), requestKey:null}).catch(()=>[]),
+        pb.collection('membership_plan_templates').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), requestKey:null}).catch(()=>[])
       ]);
       state.box.scheduleSlots = slots;
       state.box.allAttendedBookings = allAttended;
       state.box.membershipPlans = membershipPlans;
       state.box.creditOffers = creditOffers;
       state.box.myCreditCards = myCreditCards;
+      state.box.planTemplates = planTemplates;
       state.box.myCreditTransactions = myCreditCards.length
         ? await pb.collection('credit_transactions').getFullList({
             filter: myCreditCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '),
@@ -4462,6 +4464,7 @@ async function loadBoxData(){
       state.box.creditOffers = [];
       state.box.myCreditCards = [];
       state.box.myCreditTransactions = [];
+      state.box.planTemplates = [];
     }
   }catch(e){
     console.error('Box-Daten konnten nicht geladen werden', e);
@@ -5762,16 +5765,21 @@ async function savePlanTemplate(id){
   const name = (document.getElementById('mpTplName')?.value||'').trim();
   const type = document.getElementById('mpTplType')?.value || 'recurring';
   const amount = parseInt(document.getElementById('mpTplAmount')?.value)||0;
+  // Preis nur bei einmaligen Paketen relevant - laufende Pakete bleiben bewusst nicht
+  // selbst kaeuflich (monatliche Zahlung/Kuendigung soll dem Coach vorbehalten bleiben).
+  const priceRaw = type==='one-time' ? (document.getElementById('mpTplPrice')?.value||'').trim() : '';
+  const priceCents = priceRaw ? Math.round(parseFloat(priceRaw.replace(',','.'))*100) : null;
   if(!name){ showToast('Bitte einen Namen eingeben'); return; }
   if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
   try{
     if(id){
-      await pb.collection('membership_plan_templates').update(id, {name, type, amount});
+      await pb.collection('membership_plan_templates').update(id, {name, type, amount, priceCents});
     } else {
-      await pb.collection('membership_plan_templates').create({box: state.box.membership.box, name, type, amount});
+      await pb.collection('membership_plan_templates').create({box: state.box.membership.box, name, type, amount, priceCents});
     }
     showToast('Standardpaket gespeichert');
     state.tmp.mpTemplateEditId = null;
+    state.tmp.mpTplTypeDraft = null;
     await loadPlanTemplates();
   }catch(e){
     showToast('Speichern fehlgeschlagen');
@@ -5800,10 +5808,10 @@ function renderPlanTemplatesScreen(){
         <div class="history-item">
           <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
             <span class="val">${escapeHtml(t.name)}</span>
-            <span class="note" style="margin:0;">${t.type==='recurring'?'Laufend':'Einmalig'} · ${t.amount}</span>
+            <span class="note" style="margin:0;">${t.type==='recurring'?'Laufend':'Einmalig'} · ${t.amount}${t.type==='one-time' && t.priceCents ? ' · '+fmtEuro(t.priceCents)+' (Athleten-Kauf aktiv)' : ''}</span>
           </span>
           <span>
-            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.mpTemplateEditId='${t.id}'; render();">✎</button>
+            <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.mpTemplateEditId='${t.id}'; state.tmp.mpTplTypeDraft=null; render();">✎</button>
             <button class="btn-sm btn-ghost" style="width:auto;" onclick="deletePlanTemplate('${t.id}')">✕</button>
           </span>
         </div>
@@ -5812,18 +5820,22 @@ function renderPlanTemplatesScreen(){
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--iron-700);">
           <div class="field"><label>Name</label><input type="text" id="mpTplName" value="${escapeHtml(formTpl.name||'')}" placeholder="z.B. 10er Block CrossFit"></div>
           <div class="field"><label>Typ</label>
-            <select id="mpTplType">
+            <select id="mpTplType" onchange="state.tmp.mpTplTypeDraft=this.value; render();">
               <option value="recurring" ${formTpl.type==='recurring'?'selected':''}>Laufende Buchung (pro Monat)</option>
               <option value="one-time" ${formTpl.type==='one-time'?'selected':''}>Einmalige Buchung (fester Block)</option>
             </select>
           </div>
           <div class="field"><label>Menge</label><input type="number" id="mpTplAmount" min="1" value="${formTpl.amount||''}"></div>
+          ${(state.tmp.mpTplTypeDraft||formTpl.type)==='one-time' ? `
+            <div class="field"><label>Preis für Athleten-Selbstkauf (€, optional)</label><input type="number" step="0.01" min="0" id="mpTplPrice" value="${formTpl.priceCents?(formTpl.priceCents/100).toFixed(2):''}" placeholder="z.B. 149.00"></div>
+            <div class="note" style="margin-top:-6px;margin-bottom:10px;">Leer lassen = wie bisher nur vom Coach zuteilbar. Preis eintragen = Athleten können dieses Paket selbst über "Mein Kontingent" kaufen.</div>
+          ` : ''}
           <div class="row">
-            <button class="btn btn-ghost" onclick="state.tmp.mpTemplateEditId=null; render();">Abbrechen</button>
+            <button class="btn btn-ghost" onclick="state.tmp.mpTemplateEditId=null; state.tmp.mpTplTypeDraft=null; render();">Abbrechen</button>
             <button class="btn btn-primary" onclick="savePlanTemplate('${editId==='new'?'':editId}')">Speichern</button>
           </div>
         </div>
-      ` : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.mpTemplateEditId='new'; render();">+ Standardpaket anlegen</button>`}
+      ` : `<button class="btn btn-ghost" style="margin-top:10px;" onclick="state.tmp.mpTemplateEditId='new'; state.tmp.mpTplTypeDraft=null; render();">+ Standardpaket anlegen</button>`}
     </div>
   `;
 }
@@ -7006,8 +7018,18 @@ function closeMyPlansScreen(){
   state.tmp.myPlansOpen = false;
   render();
 }
+async function buyMembershipPlan(planTemplateId){
+  try{
+    const result = await pb.send('/credit/plan-checkout-session', {method:'POST', body:{planTemplateId}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Kauf konnte nicht gestartet werden');
+    location.href = result.checkoutUrl;
+  }catch(e){
+    showToast((e&&e.message)||'Kauf konnte nicht gestartet werden');
+  }
+}
 function renderMyPlansScreen(){
   const mySplit = splitPlansByArchived(state.box.membershipPlans, state.box.myBookings);
+  const purchasable = (state.box.planTemplates||[]).filter(t=>t.type==='one-time' && t.priceCents>0);
   return `
     <div class="row" style="align-items:center;margin-bottom:10px;">
       <button class="btn-sm btn-ghost" style="width:auto;" onclick="closeMyPlansScreen()">← Zurück</button>
@@ -7020,6 +7042,20 @@ function renderMyPlansScreen(){
         ${state.tmp.mpMyArchivedPlansOpen ? mySplit.archived.map(p=>renderPlanRow(p, state.box.myBookings)).join('') : ''}
       ` : ''}
     </div>
+    ${purchasable.length ? `
+      <div class="card">
+        <h2 class="small">Kontingent kaufen</h2>
+        ${purchasable.map(t=>`
+          <div class="history-item">
+            <span style="display:flex;flex-direction:column;">
+              <span class="val">${escapeHtml(t.name)}</span>
+              <span class="note" style="margin:0;">${t.amount}x · ${fmtEuro(t.priceCents)}</span>
+            </span>
+            <button class="btn-sm btn-primary" style="width:auto;" onclick="buyMembershipPlan('${t.id}')">Kaufen</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
   `;
 }
 /* ---- Meine Karten (Athlet: kaufen, einsehen, einlösen) ---- */
