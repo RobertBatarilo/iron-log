@@ -5835,6 +5835,7 @@ function closeBoxMembersScreen(){
   state.tmp.mpTemplatesOpen = false;
   state.tmp.mpCreditOffersOpen = false;
   state.tmp.mpCreditRedeemOpen = false;
+  state.tmp.mpCreditRevenueOpen = false;
   render();
 }
 async function loadBoxMembersList(){
@@ -6052,6 +6053,7 @@ function renderBoxMembersScreen(box){
   if(state.tmp.mpTemplatesOpen) return renderPlanTemplatesScreen();
   if(state.tmp.mpCreditOffersOpen) return renderCreditOffersScreen();
   if(state.tmp.mpCreditRedeemOpen) return renderCreditRedeemScreen();
+  if(state.tmp.mpCreditRevenueOpen) return renderCreditRevenueScreen();
   const isAdmin = !!pb.authStore.record?.isAppAdmin;
   const toggleHtml = isAdmin ? `
     <div class="row" style="margin-bottom:14px;">
@@ -6243,6 +6245,9 @@ function renderCreditAdminCard(box){
         <button class="btn btn-ghost" onclick="openCreditOffersScreen()">🎟️ Angebote verwalten</button>
         <button class="btn btn-ghost" onclick="openCreditRedeemScreen()">🧾 Zähltheke / Einlösen</button>
       </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-ghost" onclick="openCreditRevenueScreen()">📊 Umsatz-Übersicht</button>
+      </div>
     </div>
   `;
 }
@@ -6376,6 +6381,101 @@ function closeCreditRedeemScreen(){
   stopCreditQrScan(false);
   state.tmp.mpCreditRedeemOpen = false;
   render();
+}
+
+/* ---- Umsatz-Übersicht (Guthabenkarten & Kontingente) ---- */
+function openCreditRevenueScreen(){
+  state.tmp.mpCreditRevenueOpen = true;
+  state.box.creditRevenue = null;
+  render();
+  loadCreditRevenueOverview();
+}
+function closeCreditRevenueScreen(){
+  state.tmp.mpCreditRevenueOpen = false;
+  render();
+}
+async function loadCreditRevenueOverview(){
+  if(!isBoxOwner()) return;
+  const boxId = state.box.membership.box;
+  try{
+    const [creditOrders, planOrders, allCards] = await Promise.all([
+      pb.collection('credit_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
+      pb.collection('plan_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
+      pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), requestKey:null})
+    ]);
+    const allTx = allCards.length ? await pb.collection('credit_transactions').getFullList({
+      filter: allCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '), requestKey:null
+    }) : [];
+    state.box.creditRevenue = { creditOrders, planOrders, allCards, allTx };
+  }catch(e){
+    state.box.creditRevenue = { error:true };
+  }
+  render();
+}
+function renderCreditRevenueScreen(){
+  const rev = state.box.creditRevenue;
+  const back = `<button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeCreditRevenueScreen()">← Zurück</button>`;
+  if(rev===null || rev===undefined) return `${back}<div class="card"><div class="note">Lädt …</div></div>`;
+  if(rev.error) return `${back}<div class="card"><div class="note">Umsatzdaten konnten nicht geladen werden.</div></div>`;
+
+  const { creditOrders, planOrders, allCards, allTx } = rev;
+  const creditRevenueCents = creditOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
+  const planRevenueCents = planOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
+  const totalRevenueCents = creditRevenueCents + planRevenueCents;
+
+  const creditByOffer = {};
+  creditOrders.forEach(o=>{
+    const title = o.offerSnapshot?.title || 'Unbekanntes Angebot';
+    if(!creditByOffer[title]) creditByOffer[title] = { count:0, revenueCents:0 };
+    creditByOffer[title].count += 1;
+    creditByOffer[title].revenueCents += o.amountCents||0;
+  });
+  const planByTemplate = {};
+  planOrders.forEach(o=>{
+    const name = o.templateSnapshot?.name || 'Unbekanntes Paket';
+    if(!planByTemplate[name]) planByTemplate[name] = { count:0, revenueCents:0 };
+    planByTemplate[name].count += 1;
+    planByTemplate[name].revenueCents += o.amountCents||0;
+  });
+
+  const cardsById = {};
+  allCards.forEach(c=>{ cardsById[c.id] = c; });
+  let unitsGranted = 0, unitsRedeemed = 0;
+  allTx.forEach(tx=>{
+    if(!cardsById[tx.card]) return;
+    if(tx.deltaUnits>0) unitsGranted += tx.deltaUnits;
+    else unitsRedeemed += -tx.deltaUnits;
+  });
+  const unitsOutstanding = Math.max(0, unitsGranted - unitsRedeemed);
+
+  const creditRows = Object.entries(creditByOffer).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
+    .map(([title,d])=>`<div><span>${escapeHtml(title)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
+  const planRows = Object.entries(planByTemplate).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
+    .map(([name,d])=>`<div><span>${escapeHtml(name)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
+
+  return `
+    ${back}
+    <div class="card">
+      <h2 class="small">Gesamtumsatz</h2>
+      <div class="stat-num" style="margin:6px 0;">${fmtEuro(totalRevenueCents)}</div>
+      <div class="note">${creditOrders.length + planOrders.length} bezahlte Bestellungen insgesamt</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Guthabenkarten</h2>
+      <div class="moves">
+        <div><span>Umsatz gesamt</span><span>${fmtEuro(creditRevenueCents)}</span></div>
+        ${creditRows || '<div class="note">Noch keine Käufe.</div>'}
+      </div>
+      <div class="note" style="margin-top:10px;">Ausgegebene Einheiten: ${unitsGranted} · eingelöst: ${unitsRedeemed} · noch offen: ${unitsOutstanding}</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Einmalige Kontingente</h2>
+      <div class="moves">
+        <div><span>Umsatz gesamt</span><span>${fmtEuro(planRevenueCents)}</span></div>
+        ${planRows || '<div class="note">Noch keine Käufe.</div>'}
+      </div>
+    </div>
+  `;
 }
 async function startCreditQrScan(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
