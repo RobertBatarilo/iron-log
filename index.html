@@ -6962,7 +6962,40 @@ function closeMyCardsScreen(){
   state.tmp.myCreditCardsOpen = false;
   state.tmp.myCreditDetailCardId = null;
   state.tmp.myCreditIssuedProof = null;
+  stopRedemptionPolling();
   render();
+}
+// Solange der QR-Code angezeigt wird, fragt das Athleten-Handy periodisch nach, ob die
+// Zaehltheke den Code schon bestaetigt hat - es gibt keine Push-/Live-Verbindung dafuer,
+// also einfaches Polling ueber die normale PocketBase-Collection-API (die Berechtigungs-
+// regel von credit_redemption_proofs erlaubt dem Karteninhaber ohnehin das Lesen seines
+// eigenen Nachweises).
+function stopRedemptionPolling(){
+  if(state.tmp.myCreditPollTimer){ clearInterval(state.tmp.myCreditPollTimer); state.tmp.myCreditPollTimer = null; }
+}
+function startRedemptionPolling(proofId, cardId, expiresAt){
+  stopRedemptionPolling();
+  state.tmp.myCreditPollTimer = setInterval(async ()=>{
+    if(expiresAt && new Date(expiresAt).getTime() < Date.now()){
+      stopRedemptionPolling(); return; // Code laengst abgelaufen, kein Grund mehr weiterzufragen
+    }
+    let proof;
+    try{ proof = await pb.collection('credit_redemption_proofs').getOne(proofId); }
+    catch(e){ return; }
+    if(proof.status==='consumed'){
+      stopRedemptionPolling();
+      vibrateIfSupported(200);
+      await loadBoxData();
+      const txs = state.box.myCreditTransactions || [];
+      const balance = computeCardBalance(cardId, txs);
+      state.tmp.myCreditIssuedProof = null;
+      state.tmp.myCreditDetailCardId = cardId;
+      state.tmp.myCreditRedeemSuccessFlash = {remaining: balance.remaining};
+      render();
+    } else if(proof.status==='expired' || proof.status==='cancelled'){
+      stopRedemptionPolling();
+    }
+  }, 2000);
 }
 async function buyCreditOffer(offerId){
   try{
@@ -6984,11 +7017,13 @@ async function startCardRedemption(cardId, unitsRequested){
     if(canvas && window.QRCode){
       window.QRCode.toCanvas(canvas, JSON.stringify({t: result.token, c: result.cardId}), {width:220});
     }
+    startRedemptionPolling(result.proofId, cardId, result.expiresAt);
   }catch(e){
     showToast((e&&e.message)||'Einlösung konnte nicht gestartet werden');
   }
 }
 function cancelCardRedemption(){
+  stopRedemptionPolling();
   state.tmp.myCreditIssuedProof = null;
   render();
 }
@@ -7020,8 +7055,16 @@ function renderMyCardsScreen(){
           </div>
         `;
       }
+      const flash = (state.tmp.myCreditRedeemSuccessFlash && card.id===detailId) ? state.tmp.myCreditRedeemSuccessFlash : null;
+      if(flash) state.tmp.myCreditRedeemSuccessFlash = null; // nur einmal anzeigen
       return `
         <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="state.tmp.myCreditDetailCardId=null; render();">← Zurück</button>
+        ${flash ? `
+        <div class="card" style="text-align:center;">
+          <div style="font-size:40px;margin:6px 0 2px;">✅</div>
+          <div class="note" style="color:var(--success-green);font-size:18px;">Eingelöst! Noch ${flash.remaining} verfügbar</div>
+        </div>
+        ` : ''}
         <div class="card">
           <h2 class="small">${escapeHtml(snap.title||'Karte')}</h2>
           <div class="row" style="align-items:baseline;gap:8px;">

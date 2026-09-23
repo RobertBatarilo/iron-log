@@ -65,6 +65,7 @@ routerAdd("POST", "/credit/redemption/issue", (e) => {
 
   return e.json(200, {
     ok: true,
+    proofId: proof.id,
     token: proof.getString("token"),
     cardId: card.id,
     unitsRequested,
