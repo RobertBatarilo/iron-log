@@ -1996,7 +1996,8 @@ function buildAmrapBuilderFromWod(wod){
     phase:'build',
     movements: wod.movements.map(buildLibraryMovement),
     durationMin: String(Math.floor(totalSec/60)), durationSec: String(totalSec%60),
-    startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false
+    startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false,
+    setsCount:'1', restMin:'0', restSec:'0', currentSet:1, setPhase:'work', setsLog:[]
   };
 }
 function buildTemplateFromProgression(prog){
@@ -3944,16 +3945,28 @@ function parseAmrapText(lines){
   const movements = [];
   const leftover = [];
   let durationMin = '20', durationSec = '0';
+  let setsCount = '1', restMin = '0', restSec = '0';
+  const fullText = lines.join(' ');
+  const multiSetRe = () => [/(\d+)\s*sets?\s*(?:of\s*)?(\d+)\s*:\s*(\d+)?\s*amrap/i, /(\d+)\s*x\s*(\d+)\s*:\s*(\d+)?\s*amrap/i];
+  const restRe = () => [/rest\s*(\d+)\s*:\s*(\d+)?\s*(?:b\/t|between)\s*sets?/i, /pause\s*(\d+)\s*:\s*(\d+)?\s*(?:zwischen|b\/t)\s*(?:den\s*)?s(?:ä|a)tz/i];
+  const multiSet = multiSetRe().reduce((m,re)=>m||fullText.match(re), null);
+  if(multiSet){ setsCount = multiSet[1]; durationMin = multiSet[2]; durationSec = multiSet[3] || '0'; }
+  const restM = restRe().reduce((m,re)=>m||fullText.match(re), null);
+  if(restM){ restMin = restM[1]; restSec = restM[2] || '0'; }
   lines.forEach(line=>{
     let consumed = false;
-    const dur = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
-    if(dur){ durationMin = dur[1]; consumed = true; }
+    if(multiSet){
+      if(multiSetRe().some(re=>re.test(line)) || restRe().some(re=>re.test(line))) consumed = true;
+    } else {
+      const dur = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
+      if(dur){ durationMin = dur[1]; consumed = true; }
+    }
     if(consumed) return;
     const mv = parseMovementLine(line);
     if(mv){ movements.push(mv); return; }
     leftover.push(line);
   });
-  return { movements, durationMin, durationSec, leftover };
+  return { movements, durationMin, durationSec, setsCount, restMin, restSec, leftover };
 }
 function parseEmomText(lines){
   const movements = [];
@@ -4157,11 +4170,12 @@ function applyParsedWorkout(input){
     }
     activeMovements = state.tmp.wodTemplate;
   } else if(format==='amrap'){
-    const p = structured ? { movements: input.movements||[], durationMin: input.durationMin||'20', durationSec: input.durationSec||'0', leftover: [] } : parseAmrapText(parseLines);
+    const p = structured ? { movements: input.movements||[], durationMin: input.durationMin||'20', durationSec: input.durationSec||'0', setsCount: input.setsCount||'1', restMin: input.restMin||'0', restSec: input.restSec||'0', leftover: [] } : parseAmrapText(parseLines);
     state.tmp.wodFormat = 'amrap';
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
     b.durationMin = p.durationMin; b.durationSec = p.durationSec;
+    b.setsCount = p.setsCount || '1'; b.restMin = p.restMin || '0'; b.restSec = p.restSec || '0';
     if(p.movements.length) b.movements = p.movements.map(mv=>{
       const exerciseId = resolveExerciseIdFromName(mv.name);
       const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
@@ -4343,6 +4357,7 @@ function cancelAmrapRunning(){
   b.phase = 'build';
   b.startedAt = null; b.running = false; b.remainingMs = 0; b.durationMs = 0;
   b.roundsCompleted = 0; b.extraReps = ''; b.timedOut = false;
+  b.currentSet = 1; b.setPhase = 'work'; b.setsLog = [];
   state.tmp.confirmCancelWod = false;
   render();
   window.scrollTo(0,0);
@@ -4376,7 +4391,7 @@ async function saveWodDraft(){
   } else if(format==='amrap'){
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
-    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec };
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec, setsCount:b.setsCount, restMin:b.restMin, restSec:b.restSec };
   } else if(format==='for-load'){
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
@@ -4418,7 +4433,7 @@ function loadDraftIntoBuilder(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(draft.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
   } else if(draft.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -6657,7 +6672,7 @@ async function publishBoxWorkout(){
   } else if(format==='amrap'){
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
-    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec };
+    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec, setsCount:b.setsCount, restMin:b.restMin, restSec:b.restSec };
   } else if(format==='for-load'){
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
@@ -6696,7 +6711,7 @@ function importBoxWorkout(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(w.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
   } else if(w.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -6731,7 +6746,7 @@ function editBoxWorkout(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(w.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
   } else if(w.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -7913,7 +7928,11 @@ function formatBoxWorkoutPreview(w){
   }
   if(w.format==='amrap'){
     const moves = (p.movements||[]).map(formatMovementLine).join(', ');
-    return `AMRAP ${p.durationMin||0}:${String(p.durationSec||0).padStart(2,'0')} — ${moves}`;
+    const setsCount = parseInt(p.setsCount)||1;
+    const header = setsCount>1
+      ? `${setsCount}× ${p.durationMin||0}:${String(p.durationSec||0).padStart(2,'0')} AMRAP, ${p.restMin||0}:${String(p.restSec||0).padStart(2,'0')} Pause`
+      : `AMRAP ${p.durationMin||0}:${String(p.durationSec||0).padStart(2,'0')}`;
+    return `${header} — ${moves}`;
   }
   if(w.format==='for-load'){
     const cap = (p.timeCapMin||p.timeCapSec) ? ` (Cap ${p.timeCapMin||0}:${String(p.timeCapSec||0).padStart(2,'0')})` : '';
@@ -8035,12 +8054,22 @@ function renderWorkoutHistoryEntry(w){
     </div>`;
   } else if(format==='amrap'){
     const am = w.amrap || {};
-    summaryLine = `${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}`;
-    body = `<div class="moves">
-      <div><span>Ergebnis</span><span>${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}</span></div>
-      ${(am.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
-      <div class="note">${fmtClock((am.durationSec||0)*1000,false)} Zeitlimit</div>
-    </div>`;
+    if(am.sets && am.sets.length){
+      summaryLine = am.sets.map((s,i)=>`Satz ${i+1}: ${s.roundsCompleted} Runden${s.extraReps?' + '+s.extraReps+' Wdh.':''}`).join(', ');
+      body = `<div class="moves">
+        <div><span>Ergebnis</span><span>${am.roundsCompleted||0} Runden gesamt${am.extraReps?' + '+am.extraReps+' Wdh.':''}</span></div>
+        ${am.sets.map((s,i)=>`<div><span>Satz ${i+1}</span><span>${s.roundsCompleted} Runden${s.extraReps?' + '+s.extraReps+' Wdh.':''}</span></div>`).join('')}
+        ${(am.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+        <div class="note">${am.setsCount}× ${fmtClock((am.durationSec||0)*1000,false)} AMRAP, ${fmtClock((am.restSec||0)*1000,false)} Pause zw. Sätzen</div>
+      </div>`;
+    } else {
+      summaryLine = `${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}`;
+      body = `<div class="moves">
+        <div><span>Ergebnis</span><span>${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}</span></div>
+        ${(am.movements||[]).map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+        <div class="note">${fmtClock((am.durationSec||0)*1000,false)} Zeitlimit</div>
+      </div>`;
+    }
   } else if(format==='for-load'){
     const fl = w.forLoad || {};
     const ex = state.exercises.find(e=>e.id===fl.exerciseId);
@@ -9166,14 +9195,17 @@ function blankAmrapMove(){
 }
 function ensureAmrapBuilder(){
   if(!state.tmp.amrapBuilder){
-    state.tmp.amrapBuilder = { phase:'build', movements:[blankAmrapMove()], durationMin:'20', durationSec:'0', startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false };
+    state.tmp.amrapBuilder = { phase:'build', movements:[blankAmrapMove()], durationMin:'20', durationSec:'0', startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false,
+      setsCount:'1', restMin:'0', restSec:'0', currentSet:1, setPhase:'work', setsLog:[] };
   }
 }
+function toggleAmrapMultiSet(){ state.tmp.amrapMultiSetOpen = !state.tmp.amrapMultiSetOpen; render(); }
 function renderAmrapFlow(historyHtml){
   ensureAmrapBuilder();
   const b = state.tmp.amrapBuilder;
   if(b.phase==='summary') return renderAmrapSummary(b);
   if(b.phase==='running') return renderAmrapRunning(b);
+  const multiSetOpen = state.tmp.amrapMultiSetOpen || (parseInt(b.setsCount)||1) > 1;
 
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const headerFields = buildHeaderFields(uniqueNames);
@@ -9241,6 +9273,16 @@ function renderAmrapFlow(historyHtml){
         <div class="field"><label>Dauer Min.</label><input type="number" step="1" min="0" value="${b.durationMin}" oninput="updateAmrapField('durationMin',this.value)"></div>
         <div class="field"><label>Dauer Sek.</label><input type="number" step="1" min="0" max="59" value="${b.durationSec}" oninput="updateAmrapField('durationSec',this.value)"></div>
       </div>
+      <div class="note" style="cursor:pointer;" onclick="toggleAmrapMultiSet()">${multiSetOpen?'▾':'▸'} Mehrere Sätze (Intervall-AMRAP)</div>
+      ${multiSetOpen ? `
+      <div class="row">
+        <div class="field"><label>Sets</label><input type="number" step="1" min="1" value="${b.setsCount}" oninput="updateAmrapField('setsCount',this.value)"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Pause Min.</label><input type="number" step="1" min="0" value="${b.restMin}" oninput="updateAmrapField('restMin',this.value)"></div>
+        <div class="field"><label>Pause Sek.</label><input type="number" step="1" min="0" max="59" value="${b.restSec}" oninput="updateAmrapField('restSec',this.value)"></div>
+      </div>
+      ` : ''}
       <div class="row">
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="startAmrapWod()">AMRAP starten</button>
@@ -9307,6 +9349,9 @@ function startAmrapWod(){
   b.remainingMs = b.durationMs;
   b.roundsCompleted = 0;
   b.timedOut = false;
+  b.currentSet = 1;
+  b.setPhase = 'work';
+  b.setsLog = [];
   b.startedAt = Date.now();
   b.running = true;
   b.phase = 'running';
@@ -9322,9 +9367,18 @@ function tickAmrap(){
   if(remaining<=0){
     b.remainingMs = 0;
     b.running = false;
-    b.timedOut = true;
     stopTicking();
     beep();
+    if(b.setPhase==='rest'){
+      b.setPhase = 'work';
+      b.remainingMs = b.durationMs;
+      b.startedAt = Date.now();
+      b.running = true;
+      startTicking('live', tickAmrap);
+      render();
+      return;
+    }
+    b.timedOut = true;
     render();
     return;
   }
@@ -9361,17 +9415,58 @@ function resumeAmrapClock(){
 function confirmAmrapExtraReps(){
   const b = state.tmp.amrapBuilder;
   b.extraReps = document.getElementById('amrapExtraReps').value || '0';
+  const setsCount = parseInt(b.setsCount)||1;
+  if(setsCount>1){
+    b.setsLog.push({roundsCompleted: b.roundsCompleted, extraReps: parseInt(b.extraReps)||0});
+    if(b.currentSet < setsCount){
+      b.currentSet += 1;
+      b.roundsCompleted = 0;
+      b.extraReps = '';
+      b.timedOut = false;
+      const restMs = (parseInt(b.restMin)||0)*60000 + (parseInt(b.restSec)||0)*1000;
+      b.setPhase = restMs>0 ? 'rest' : 'work';
+      b.remainingMs = restMs>0 ? restMs : b.durationMs;
+      b.startedAt = Date.now();
+      b.running = true;
+      startTicking('live', tickAmrap);
+      render();
+      return;
+    }
+  }
   b.phase = 'summary';
   render();
 }
 function renderAmrapRunning(b){
+  const setsCount = parseInt(b.setsCount)||1;
   if(b.timedOut){
     return `
       <div class="card" style="text-align:center;">
+        ${setsCount>1 ? `<div class="note" style="margin-bottom:6px;">Satz ${b.currentSet}/${setsCount}</div>` : ''}
         <div class="stat-label">Zeit abgelaufen</div>
         <div class="stat-num accent" style="margin:10px 0;">${b.roundsCompleted} Runden</div>
         <div class="field" style="text-align:left;"><label>Weitere Wiederholungen in der laufenden Runde</label><input type="number" step="1" min="0" id="amrapExtraReps" value="${b.extraReps}" placeholder="z.B. 12"></div>
         <button class="btn btn-primary" onclick="confirmAmrapExtraReps()">Weiter</button>
+      </div>
+    `;
+  }
+  if(b.setPhase==='rest'){
+    const last = b.setsLog[b.setsLog.length-1] || {roundsCompleted:0, extraReps:0};
+    return `
+      <div class="card" style="text-align:center;">
+        ${state.tmp.confirmCancelWod ? `
+          <div class="note" style="color:var(--plate-red);margin-bottom:8px;">Fortschritt geht verloren.</div>
+          <div class="row" style="margin-bottom:14px;">
+            <button class="btn btn-ghost" onclick="cancelCancelWodRunning()">Weiter trainieren</button>
+            <button class="btn btn-danger" onclick="cancelAmrapRunning()">Ja, abbrechen</button>
+          </div>
+        ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
+        <div class="stat-label">Pause</div>
+        <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
+        <div class="note" style="margin-bottom:10px;">Satz ${b.currentSet-1}/${setsCount} abgeschlossen: ${last.roundsCompleted} Runden${last.extraReps?' + '+last.extraReps+' Wdh.':''}</div>
+        <div class="note" style="margin-bottom:14px;">Nächster Satz (${b.currentSet}/${setsCount}): ${b.movements.map(m=>escapeHtml(formatMovementLine(m))).join(', ')}</div>
+        <div class="row">
+          <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseAmrapClock()':'resumeAmrapClock()'}">${b.running?'Pause':'Weiter'}</button>
+        </div>
       </div>
     `;
   }
@@ -9384,6 +9479,7 @@ function renderAmrapRunning(b){
           <button class="btn btn-danger" onclick="cancelAmrapRunning()">Ja, abbrechen</button>
         </div>
       ` : `<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="requestCancelWodRunning()">✕ Abbrechen</button>`}
+      ${setsCount>1 ? `<div class="note" style="margin-bottom:6px;">Satz ${b.currentSet}/${setsCount}</div>` : ''}
       <div class="stat-label">Verbleibend</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
       <div class="moves" style="text-align:left;margin-bottom:14px;">
@@ -9402,11 +9498,16 @@ function renderAmrapRunning(b){
   `;
 }
 function renderAmrapSummary(b){
+  const setsCount = parseInt(b.setsCount)||1;
+  const totalRounds = setsCount>1 ? b.setsLog.reduce((s,x)=>s+x.roundsCompleted,0) : b.roundsCompleted;
+  const totalExtra = setsCount>1 ? b.setsLog.reduce((s,x)=>s+x.extraReps,0) : (parseInt(b.extraReps)||0);
+  const setsBreakdown = setsCount>1 ? `<div class="moves" style="text-align:left;margin:10px 0;">${b.setsLog.map((s,i)=>`<div>Satz ${i+1}: ${s.roundsCompleted} Runden${s.extraReps?' + '+s.extraReps+' Wdh.':''}</div>`).join('')}</div>` : '';
   return `
     <div class="card" style="text-align:center;">
       <h2>Workout abgeschlossen 🏁</h2>
       ${renderDuplicateWarning('amrap')}
-      <div class="stat-num" style="font-size:34px;margin:14px 0;">${b.roundsCompleted} Runden${parseInt(b.extraReps)?' + '+b.extraReps+' Wdh.':''}</div>
+      <div class="stat-num" style="font-size:34px;margin:14px 0;">${totalRounds} Runden${totalExtra?' + '+totalExtra+' Wdh.':''}${setsCount>1?' gesamt':''}</div>
+      ${setsBreakdown}
       <div class="field" style="text-align:left;"><label>Notiz</label><textarea id="wodNote" rows="2" oninput="state.tmp.wodNote=this.value" placeholder="Beschreibung, Runden, Zeit-Cap …">${escapeHtml(state.tmp.wodNote||'')}</textarea></div>
       <button class="btn btn-primary" style="margin-top:10px;" onclick="saveAmrapWorkout()">Workout speichern</button>
     </div>
@@ -9420,15 +9521,24 @@ async function saveAmrapWorkout(){
   const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
   const prMovements = buildPrMovementsFromFlat(movements);
   const durationSec = Math.round(b.durationMs/1000);
-  const extraReps = parseInt(b.extraReps)||0;
+  const setsCount = parseInt(b.setsCount)||1;
+  let roundsCompleted, extraReps, multiSetFields = {};
+  if(setsCount>1 && b.setsLog.length){
+    roundsCompleted = b.setsLog.reduce((s,x)=>s+x.roundsCompleted,0);
+    extraReps = b.setsLog.reduce((s,x)=>s+x.extraReps,0);
+    multiSetFields = { setsCount, restSec:(parseInt(b.restMin)||0)*60+(parseInt(b.restSec)||0), sets: b.setsLog };
+  } else {
+    roundsCompleted = b.roundsCompleted;
+    extraReps = parseInt(b.extraReps)||0;
+  }
   const workout = {
     id: uid(), date, name, note, format:'amrap', movements: prMovements,
-    amrap: { movements, durationSec, roundsCompleted: b.roundsCompleted, extraReps }
+    amrap: { movements, durationSec, roundsCompleted, extraReps, ...multiSetFields }
   };
   const isNewRoundsPR = !!(name && (()=>{
-    const priorAmraps = state.workouts.filter(w=>w.format==='amrap' && (w.name||'').toLowerCase()===name.toLowerCase() && w.amrap?.durationSec===durationSec);
+    const priorAmraps = state.workouts.filter(w=>w.format==='amrap' && (w.name||'').toLowerCase()===name.toLowerCase() && w.amrap?.durationSec===durationSec && (parseInt(w.amrap?.setsCount)||1)===setsCount);
     if(!priorAmraps.length) return false;
-    return priorAmraps.every(a=>b.roundsCompleted>a.amrap.roundsCompleted || (b.roundsCompleted===a.amrap.roundsCompleted && extraReps>a.amrap.extraReps));
+    return priorAmraps.every(a=>roundsCompleted>a.amrap.roundsCompleted || (roundsCompleted===a.amrap.roundsCompleted && extraReps>a.amrap.extraReps));
   })());
   showPRToastIfAny(prMovements);
   state.workouts.push(workout);
@@ -10676,6 +10786,14 @@ function renderEditAmrapFields(w){
     return `<div class="field"><label>${escapeHtml(ex?ex.name:'—')} – Gewicht (${weightUnitLabel()})</label>
       <input type="number" step="0.5" id="edit_am_weight_${i}" value="${toDisplayWeight(m.weight)}"></div>`;
   }).join('');
+  if(am.sets && am.sets.length){
+    const setsHtml = am.sets.map((s,i)=>`
+      <div class="row">
+        <div class="field"><label>Satz ${i+1} Runden</label><input type="number" id="edit_am_set_rounds_${i}" value="${s.roundsCompleted||0}"></div>
+        <div class="field"><label>Satz ${i+1} + Wdh.</label><input type="number" id="edit_am_set_extra_${i}" value="${s.extraReps||0}"></div>
+      </div>`).join('');
+    return `${setsHtml}${movesHtml}`;
+  }
   return `
     <div class="row">
       <div class="field"><label>Runden</label><input type="number" id="edit_am_rounds" value="${am.roundsCompleted||0}"></div>
@@ -10768,8 +10886,17 @@ async function saveEditWorkout(){
     });
   } else if(format==='amrap'){
     const am = w.amrap;
-    am.roundsCompleted = parseInt(document.getElementById('edit_am_rounds').value)||0;
-    am.extraReps = parseInt(document.getElementById('edit_am_extra').value)||0;
+    if(am.sets && am.sets.length){
+      am.sets.forEach((s,i)=>{
+        s.roundsCompleted = parseInt(document.getElementById(`edit_am_set_rounds_${i}`).value)||0;
+        s.extraReps = parseInt(document.getElementById(`edit_am_set_extra_${i}`).value)||0;
+      });
+      am.roundsCompleted = am.sets.reduce((sum,s)=>sum+s.roundsCompleted,0);
+      am.extraReps = am.sets.reduce((sum,s)=>sum+s.extraReps,0);
+    } else {
+      am.roundsCompleted = parseInt(document.getElementById('edit_am_rounds').value)||0;
+      am.extraReps = parseInt(document.getElementById('edit_am_extra').value)||0;
+    }
     (am.movements||[]).forEach((m,i)=>{
       const el = document.getElementById(`edit_am_weight_${i}`);
       if(el) m.weight = fromDisplayWeight(el.value);
