@@ -3874,6 +3874,12 @@ function findSimilarExercise(name){
   });
   return best;
 }
+// Normalisierte Vergleichsform fuer Uebungsnamen: Kleinbuchstaben, keine Sonderzeichen/
+// Leerzeichen/Bindestriche, kein Singular/Plural-"s" am Ende - damit "Pull-Ups", "Pull-up",
+// "Pull ups" und "PullUps" alle auf denselben Schluessel ("pullup") abbilden.
+function normalizeExerciseName(name){
+  return (name||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/s$/,'');
+}
 function resolveExerciseIdFromName(rawName){
   const name = (rawName||'').trim();
   if(!name) return null;
@@ -3881,6 +3887,9 @@ function resolveExerciseIdFromName(rawName){
   if(alias && state.exercises.some(e=>e.id===alias.exerciseId)) return alias.exerciseId;
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
+  const normalized = normalizeExerciseName(name);
+  const normMatch = normalized ? state.exercises.find(e=>normalizeExerciseName(e.name)===normalized) : null;
+  if(normMatch) return normMatch.id;
   const nameWords = name.toLowerCase().split(/\s+/);
   const partial = state.exercises.find(e=>{
     const exWords = e.name.toLowerCase().split(/\s+/);
@@ -3895,15 +3904,37 @@ function resolveExerciseIdFromName(rawName){
   }
   return newId;
 }
+// Erkennt, ob ein freier Name (z.B. "Jumping Pull-Ups") einer bekannten Variante einer
+// Basis-Uebung aus EXERCISE_LIBRARY entspricht (z.B. "Jumping" + "Pull-up"), unabhaengig von
+// Schreibweise/Singular-Plural (normalizeExerciseName). Detail-Varianten (z.B. "Weighted" mit
+// Zusatzgewicht) werden ausgelassen, da sich der Detailwert aus einem reinen Namen nicht
+// sicher parsen laesst.
+function matchLibraryVariantFromName(rawName){
+  const normalized = normalizeExerciseName(rawName);
+  if(!normalized) return null;
+  for(const base of EXERCISE_LIBRARY){
+    for(const variant of base.variants){
+      if(variant.id==='standard' || (variant.details && variant.details.length)) continue;
+      if(normalizeExerciseName(composeVariantName(base, variant, '')) === normalized) return {base, variant};
+    }
+  }
+  return null;
+}
 function resolveSubstituteExerciseId(rawName, originalExerciseId){
-  const resolved = resolveExerciseIdFromName(rawName);
+  // Entspricht der Name einer bekannten Bibliotheks-Variante (z.B. "Jumping Pull-Ups" ->
+  // Variante "Jumping" der Basis-Uebung "Pull-up"), IMMER den kanonischen, in der Bibliothek
+  // hinterlegten Namen verwenden - damit z.B. die "Variante wechseln"-Auswahl an der
+  // Bewegungszeile diese Uebung korrekt erkennt, statt eine unverbundene Dublette anzulegen.
+  const libMatch = matchLibraryVariantFromName(rawName);
+  const nameToResolve = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : rawName;
+  const resolved = resolveExerciseIdFromName(nameToResolve);
   if(resolved !== originalExerciseId) return resolved;
   // Der grosszuegige Teilwort-Abgleich in resolveExerciseIdFromName wuerde z.B. "Jumping
   // Pull-Ups" faelschlich auf die bereits vorhandene Uebung "Pull-Ups" abbilden (Wortmenge
   // ist eine Teilmenge) - bei einer Ersatzuebung ist das aber garantiert eine ANDERE Uebung
   // als das Original, sonst waere es keine Skalierung. Deshalb hier exakte Suche bzw.
   // Neuanlage statt der lockeren Heuristik erzwingen.
-  const name = (rawName||'').trim();
+  const name = (nameToResolve||'').trim();
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
   return findOrCreateExerciseId(name);
@@ -3920,6 +3951,69 @@ function replaceExerciseIdEverywhere(oldId, newId){
   ].filter(Boolean);
   arrays.forEach(arr=>arr.forEach(mv=>{ if(mv.exerciseId===oldId) mv.exerciseId = newId; }));
   if(state.tmp.forLoadBuilder?.exerciseId===oldId) state.tmp.forLoadBuilder.exerciseId = newId;
+}
+// Generischer Walker statt manuell aufgezaehlter Pfade: exerciseId wird an sehr vielen,
+// unterschiedlich geformten Stellen referenziert (workouts je Format, prEntries, timeRecords,
+// trainingPlan, drafts, exerciseAliases). Ein rekursiver Durchlauf trifft JEDE Stelle, die
+// je ein "exerciseId"-Feld hat, unabhaengig von Verschachtelungstiefe/Formatvariante - sicherer
+// als eine Liste konkreter Pfade, bei der man leicht eine Stelle vergisst.
+function replaceExerciseIdInPersistedData(oldId, newId){
+  const visited = new WeakSet();
+  function walk(node){
+    if(!node || typeof node !== 'object') return;
+    if(visited.has(node)) return;
+    visited.add(node);
+    if(Array.isArray(node)){ node.forEach(walk); return; }
+    if(node.exerciseId === oldId) node.exerciseId = newId;
+    Object.values(node).forEach(walk);
+  }
+  walk(state.workouts);
+  walk(state.prEntries);
+  walk(state.timeRecords);
+  walk(state.trainingPlan);
+  walk(state.drafts);
+  walk(state.profile?.exerciseAliases);
+  replaceExerciseIdEverywhere(oldId, newId);
+}
+async function mergeExercises(keepId, removeId){
+  if(!keepId || !removeId || keepId===removeId) return;
+  replaceExerciseIdInPersistedData(removeId, keepId);
+  state.exercises = state.exercises.filter(e=>e.id!==removeId);
+  await Promise.all([
+    saveKey('workouts', state.workouts),
+    saveKey('prEntries', state.prEntries),
+    saveKey('timeRecords', state.timeRecords),
+    saveKey('trainingPlan', state.trainingPlan),
+    saveKey('drafts', state.drafts),
+    saveKey('profile', state.profile),
+    saveKey('exercises', state.exercises)
+  ]);
+  if(state.tmp.newlyCreatedExerciseIds) state.tmp.newlyCreatedExerciseIds = state.tmp.newlyCreatedExerciseIds.filter(id=>id!==removeId);
+  showToast('Übungen zusammengeführt');
+  render();
+}
+function findDuplicateExerciseGroups(){
+  const groups = {};
+  state.exercises.forEach(e=>{
+    const key = normalizeExerciseName(e.name);
+    if(!key) return;
+    (groups[key] = groups[key] || []).push(e);
+  });
+  return Object.entries(groups).filter(([,list])=>list.length>1);
+}
+function setDupeKeeper(key, exerciseId){
+  state.tmp.dupeKeeper = state.tmp.dupeKeeper || {};
+  state.tmp.dupeKeeper[key] = exerciseId;
+  render();
+}
+async function confirmMergeDuplicateGroup(key){
+  const group = findDuplicateExerciseGroups().find(([k])=>k===key);
+  if(!group) return;
+  const [, list] = group;
+  const keepId = state.tmp.dupeKeeper?.[key] || list[0].id;
+  for(const e of list){
+    if(e.id!==keepId) await mergeExercises(keepId, e.id);
+  }
 }
 async function acceptExerciseAliasSuggestion(oldId){
   const sug = state.tmp.exerciseAliasSuggestions?.[oldId];
@@ -4271,11 +4365,13 @@ function applyParsedWorkout(input){
       (tier.moves||[]).forEach(tm=>{
         const tmWords = (tm.name||'').toLowerCase().split(/\s+/).filter(Boolean);
         if(!tmWords.length) return;
+        const tmNormalized = normalizeExerciseName(tm.name);
         const match = activeMovements.find(mv=>{
           const ex = state.exercises.find(e=>e.id===mv.exerciseId);
           if(!ex) return false;
           const exWords = ex.name.toLowerCase().split(/\s+/);
-          return ex.name.toLowerCase()===tm.name.toLowerCase() || exWords.every(w=>tmWords.includes(w)) || tmWords.every(w=>exWords.includes(w));
+          return ex.name.toLowerCase()===tm.name.toLowerCase() || normalizeExerciseName(ex.name)===tmNormalized
+            || exWords.every(w=>tmWords.includes(w)) || tmWords.every(w=>exWords.includes(w));
         });
         if(!match) return;
         if(tm.substitutes && tm.substitutes.length){
@@ -11596,8 +11692,29 @@ function renderProfile(){
 }
 function renderMyExercisesScreen(){
   const aliases = state.profile?.exerciseAliases || [];
+  const dupeGroups = findDuplicateExerciseGroups();
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${dupeGroups.length ? `
+    <div class="card">
+      <h2 class="small">Mögliche Duplikate</h2>
+      <div class="note" style="margin-bottom:10px;">Ähnlich geschriebene Übungen erkannt — wähle, welcher Name bleiben soll, dann zusammenführen. Bestehende Log-Einträge, PRs und Skalierungs-Zuordnungen werden automatisch auf die verbleibende Übung umgehängt.</div>
+      ${dupeGroups.map(([key, list])=>{
+        const keeper = state.tmp.dupeKeeper?.[key] || list[0].id;
+        return `
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--iron-700);">
+          ${list.map(e=>`
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer;">
+              <input type="radio" name="dupe_${key}" ${e.id===keeper?'checked':''} onchange="setDupeKeeper('${key}','${e.id}')">
+              <span>${escapeHtml(e.name)}</span>
+            </label>
+          `).join('')}
+          <button class="btn btn-ghost" style="margin-top:6px;" onclick="confirmMergeDuplicateGroup('${key}')">Zusammenführen</button>
+        </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
     <div class="card">
       <h2 class="small">Meine Übungen</h2>
       <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
