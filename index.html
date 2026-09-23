@@ -5832,6 +5832,8 @@ function openBoxMemberDetail(membershipId){
   state.tmp.mpMemberDetailPlans = null;
   state.tmp.mpMemberDetailBookings = null;
   state.tmp.mpMemberDetailUser = null;
+  state.tmp.mpMemberDetailCreditCards = null;
+  state.tmp.mpMemberDetailCreditTransactions = null;
   state.tmp.mpArchivedPlansOpen = false;
   render();
   loadBoxMemberDetail(membershipId);
@@ -5846,16 +5848,26 @@ async function loadBoxMemberDetail(membershipId){
   try{
     const tasks = [
       pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:membershipId}), sort:'-created'}),
-      pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && user = {:u}', {box:state.box.membership.box, u:m.user}), expand:'classInstance', requestKey:null})
+      pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && user = {:u}', {box:state.box.membership.box, u:m.user}), expand:'classInstance', requestKey:null}),
+      pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box} && owner = {:u}', {box:state.box.membership.box, u:m.user}), sort:'-created', requestKey:null}).catch(()=>[])
     ];
     if(pb.authStore.record?.isAppAdmin) tasks.push(pb.collection('users').getOne(m.user));
-    const [plans, bookings, user] = await Promise.all(tasks);
+    const [plans, bookings, creditCards, user] = await Promise.all(tasks);
     state.tmp.mpMemberDetailPlans = plans;
     state.tmp.mpMemberDetailBookings = bookings;
+    state.tmp.mpMemberDetailCreditCards = creditCards;
+    state.tmp.mpMemberDetailCreditTransactions = creditCards.length
+      ? await pb.collection('credit_transactions').getFullList({
+          filter: creditCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '),
+          sort:'created', requestKey:null
+        }).catch(()=>[])
+      : [];
     if(user) state.tmp.mpMemberDetailUser = user;
   }catch(e){
     state.tmp.mpMemberDetailPlans = [];
     state.tmp.mpMemberDetailBookings = [];
+    state.tmp.mpMemberDetailCreditCards = [];
+    state.tmp.mpMemberDetailCreditTransactions = [];
     showToast('Kontingente konnten nicht geladen werden');
   }
   render();
@@ -5997,22 +6009,24 @@ function renderBoxMembersScreen(box){
       ` : ''}
     </div>
     <div class="card">
-      <h2>Mitglieder & Kontingente</h2>
-      <div class="field" style="margin-bottom:0;">
-        <input type="text" id="mpMemberSearchInput" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
-      </div>
-      <button class="btn btn-ghost" style="margin-top:10px;" onclick="openPlanTemplatesScreen()">📦 Standardpakete verwalten</button>
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.mpMembersListOpen=!(state.tmp.mpMembersListOpen!==false); render();">Mitglieder & Kontingente ${state.tmp.mpMembersListOpen!==false?'▾':'▸'}</h2>
+      ${state.tmp.mpMembersListOpen!==false ? `
+        <div class="field" style="margin:10px 0 0;">
+          <input type="text" id="mpMemberSearchInput" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
+        </div>
+        ${list===null ? `<div class="note">Lädt …</div>` : (filtered.length ? filtered.map(m=>`
+          <div class="history-item" style="cursor:pointer;" onclick="openBoxMemberDetail('${m.id}')">
+            <span class="row" style="align-items:center;gap:8px;">
+              <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((m.expand?.user?.name||m.userEmail||'?').slice(0,2).toUpperCase())}</span>
+              <span class="val">${escapeHtml(m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied')}</span>
+            </span>
+            <span class="note" style="margin:0;">${m.role==='owner'?'Coach':'Athlet'}</span>
+          </div>
+        `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="openPlanTemplatesScreen()">📦 Standardpakete verwalten</button>
+      ` : ''}
     </div>
     ${renderCreditAdminCard(box)}
-    ${list===null ? `<div class="note">Lädt …</div>` : (filtered.length ? filtered.map(m=>`
-      <div class="history-item" style="cursor:pointer;" onclick="openBoxMemberDetail('${m.id}')">
-        <span class="row" style="align-items:center;gap:8px;">
-          <span class="box-avatar" style="width:28px;height:28px;font-size:11px;flex:0 0 auto;">${escapeHtml((m.expand?.user?.name||m.userEmail||'?').slice(0,2).toUpperCase())}</span>
-          <span class="val">${escapeHtml(m.expand?.user?.name || m.userEmail || m.expand?.user?.email || 'Mitglied')}</span>
-        </span>
-        <span class="note" style="margin:0;">${m.role==='owner'?'Coach':'Athlet'}</span>
-      </div>
-    `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
   `;
 }
 /* ---- Guthabenkarten & Boni (Coach-Verwaltung) ---- */
@@ -6381,43 +6395,16 @@ function renderBoxMemberDetail(){
   const archivedPlans = split.archived;
   const u = state.tmp.mpMemberDetailUser;
   const templates = state.tmp.mpTemplates || [];
+  const creditCards = state.tmp.mpMemberDetailCreditCards;
+  const creditTxs = state.tmp.mpMemberDetailCreditTransactions || [];
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMemberDetail()">← Zurück</button>
     <div class="card">
       <h2>${escapeHtml(name)}</h2>
-      <h2 class="small" style="margin-top:14px;">Kontingente</h2>
-      ${activePlans===null ? `<div class="note">Lädt …</div>` : (activePlans.length ? activePlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
-      ${archivedPlans.length ? `
-        <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpArchivedPlansOpen=!state.tmp.mpArchivedPlansOpen; render();">Abgelaufene Buchungen (${archivedPlans.length}) ${state.tmp.mpArchivedPlansOpen?'▾':'▸'}</h2>
-        ${state.tmp.mpArchivedPlansOpen ? archivedPlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : ''}
-      ` : ''}
-      <h2 class="small" style="margin-top:14px;">Kontingent anlegen</h2>
-      <div class="field"><label>Standardpaket</label>
-        <select id="mpNewTemplateId" onchange="applyPlanTemplateSelection(this.value)">
-          <option value="">— Frei eingeben —</option>
-          ${templates.map(t=>`<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Name</label><input type="text" id="mpNewName" placeholder="z.B. 10er Block CrossFit"></div>
-      <div class="field"><label>Typ</label>
-        <select id="mpNewType">
-          <option value="recurring">Laufende Buchung (pro Monat)</option>
-          <option value="one-time">Einmalige Buchung (fester Block)</option>
-        </select>
-      </div>
-      <div class="field"><label>Menge</label><input type="number" id="mpNewAmount" min="1" placeholder="z.B. 10"></div>
-      <div class="field"><label>Startdatum</label><input type="date" id="mpNewStart" value="${todayStr()}"></div>
-      <div class="field"><label>Notiz (optional)</label><input type="text" id="mpNewNote" placeholder="z.B. 10er-Monatspaket"></div>
-      <button class="btn btn-primary" onclick="createMembershipPlan('${m.id}')">Kontingent anlegen</button>
-      <h2 class="small" style="margin-top:14px;">Guthaben schenken (Kulanz)</h2>
-      <div class="note" style="margin-bottom:10px;">Kostenlose Einheiten gutschreiben, z.B. bei einem Notfall nach Ablauf der Stornofrist.</div>
-      <div class="field"><label>Menge</label><input type="number" id="mpGiftAmount" min="1" value="1"></div>
-      <div class="field"><label>Grund (optional)</label><input type="text" id="mpGiftNote" placeholder="z.B. Kulanz — Notfall"></div>
-      <button class="btn btn-ghost" onclick="grantGoodwillCredit('${m.id}')">Guthaben schenken</button>
       ${u ? `
-        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
-        <h2 class="small">Rolle & Zugang · ${userTierLabel(u, true)}</h2>
-        <div class="row" style="align-items:center;gap:20px;margin-bottom:10px;">
+        <div class="note" style="margin:4px 0 10px;">${userTierLabel(u, true)}</div>
+        <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
+        <div class="row" style="align-items:center;gap:20px;margin:10px 0;">
           <div class="row" style="align-items:center;gap:8px;width:auto;">Admin
             <label class="toggle-switch"><input type="checkbox" id="adminFlag_${u.id}" ${u.isAppAdmin?'checked':''}><span class="toggle-slider"></span></label>
           </div>
@@ -6425,24 +6412,96 @@ function renderBoxMemberDetail(){
             <label class="toggle-switch"><input type="checkbox" id="proFlag_${u.id}" ${u.isPro?'checked':''}><span class="toggle-slider"></span></label>
           </div>
         </div>
-        <div class="field"><label>Titel</label><input type="text" id="titleField_${u.id}" value="${escapeHtml(u.title||'')}" placeholder="z.B. Coach"></div>
+        <div class="row" style="align-items:center;gap:8px;margin-bottom:14px;width:auto;">Konto aktiv
+          <label class="toggle-switch"><input type="checkbox" id="activeFlag_${u.id}" ${u.disabled?'':'checked'}><span class="toggle-slider"></span></label>
+        </div>
         <button class="btn btn-primary" onclick="saveAdminUserFlags('${u.id}')">Speichern</button>
-        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
-        <div class="note" style="margin-bottom:10px;">Konto-Status</div>
-        <button class="btn ${u.disabled?'btn-primary':'btn-ghost'}" onclick="toggleAdminUserDisabled('${u.id}', ${!u.disabled})">${u.disabled?'Wieder aktivieren':'Deaktivieren'}</button>
-        <div style="border-top:1px solid var(--iron-700);margin:14px 0 10px;"></div>
-        <div class="note" style="color:var(--plate-red);margin-bottom:10px;">⚠️ Achtung! Diesen Löschvorgang nur durchführen, wenn die Person es ausdrücklich wünscht. Dieser Löschvorgang kann nicht mehr rückgängig gemacht werden.</div>
-        ${state.tmp.adminDeleteConfirmId===u.id ? `
-          <div class="field"><label>Zur Bestätigung eingeben: „ja, bitte alle Daten unwiderruflich löschen."</label>
-            <input type="text" id="adminDeleteConfirmText" placeholder="ja, bitte alle Daten unwiderruflich löschen.">
-          </div>
-          <button class="btn btn-danger" onclick="confirmAdminUserDelete('${u.id}')">Endgültig löschen</button>
-          <button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelAdminUserDelete()">Abbrechen</button>
-        ` : `
-          <button class="btn btn-danger" onclick="startAdminUserDelete('${u.id}')">Profil löschen (DSGVO)</button>
-        `}
       ` : ''}
     </div>
+
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.mpMemberKontingenteOpen=(state.tmp.mpMemberKontingenteOpen===false); render();">Kontingente${activePlans?.length?' ('+activePlans.length+')':''} ${state.tmp.mpMemberKontingenteOpen!==false?'▾':'▸'}</h2>
+      ${state.tmp.mpMemberKontingenteOpen!==false ? `
+        <div style="margin-top:10px;">
+          ${activePlans===null ? `<div class="note">Lädt …</div>` : (activePlans.length ? activePlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : `<div class="note">Noch kein Kontingent zugewiesen.</div>`)}
+          ${archivedPlans.length ? `
+            <h2 class="small" style="margin-top:14px;cursor:pointer;" onclick="state.tmp.mpArchivedPlansOpen=!state.tmp.mpArchivedPlansOpen; render();">Abgelaufene Buchungen (${archivedPlans.length}) ${state.tmp.mpArchivedPlansOpen?'▾':'▸'}</h2>
+            ${state.tmp.mpArchivedPlansOpen ? archivedPlans.map(p=>renderPlanRow(p, bookings, {showCancelButton:true, membershipId:m.id})).join('') : ''}
+          ` : ''}
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.mpMemberCreditCardsOpen=(state.tmp.mpMemberCreditCardsOpen===false); render();">Guthabenkarten${creditCards?.length?' ('+creditCards.length+')':''} ${state.tmp.mpMemberCreditCardsOpen!==false?'▾':'▸'}</h2>
+      ${state.tmp.mpMemberCreditCardsOpen!==false ? `
+        <div style="margin-top:10px;">
+          ${creditCards===null ? `<div class="note">Lädt …</div>` : (creditCards.length ? creditCards.map(c=>{
+            const balance = computeCardBalance(c.id, creditTxs);
+            const snap = c.offerSnapshot || {};
+            return `<div class="history-item">
+              <span style="display:flex;flex-direction:column;">
+                <span class="val">${escapeHtml(snap.title||'Karte')}</span>
+                <span class="note" style="margin:0;">Gekauft am ${fmtDate((c.created||'').slice(0,10))}</span>
+              </span>
+              <span class="note" style="margin:0;">Noch ${balance.remaining} von ${balance.granted} ${escapeHtml(snap.unitLabel||'Einheiten')}${c.status!=='active'?' · Inaktiv':''}</span>
+            </div>`;
+          }).join('') : `<div class="note">Noch keine Guthabenkarte gekauft.</div>`)}
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.mpNewPlanOpen=!state.tmp.mpNewPlanOpen; render();">Kontingent anlegen ${state.tmp.mpNewPlanOpen?'▾':'▸'}</h2>
+      ${state.tmp.mpNewPlanOpen ? `
+        <div style="margin-top:10px;">
+          <div class="field"><label>Standardpaket</label>
+            <select id="mpNewTemplateId" onchange="applyPlanTemplateSelection(this.value)">
+              <option value="">— Frei eingeben —</option>
+              ${templates.map(t=>`<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Name</label><input type="text" id="mpNewName" placeholder="z.B. 10er Block CrossFit"></div>
+          <div class="field"><label>Typ</label>
+            <select id="mpNewType">
+              <option value="recurring">Laufende Buchung (pro Monat)</option>
+              <option value="one-time">Einmalige Buchung (fester Block)</option>
+            </select>
+          </div>
+          <div class="field"><label>Menge</label><input type="number" id="mpNewAmount" min="1" placeholder="z.B. 10"></div>
+          <div class="field"><label>Startdatum</label><input type="date" id="mpNewStart" value="${todayStr()}"></div>
+          <div class="field"><label>Notiz (optional)</label><input type="text" id="mpNewNote" placeholder="z.B. 10er-Monatspaket"></div>
+          <button class="btn btn-primary" onclick="createMembershipPlan('${m.id}')">Kontingent anlegen</button>
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.mpGiftOpen=!state.tmp.mpGiftOpen; render();">Guthaben schenken (Kulanz) ${state.tmp.mpGiftOpen?'▾':'▸'}</h2>
+      ${state.tmp.mpGiftOpen ? `
+        <div style="margin-top:10px;">
+          <div class="note" style="margin-bottom:10px;">Kostenlose Einheiten gutschreiben, z.B. bei einem Notfall nach Ablauf der Stornofrist.</div>
+          <div class="field"><label>Menge</label><input type="number" id="mpGiftAmount" min="1" value="1"></div>
+          <div class="field"><label>Grund (optional)</label><input type="text" id="mpGiftNote" placeholder="z.B. Kulanz — Notfall"></div>
+          <button class="btn btn-ghost" onclick="grantGoodwillCredit('${m.id}')">Guthaben schenken</button>
+        </div>
+      ` : ''}
+    </div>
+
+    ${u ? `
+    <div class="card">
+      <div class="note" style="color:var(--plate-red);margin-bottom:10px;">⚠️ Achtung! Diesen Löschvorgang nur durchführen, wenn die Person es ausdrücklich wünscht. Dieser Löschvorgang kann nicht mehr rückgängig gemacht werden.</div>
+      ${state.tmp.adminDeleteConfirmId===u.id ? `
+        <div class="field"><label>Zur Bestätigung eingeben: „ja, bitte alle Daten unwiderruflich löschen."</label>
+          <input type="text" id="adminDeleteConfirmText" placeholder="ja, bitte alle Daten unwiderruflich löschen.">
+        </div>
+        <button class="btn btn-danger" onclick="confirmAdminUserDelete('${u.id}')">Endgültig löschen</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" onclick="cancelAdminUserDelete()">Abbrechen</button>
+      ` : `
+        <button class="btn btn-danger" onclick="startAdminUserDelete('${u.id}')">Profil löschen (DSGVO)</button>
+      `}
+    </div>
+    ` : ''}
   `;
 }
 async function regenerateInviteCode(){
@@ -11132,9 +11191,10 @@ function closeAdminUserDetail(){
 async function saveAdminUserFlags(userId){
   const isAppAdmin = !!document.getElementById(`adminFlag_${userId}`)?.checked;
   const isPro = !!document.getElementById(`proFlag_${userId}`)?.checked;
+  const active = !!document.getElementById(`activeFlag_${userId}`)?.checked;
   const title = document.getElementById(`titleField_${userId}`)?.value || '';
   try{
-    await pb.collection('users').update(userId, { isAppAdmin, isPro, title });
+    await pb.collection('users').update(userId, { isAppAdmin, isPro, title, disabled: !active });
     showToast('Gespeichert');
     await loadAdminUsers();
     if(state.tmp.mpMemberDetailId){ state.tmp.mpMemberDetailUser = await pb.collection('users').getOne(userId); render(); }
