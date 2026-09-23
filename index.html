@@ -4422,14 +4422,24 @@ async function loadBoxData(){
     state.profile.hasPro = !!(pb.authStore.record?.isAppAdmin || pb.authStore.record?.isPro);
     if(mine && mine.status==='active'){
       const boxId = mine.box;
-      const [slots, allAttended, membershipPlans] = await Promise.all([
+      const [slots, allAttended, membershipPlans, creditOffers, myCreditCards] = await Promise.all([
         pb.collection('schedule_slots').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), sort:'weekday,startTime'}),
         pb.collection('bookings').getFullList({filter: pb.filter('box = {:box} && status = "attended"', {box:boxId}), expand:'classInstance', requestKey:null}),
-        pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:mine.id}), requestKey:null})
+        pb.collection('membership_plans').getFullList({filter: pb.filter('membership = {:m}', {m:mine.id}), requestKey:null}),
+        pb.collection('credit_offers').getFullList({filter: pb.filter('box = {:box} && status = "active"', {box:boxId}), requestKey:null}).catch(()=>[]),
+        pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box} && owner = {:u}', {box:boxId, u:userId}), requestKey:null}).catch(()=>[])
       ]);
       state.box.scheduleSlots = slots;
       state.box.allAttendedBookings = allAttended;
       state.box.membershipPlans = membershipPlans;
+      state.box.creditOffers = creditOffers;
+      state.box.myCreditCards = myCreditCards;
+      state.box.myCreditTransactions = myCreditCards.length
+        ? await pb.collection('credit_transactions').getFullList({
+            filter: myCreditCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '),
+            sort:'created', requestKey:null
+          }).catch(()=>[])
+        : [];
       state.box.pendingMemberships = mine.role==='owner'
         ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
         : [];
@@ -4440,6 +4450,9 @@ async function loadBoxData(){
       state.box.myBookings = [];
       state.box.allAttendedBookings = [];
       state.box.membershipPlans = [];
+      state.box.creditOffers = [];
+      state.box.myCreditCards = [];
+      state.box.myCreditTransactions = [];
     }
   }catch(e){
     console.error('Box-Daten konnten nicht geladen werden', e);
@@ -5693,11 +5706,15 @@ function openBoxMembersScreen(){
   render();
   loadBoxMembersList();
   loadPlanTemplates();
+  loadCreditOffers();
+  loadBoxPaymentAccount();
 }
 function closeBoxMembersScreen(){
   state.tmp.mpMembersOpen = false;
   state.tmp.mpMemberDetailId = null;
   state.tmp.mpTemplatesOpen = false;
+  state.tmp.mpCreditOffersOpen = false;
+  state.tmp.mpCreditRedeemOpen = false;
   render();
 }
 async function loadBoxMembersList(){
@@ -5892,6 +5909,8 @@ function renderBoxMembersScreen(box){
   if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
   if(state.tmp.mpTemplatesOpen) return renderPlanTemplatesScreen();
+  if(state.tmp.mpCreditOffersOpen) return renderCreditOffersScreen();
+  if(state.tmp.mpCreditRedeemOpen) return renderCreditRedeemScreen();
   const isAdmin = !!pb.authStore.record?.isAppAdmin;
   const toggleHtml = isAdmin ? `
     <div class="row" style="margin-bottom:14px;">
@@ -5957,24 +5976,25 @@ function renderBoxMembersScreen(box){
       </div>
     ` : ''}
     <div class="card">
+      <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
+      ${state.tmp.inviteLinkOpen ? `
+        <div class="note" style="margin:10px 0;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
+        <div class="row" style="gap:10px;">
+          <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
+          <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
+          <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
+        </div>
+        <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
+      ` : ''}
+    </div>
+    <div class="card">
       <h2>Mitglieder & Kontingente</h2>
       <div class="field" style="margin-bottom:0;">
         <input type="text" id="mpMemberSearchInput" value="${escapeHtml(state.tmp.mpMemberSearch||'')}" oninput="state.tmp.mpMemberSearch=this.value; render();" placeholder="Athlet suchen …">
       </div>
       <button class="btn btn-ghost" style="margin-top:10px;" onclick="openPlanTemplatesScreen()">📦 Standardpakete verwalten</button>
-      <div class="invite-box">
-        <h2 class="small" style="cursor:pointer;margin:0;" onclick="state.tmp.inviteLinkOpen=!state.tmp.inviteLinkOpen; render();">📨 Einladungslink teilen ${state.tmp.inviteLinkOpen?'▾':'▸'}</h2>
-        ${state.tmp.inviteLinkOpen ? `
-          <div class="note" style="margin:10px 0;">Neue Mitglieder treten nach einem Klick automatisch bei.</div>
-          <div class="row" style="gap:10px;">
-            <a class="icon-btn" href="mailto:?subject=${encodeURIComponent('Einladung zu '+(box?.name||'meiner Box'))}&body=${encodeURIComponent(inviteMsg)}" title="Per Mail teilen">✉️</a>
-            <a class="icon-btn" href="https://wa.me/?text=${encodeURIComponent(inviteMsg)}" target="_blank" rel="noopener" title="Per WhatsApp teilen">${iconWhatsApp()}</a>
-            <button class="icon-btn" onclick="regenerateInviteCode()" title="Neuen Link erzeugen">🔄</button>
-          </div>
-          <div class="note" style="margin-top:10px;">Code manuell: <b>${escapeHtml(box?.inviteCode||'')}</b></div>
-        ` : ''}
-      </div>
     </div>
+    ${renderCreditAdminCard(box)}
     ${list===null ? `<div class="note">Lädt …</div>` : (filtered.length ? filtered.map(m=>`
       <div class="history-item" style="cursor:pointer;" onclick="openBoxMemberDetail('${m.id}')">
         <span class="row" style="align-items:center;gap:8px;">
@@ -5986,6 +6006,308 @@ function renderBoxMembersScreen(box){
     `).join('') : `<div class="note">Kein Athlet gefunden.</div>`)}
   `;
 }
+/* ---- Guthabenkarten & Boni (Coach-Verwaltung) ---- */
+function fmtEuro(cents){
+  return ((cents||0)/100).toLocaleString('de-AT', {style:'currency', currency:'EUR'});
+}
+// Client-Entsprechung des serverseitigen computeCardBalance() in
+// server-deploy/pb_hooks/credit_helpers.js - NUR fuer die Anzeige. Die verbindliche
+// Abbuchungs-Entscheidung passiert immer serverseitig im Einloese-Hook.
+function computeCardBalance(cardId, transactions){
+  let granted=0, redeemed=0, correction=0;
+  (transactions||[]).filter(t=>t.card===cardId).forEach(t=>{
+    const delta = parseFloat(t.deltaUnits)||0;
+    if(t.type==='purchase_grant'||t.type==='bonus_grant') granted += delta;
+    else if(t.type==='redemption') redeemed += Math.abs(delta);
+    else if(t.type==='correction') correction += delta;
+  });
+  return {granted, redeemed, correction, remaining: Math.max(0, granted-redeemed+correction)};
+}
+function loadJsQrIfNeeded(){
+  if(window.jsQR) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1/dist/jsQR.js';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('QR-Scanner konnte nicht geladen werden (Internetverbindung nötig).'));
+    document.head.appendChild(s);
+  });
+}
+function loadQrCodeGeneratorIfNeeded(){
+  if(window.QRCode) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('QR-Code konnte nicht erzeugt werden (Internetverbindung nötig).'));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadCreditOffers(){
+  try{
+    state.box.creditOffers = await pb.collection('credit_offers').getFullList({
+      filter: pb.filter('box = {:box}', {box: state.box.membership.box}), sort:'-created'
+    });
+  }catch(e){ state.box.creditOffers = []; }
+  render();
+}
+async function loadBoxPaymentAccount(){
+  try{
+    state.box.paymentAccount = await pb.collection('box_payment_accounts').getFirstListItem(
+      pb.filter('box = {:box}', {box: state.box.membership.box})
+    );
+  }catch(e){ state.box.paymentAccount = null; }
+  render();
+}
+async function startStripeConnectOnboarding(boxId){
+  try{
+    const result = await pb.send('/credit/connect-onboarding-link', {method:'POST', body:{boxId}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Stripe-Einrichtung fehlgeschlagen');
+    location.href = result.url;
+  }catch(e){
+    showToast((e&&e.message)||'Stripe-Einrichtung fehlgeschlagen');
+  }
+}
+
+function renderCreditAdminCard(box){
+  const offers = state.box.creditOffers;
+  const activeCount = offers ? offers.filter(o=>o.status==='active').length : 0;
+  const account = state.box.paymentAccount;
+  const paymentsReady = !!(account && account.chargesEnabled);
+  return `
+    <div class="card">
+      <h2 class="small">Guthabenkarten & Boni</h2>
+      ${offers===null||offers===undefined ? `<div class="note">Lädt …</div>` : `<div class="note">${activeCount} aktive${activeCount===1?'s Angebot':' Angebote'}</div>`}
+      ${!paymentsReady ? `
+        <div class="note" style="color:var(--plate-red);margin-top:6px;">Zahlungen für diese Box sind noch nicht eingerichtet — Athleten können erst nach abgeschlossener Stripe-Einrichtung kaufen.</div>
+        <button class="btn btn-ghost" style="margin-top:8px;" onclick="startStripeConnectOnboarding('${box?.id||state.box.membership.box}')">💳 Zahlungen einrichten (Stripe)</button>
+      ` : `<div class="note" style="color:var(--success-green);">Zahlungen eingerichtet ✓</div>`}
+      <div class="row" style="margin-top:10px;">
+        <button class="btn btn-ghost" onclick="openCreditOffersScreen()">🎟️ Angebote verwalten</button>
+        <button class="btn btn-ghost" onclick="openCreditRedeemScreen()">🧾 Zähltheke / Einlösen</button>
+      </div>
+    </div>
+  `;
+}
+
+function openCreditOffersScreen(){
+  state.tmp.mpCreditOffersOpen = true;
+  state.tmp.mpCreditOfferEditId = null;
+  state.tmp.mpCreditOfferPrefill = null;
+  render();
+}
+function closeCreditOffersScreen(){
+  state.tmp.mpCreditOffersOpen = false;
+  state.tmp.mpCreditOfferEditId = null;
+  state.tmp.mpCreditOfferPrefill = null;
+  render();
+}
+function startCreditOfferNewVersion(oldId){
+  const old = (state.box.creditOffers||[]).find(o=>o.id===oldId);
+  state.tmp.mpCreditOfferEditId = 'new';
+  state.tmp.mpCreditOfferPrefill = old ? {
+    title: old.title, description: old.description, unitLabel: old.unitLabel,
+    unitsGranted: old.unitsGranted, bonusUnitsIncluded: old.bonusUnitsIncluded,
+    priceEuros: ((old.priceCents||0)/100).toFixed(2), archiveId: old.id
+  } : null;
+  render();
+}
+async function saveCreditOffer(editId){
+  const title = (document.getElementById('coTitle')?.value||'').trim();
+  const description = (document.getElementById('coDescription')?.value||'').trim();
+  if(!title){ showToast('Bitte einen Namen angeben'); return; }
+  try{
+    if(editId==='new'){
+      const unitLabel = (document.getElementById('coUnitLabel')?.value||'').trim();
+      const unitsGranted = parseInt(document.getElementById('coUnitsGranted')?.value)||0;
+      const bonusUnitsIncluded = parseInt(document.getElementById('coBonusUnits')?.value)||0;
+      const priceEuros = parseFloat(document.getElementById('coPrice')?.value)||0;
+      if(!unitLabel || !unitsGranted || priceEuros<=0){ showToast('Bitte Produkt, Anzahl und Preis angeben'); return; }
+      await pb.collection('credit_offers').create({
+        box: state.box.membership.box, title, description, unitLabel,
+        unitsGranted, bonusUnitsIncluded, priceCents: Math.round(priceEuros*100),
+        currency:'eur', status:'active', createdBy: pb.authStore.record.id
+      });
+      const archiveId = state.tmp.mpCreditOfferPrefill?.archiveId;
+      if(archiveId) await pb.collection('credit_offers').update(archiveId, {status:'archived'});
+    } else {
+      const status = document.getElementById('coStatus')?.value || 'active';
+      await pb.collection('credit_offers').update(editId, {title, description, status});
+    }
+    showToast('Angebot gespeichert');
+    state.tmp.mpCreditOfferEditId = null;
+    state.tmp.mpCreditOfferPrefill = null;
+    await loadCreditOffers();
+  }catch(e){
+    showToast('Speichern fehlgeschlagen');
+  }
+}
+async function toggleCreditOfferStatus(id, currentStatus){
+  const next = currentStatus==='active' ? 'paused' : 'active';
+  try{
+    await pb.collection('credit_offers').update(id, {status: next});
+    await loadCreditOffers();
+  }catch(e){ showToast('Aktion fehlgeschlagen'); }
+}
+function renderCreditOffersScreen(){
+  const offers = state.box.creditOffers || [];
+  const editId = state.tmp.mpCreditOfferEditId;
+  const isNew = editId==='new';
+  const editing = (editId && !isNew) ? offers.find(o=>o.id===editId) : null;
+  const prefill = state.tmp.mpCreditOfferPrefill;
+  const formTpl = isNew ? (prefill||{title:'',description:'',unitLabel:'',unitsGranted:'',bonusUnitsIncluded:0,priceEuros:''}) : editing;
+  const formHtml = (editId && (isNew || editing)) ? `
+    <div class="card">
+      <h2 class="small">${isNew?'Neues Angebot':'Angebot bearbeiten'}</h2>
+      <div class="field"><label>Name</label><input type="text" id="coTitle" value="${escapeHtml(formTpl?.title||'')}" placeholder="z.B. Shake-Zehnerkarte"></div>
+      <div class="field"><label>Beschreibung</label><textarea id="coDescription" rows="2" placeholder="z.B. Zehn Proteinshakes aus unserem Standardsortiment">${escapeHtml(formTpl?.description||'')}</textarea></div>
+      ${isNew ? `
+        <div class="field"><label>Produkt / Kategorie</label><input type="text" id="coUnitLabel" value="${escapeHtml(formTpl?.unitLabel||'')}" placeholder="z.B. Standardshake"></div>
+        <div class="row">
+          <div class="field"><label>Anzahl gekaufter Einheiten</label><input type="number" step="1" min="1" id="coUnitsGranted" value="${formTpl?.unitsGranted||''}" placeholder="10"></div>
+          <div class="field"><label>Zusätzliche Gratiseinheiten</label><input type="number" step="1" min="0" id="coBonusUnits" value="${formTpl?.bonusUnitsIncluded||0}" placeholder="0"></div>
+        </div>
+        <div class="field"><label>Paketpreis (€)</label><input type="number" step="0.01" min="0" id="coPrice" value="${formTpl?.priceEuros||''}" placeholder="40.00"></div>
+        <div class="note">Gültige Standorte: alle Standorte dieser Box (mehrere Standorte sind eine spätere Erweiterung).</div>
+      ` : `
+        <div class="note">Produkt: ${escapeHtml(editing.unitLabel)} · ${editing.unitsGranted}${editing.bonusUnitsIncluded?' + '+editing.bonusUnitsIncluded+' Bonus':''} Einheiten · ${fmtEuro(editing.priceCents)}</div>
+        <div class="note">Menge/Preis sind nach der Veröffentlichung unveränderlich (bereits gekaufte Karten behalten ihre Bedingungen). Für neue Konditionen: "🔁 Neue Version anlegen" in der Liste.</div>
+        <div class="field"><label>Verkaufsstatus</label>
+          <select id="coStatus">
+            <option value="active" ${editing.status==='active'?'selected':''}>Aktiv</option>
+            <option value="paused" ${editing.status==='paused'?'selected':''}>Pausiert</option>
+          </select>
+        </div>
+      `}
+      <div class="row" style="margin-top:10px;">
+        <button class="btn btn-ghost" onclick="state.tmp.mpCreditOfferEditId=null; state.tmp.mpCreditOfferPrefill=null; render();">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveCreditOffer('${isNew?'new':editId}')">Speichern</button>
+      </div>
+    </div>
+  ` : `
+    <button class="btn btn-primary" style="margin-bottom:14px;" onclick="state.tmp.mpCreditOfferEditId='new'; state.tmp.mpCreditOfferPrefill=null; render();">+ Neues Angebot</button>
+  `;
+  const visibleOffers = offers.filter(o=>o.status!=='archived');
+  const listHtml = visibleOffers.map(o=>`
+    <div class="history-item">
+      <span style="display:flex;flex-direction:column;">
+        <span class="val">${escapeHtml(o.title)} ${o.status==='paused'?'<span class="chip">Pausiert</span>':''}</span>
+        <span class="note" style="margin:0;">${o.unitsGranted}${o.bonusUnitsIncluded?' + '+o.bonusUnitsIncluded+' Bonus':''}x ${escapeHtml(o.unitLabel)} · ${fmtEuro(o.priceCents)}</span>
+      </span>
+      <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.mpCreditOfferEditId='${o.id}'; state.tmp.mpCreditOfferPrefill=null; render();">✎</button>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="toggleCreditOfferStatus('${o.id}','${o.status}')">${o.status==='active'?'Pausieren':'Aktivieren'}</button>
+        <button class="btn-sm btn-ghost" style="width:auto;" onclick="startCreditOfferNewVersion('${o.id}')" title="Neue Version mit anderem Preis/Menge anlegen">🔁</button>
+      </span>
+    </div>
+  `).join('');
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeCreditOffersScreen()">← Zurück</button>
+    <div class="card"><h2>Angebote</h2></div>
+    ${formHtml}
+    ${visibleOffers.length ? listHtml : '<div class="note">Noch keine Angebote angelegt.</div>'}
+  `;
+}
+
+/* ---- Zähltheke: QR-Einlösung scannen (Coach-Verwaltung) ---- */
+function openCreditRedeemScreen(){
+  state.tmp.mpCreditRedeemOpen = true;
+  state.tmp.creditScan = {active:false, result:null};
+  render();
+}
+function closeCreditRedeemScreen(){
+  stopCreditQrScan(false);
+  state.tmp.mpCreditRedeemOpen = false;
+  render();
+}
+async function startCreditQrScan(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showToast('Kamera wird von diesem Browser nicht unterstützt'); return;
+  }
+  try{ await loadJsQrIfNeeded(); }
+  catch(e){ showToast(e.message); return; }
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+  }catch(e){
+    showToast('Kamerazugriff verweigert oder nicht verfügbar'); return;
+  }
+  state.tmp.creditScan = {active:true, result:null, stream};
+  render();
+  const video = document.getElementById('creditScanVideo');
+  if(!video){ stopCreditQrScan(false); return; }
+  video.srcObject = stream;
+  await video.play();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  function tick(){
+    const scan = state.tmp.creditScan;
+    if(!scan || !scan.active) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+      if(code && code.data){
+        let payload = null;
+        try{ payload = JSON.parse(code.data); }catch(e){ /* kein gültiges Payload */ }
+        if(payload && payload.t){
+          scan.result = payload;
+          stopCreditQrScan(true);
+          render();
+          return;
+        }
+      }
+    }
+    scan.rafId = requestAnimationFrame(tick);
+  }
+  state.tmp.creditScan.rafId = requestAnimationFrame(tick);
+}
+function stopCreditQrScan(keepResult){
+  const scan = state.tmp.creditScan;
+  if(!scan) return;
+  if(scan.rafId) cancelAnimationFrame(scan.rafId);
+  if(scan.stream) scan.stream.getTracks().forEach(t=>t.stop());
+  scan.active = false;
+  scan.stream = null;
+  if(!keepResult) scan.result = null;
+}
+async function confirmCreditRedemption(token){
+  try{
+    const result = await pb.send('/credit/redemption/confirm', {method:'POST', body:{token}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Einlösung fehlgeschlagen');
+    showToast(`${result.unitsRedeemed} eingelöst – noch ${result.remaining} verfügbar`);
+    state.tmp.creditScan = {active:false, result:null};
+    render();
+  }catch(e){
+    showToast((e&&e.message)||'Einlösung fehlgeschlagen');
+  }
+}
+function renderCreditRedeemScreen(){
+  const scan = state.tmp.creditScan || {};
+  const result = scan.result;
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeCreditRedeemScreen()">← Zurück</button>
+    <div class="card" style="text-align:center;">
+      <h2>Zähltheke</h2>
+      ${!scan.active && !result ? `
+        <div class="note" style="margin-bottom:14px;">Athlet zeigt seinen QR-Code aus "Meine Karten" — hier scannen, um eine Einheit abzubuchen.</div>
+        <button class="btn btn-primary" onclick="startCreditQrScan()">📷 Scannen starten</button>
+      ` : ''}
+      ${scan.active ? `
+        <video id="creditScanVideo" playsinline muted style="width:100%;max-width:360px;border-radius:12px;margin:10px auto;display:block;"></video>
+        <button class="btn btn-ghost" onclick="stopCreditQrScan(false); render();">Abbrechen</button>
+      ` : ''}
+      ${result ? `
+        <div class="note" style="margin:10px 0;">Code erkannt. Vor dem Bestätigen prüfen, dass es sich um den richtigen Athleten handelt.</div>
+        <button class="btn btn-primary" onclick="confirmCreditRedemption('${escapeHtml(result.t)}')">✓ Bestätigen & einlösen</button>
+        <button class="btn btn-ghost" style="margin-top:8px;" onclick="state.tmp.creditScan={active:false,result:null}; render();">Verwerfen</button>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderBoxMemberDetail(){
   const m = (state.tmp.mpMembersList||[]).find(x=>x.id===state.tmp.mpMemberDetailId);
   if(!m) return `<button class="btn btn-ghost" onclick="closeBoxMembersScreen()">← Zurück</button>`;
@@ -6533,6 +6855,7 @@ function renderBoxHomeMember(box){
     </div>
       `;
     })()}
+    ${renderMyCreditsCard(box)}
     <div class="card">
       <h2 class="small">Nächster Termin</h2>
       ${next ? `
@@ -6578,8 +6901,160 @@ function renderMyPlansScreen(){
     </div>
   `;
 }
+/* ---- Meine Karten (Athlet: kaufen, einsehen, einlösen) ---- */
+function renderMyCreditsCard(box){
+  const cards = state.box.myCreditCards || [];
+  const txs = state.box.myCreditTransactions || [];
+  const activeCards = cards.filter(c=>c.status==='active');
+  const totalRemaining = activeCards.reduce((sum,c)=>sum+computeCardBalance(c.id, txs).remaining, 0);
+  return `
+    <div class="card" style="cursor:pointer;" onclick="openMyCardsScreen()">
+      <h2 class="small">Meine Karten</h2>
+      ${activeCards.length ? `
+        <div class="row" style="align-items:baseline;gap:8px;">
+          <span class="stat-num" style="font-size:28px;">${totalRemaining}</span>
+          <span class="note" style="margin:0;">Einheiten übrig in ${activeCards.length} Karte${activeCards.length===1?'':'n'}</span>
+        </div>
+      ` : `<div class="note">Noch keine Guthabenkarte gekauft.</div>`}
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="event.stopPropagation(); openMyCardsScreen();">Alle Karten ansehen →</button>
+    </div>
+  `;
+}
+function openMyCardsScreen(){
+  state.tmp.myCreditCardsOpen = true;
+  state.tmp.myCreditDetailCardId = null;
+  render();
+}
+function closeMyCardsScreen(){
+  state.tmp.myCreditCardsOpen = false;
+  state.tmp.myCreditDetailCardId = null;
+  state.tmp.myCreditIssuedProof = null;
+  render();
+}
+async function buyCreditOffer(offerId){
+  try{
+    const result = await pb.send('/credit/checkout-session', {method:'POST', body:{offerId}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Kauf konnte nicht gestartet werden');
+    location.href = result.checkoutUrl;
+  }catch(e){
+    showToast((e&&e.message)||'Kauf konnte nicht gestartet werden');
+  }
+}
+async function startCardRedemption(cardId, unitsRequested){
+  try{
+    const result = await pb.send('/credit/redemption/issue', {method:'POST', body:{cardId, unitsRequested}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Einlösung konnte nicht gestartet werden');
+    state.tmp.myCreditIssuedProof = result;
+    render();
+    await loadQrCodeGeneratorIfNeeded();
+    const canvas = document.getElementById('myCreditQrCanvas');
+    if(canvas && window.QRCode){
+      window.QRCode.toCanvas(canvas, JSON.stringify({t: result.token, c: result.cardId}), {width:220});
+    }
+  }catch(e){
+    showToast((e&&e.message)||'Einlösung konnte nicht gestartet werden');
+  }
+}
+function cancelCardRedemption(){
+  state.tmp.myCreditIssuedProof = null;
+  render();
+}
+function renderMyCardsScreen(){
+  const cards = state.box.myCreditCards || [];
+  const txs = state.box.myCreditTransactions || [];
+  const offers = state.box.creditOffers || [];
+  const detailId = state.tmp.myCreditDetailCardId;
+  const issued = state.tmp.myCreditIssuedProof;
+
+  if(detailId){
+    const card = cards.find(c=>c.id===detailId);
+    if(!card) { state.tmp.myCreditDetailCardId = null; }
+    else {
+      const balance = computeCardBalance(card.id, txs);
+      const snap = card.offerSnapshot || {};
+      const history = txs.filter(t=>t.card===card.id).slice().reverse();
+      const typeLabel = {purchase_grant:'Kauf', bonus_grant:'Gratiseinheiten', redemption:'Einlösung', correction:'Korrektur'};
+      if(issued && issued.cardId===card.id){
+        return `
+          <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="cancelCardRedemption()">← Zurück</button>
+          <div class="card" style="text-align:center;">
+            <h2 class="small">${escapeHtml(snap.title||'Karte')}</h2>
+            <div class="note" style="margin-bottom:10px;">Dem Personal zeigen und scannen lassen.</div>
+            <canvas id="myCreditQrCanvas" style="margin:0 auto;display:block;"></canvas>
+            <div class="note" style="margin-top:10px;">${issued.unitsRequested}x ${escapeHtml(snap.unitLabel||'Einheit')} · gültig bis ${new Date(issued.expiresAt).toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'})}</div>
+            <button class="btn btn-ghost" style="margin-top:14px;" onclick="cancelCardRedemption()">Abbrechen</button>
+          </div>
+        `;
+      }
+      return `
+        <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="state.tmp.myCreditDetailCardId=null; render();">← Zurück</button>
+        <div class="card">
+          <h2 class="small">${escapeHtml(snap.title||'Karte')}</h2>
+          <div class="row" style="align-items:baseline;gap:8px;">
+            <span class="stat-num" style="font-size:28px;">${balance.remaining}</span>
+            <span class="note" style="margin:0;">von ${balance.granted} ${escapeHtml(snap.unitLabel||'Einheiten')} verfügbar</span>
+          </div>
+          <div class="note" style="margin-top:6px;">Gekauft am ${fmtDate(card.created?.slice(0,10)||'')}</div>
+          ${snap.description ? `<div class="note">${escapeHtml(snap.description)}</div>` : ''}
+          ${card.status==='active' && balance.remaining>0 ? `
+            <button class="btn btn-primary" style="margin-top:10px;" onclick="startCardRedemption('${card.id}',1)">Einlösen (1x ${escapeHtml(snap.unitLabel||'Einheit')})</button>
+          ` : card.status!=='active' ? `<div class="note" style="color:var(--plate-red);">Karte ist nicht mehr aktiv.</div>` : `<div class="note">Kein Guthaben mehr auf dieser Karte.</div>`}
+          <button class="btn btn-ghost" style="margin-top:8px;" onclick="buyCreditOffer('${card.offer}')">Erneut kaufen</button>
+        </div>
+        <div class="card">
+          <h2 class="small">Buchungsverlauf</h2>
+          ${history.length ? history.map(t=>`
+            <div class="history-item">
+              <span class="val">${typeLabel[t.type]||t.type}</span>
+              <span class="note" style="margin:0;">${t.deltaUnits>0?'+':''}${t.deltaUnits} · ${fmtDate((t.created||'').slice(0,10))}</span>
+            </div>
+          `).join('') : `<div class="note">Noch keine Buchungen.</div>`}
+        </div>
+      `;
+    }
+  }
+
+  const cardsHtml = cards.length ? cards.map(c=>{
+    const balance = computeCardBalance(c.id, txs);
+    const snap = c.offerSnapshot || {};
+    return `
+      <div class="history-item" style="cursor:pointer;" onclick="state.tmp.myCreditDetailCardId='${c.id}'; render();">
+        <span style="display:flex;flex-direction:column;">
+          <span class="val">${escapeHtml(snap.title||'Karte')}</span>
+          <span class="note" style="margin:0;">Noch ${balance.remaining} von ${balance.granted} ${escapeHtml(snap.unitLabel||'Einheiten')} verfügbar</span>
+        </span>
+        ${c.status!=='active' ? '<span class="chip">Inaktiv</span>' : ''}
+      </div>
+    `;
+  }).join('') : `<div class="note">Noch keine Guthabenkarte gekauft.</div>`;
+
+  const offersHtml = offers.length ? offers.map(o=>`
+    <div class="history-item">
+      <span style="display:flex;flex-direction:column;">
+        <span class="val">${escapeHtml(o.title)}</span>
+        <span class="note" style="margin:0;">${o.unitsGranted}${o.bonusUnitsIncluded?' + '+o.bonusUnitsIncluded+' Bonus':''}x ${escapeHtml(o.unitLabel)} · ${fmtEuro(o.priceCents)}</span>
+        ${o.description ? `<span class="note" style="margin:0;">${escapeHtml(o.description)}</span>` : ''}
+      </span>
+      <button class="btn-sm btn-primary" style="width:auto;" onclick="buyCreditOffer('${o.id}')">Kaufen</button>
+    </div>
+  `).join('') : `<div class="note">Diese Box bietet aktuell keine Guthabenkarten an.</div>`;
+
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeMyCardsScreen()">← Zurück</button>
+    <div class="card">
+      <h2 class="small">Meine Karten</h2>
+      ${cardsHtml}
+    </div>
+    <div class="card">
+      <h2 class="small">Angebote</h2>
+      ${offersHtml}
+    </div>
+  `;
+}
+
 function renderBoxHome(box){
   if(!isBoxAdminView() && state.tmp.myPlansOpen) return renderMyPlansScreen();
+  if(!isBoxAdminView() && state.tmp.myCreditCardsOpen) return renderMyCardsScreen();
   return isBoxAdminView() ? renderBoxHomeAdmin(box) : renderBoxHomeMember(box);
 }
 function shiftScheduleWeek(delta){

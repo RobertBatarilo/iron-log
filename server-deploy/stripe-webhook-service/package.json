@@ -1,0 +1,9 @@
+{
+  "name": "wod-ledger-stripe-webhook-service",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "stripe": "^17.0.0"
+  }
+}

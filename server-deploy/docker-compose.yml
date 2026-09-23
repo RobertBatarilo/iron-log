@@ -29,6 +29,15 @@ services:
     networks:
       - n8n-docker-caddy_default
 
+  stripe-webhook-service:
+    build: ./stripe-webhook-service
+    container_name: stripe-webhook-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - n8n-docker-caddy_default
+
 volumes:
   pocketbase_data:
 
