@@ -10958,12 +10958,16 @@ function renderProgress(){
   return renderProgressMenu();
 }
 function renderProgressMenu(){
+  // Solange loadBoxData() noch nicht fertig ist, state.box.membership optimistisch als
+  // "noch aktiv" behandeln statt den Button kurz auszublenden - sonst flackert "Disziplin"
+  // bei jedem Neuladen kurz weg und wieder rein (gleiches Muster wie showBoxTab in bottomNavHtml()).
+  const showDiscipline = !state.box.loaded || state.box.membership?.status==='active';
   return `
     <div class="card">
       <h2 class="small">Ruhmeshalle</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('1rm')">💪 Stärke</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;${state.box.membership?.status==='active' ? 'margin-bottom:10px;' : ''}" onclick="setProgressSection('times')">⏱️ Schnelligkeit</button>
-      ${state.box.membership?.status==='active' ? `<button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('discipline')">🏅 Disziplin</button>` : ''}
+      <button class="btn btn-ghost" style="justify-content:space-between;${showDiscipline ? 'margin-bottom:10px;' : ''}" onclick="setProgressSection('times')">⏱️ Schnelligkeit</button>
+      ${showDiscipline ? `<button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('discipline')">🏅 Disziplin</button>` : ''}
     </div>
     <div class="card">
       <h2 class="small">Meine Fortschritte</h2>
@@ -11254,8 +11258,13 @@ function renderProfileMenu(){
   const mode = state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
   const m = state.box.membership;
   const showBoxSettings = !m || m.status==='pending' || isBoxOwner();
+  // Solange loadBoxData() noch nicht fertig ist (state.box.membership noch null), isBoxOwner()
+  // optimistisch als "vermutlich noch true" behandeln statt "Rolle" kurz auszublenden - sonst
+  // flackert die Karte bei jedem Neuladen kurz weg und wieder rein (gleiches Muster wie
+  // showBoxTab in bottomNavHtml()).
+  const showRoleSwitch = !state.box.loaded || isBoxOwner();
   return `
-    ${isBoxOwner() ? `
+    ${showRoleSwitch ? `
     <div class="card">
       <h2 class="small">Rolle</h2>
       <div class="role-switch">
