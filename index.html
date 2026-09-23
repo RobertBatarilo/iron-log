@@ -6295,33 +6295,44 @@ function stopCreditQrScan(keepResult){
   scan.stream = null;
   if(!keepResult) scan.result = null;
 }
+function vibrateIfSupported(pattern){
+  try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){ /* z.B. iOS Safari ohne Vibration API */ }
+}
 async function confirmCreditRedemption(token){
   try{
     const result = await pb.send('/credit/redemption/confirm', {method:'POST', body:{token}});
     if(!result || !result.ok) throw new Error((result&&result.error)||'Einlösung fehlgeschlagen');
-    showToast(`${result.unitsRedeemed} eingelöst – noch ${result.remaining} verfügbar`);
-    state.tmp.creditScan = {active:false, result:null};
+    vibrateIfSupported(200);
+    state.tmp.creditScan = {active:false, result:null, success:result};
     render();
   }catch(e){
+    vibrateIfSupported([80,60,80]);
     showToast((e&&e.message)||'Einlösung fehlgeschlagen');
   }
 }
 function renderCreditRedeemScreen(){
   const scan = state.tmp.creditScan || {};
   const result = scan.result;
+  const success = scan.success;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeCreditRedeemScreen()">← Zurück</button>
     <div class="card" style="text-align:center;">
       <h2>Zähltheke</h2>
-      ${!scan.active && !result ? `
+      ${success ? `
+        <div style="font-size:48px;margin:14px 0 4px;">✅</div>
+        <div class="note" style="color:var(--success-green);font-size:20px;margin-bottom:4px;">${success.unitsRedeemed} eingelöst</div>
+        <div class="note" style="margin-bottom:14px;">Noch ${success.remaining} verfügbar</div>
+        <button class="btn btn-primary" onclick="state.tmp.creditScan={active:false,result:null,success:null}; render();">Nächster Scan</button>
+      ` : ''}
+      ${!success && !scan.active && !result ? `
         <div class="note" style="margin-bottom:14px;">Athlet zeigt seinen QR-Code aus "Meine Karten" — hier scannen, um eine Einheit abzubuchen.</div>
         <button class="btn btn-primary" onclick="startCreditQrScan()">📷 Scannen starten</button>
       ` : ''}
-      ${scan.active ? `
+      ${!success && scan.active ? `
         <video id="creditScanVideo" playsinline muted style="width:100%;max-width:360px;border-radius:12px;margin:10px auto;display:block;"></video>
         <button class="btn btn-ghost" onclick="stopCreditQrScan(false); render();">Abbrechen</button>
       ` : ''}
-      ${result ? `
+      ${!success && result ? `
         <div class="note" style="margin:10px 0;">Code erkannt. Vor dem Bestätigen prüfen, dass es sich um den richtigen Athleten handelt.</div>
         <button class="btn btn-primary" onclick="confirmCreditRedemption('${escapeHtml(result.t)}')">✓ Bestätigen & einlösen</button>
         <button class="btn btn-ghost" style="margin-top:8px;" onclick="state.tmp.creditScan={active:false,result:null}; render();">Verwerfen</button>

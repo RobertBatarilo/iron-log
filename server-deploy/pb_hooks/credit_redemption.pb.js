@@ -106,12 +106,19 @@ routerAdd("POST", "/credit/redemption/confirm", (e) => {
     return e.json(410, { ok: false, error: "Code abgelaufen" });
   }
 
-  let result;
+  // WICHTIG: $app.runInTransaction(fn) erwartet fn: (txApp) => void - kein Rueckgabewert!
+  // Einen Wert per return {...} aus der Callback herauszureichen (wie zuvor versucht)
+  // fuehrt im JSVM zu "GoError: could not convert [object Object] to error", der dann
+  // faelschlich als generischer Fehler im catch-Block landete (live als 409 "Code bereits
+  // verwendet" fehlgedeutet, obwohl der Code noch gar nicht eingeloest war). Deshalb: das
+  // Ergebnis in einer Variable AUSSERHALB der Transaktion festhalten, kein return-Wert.
+  let outcome = { ok: false };
   try {
-    result = $app.runInTransaction((txApp) => {
+    $app.runInTransaction((txApp) => {
       const freshProof = txApp.findRecordById("credit_redemption_proofs", proof.id);
       if (freshProof.getString("status") !== "issued") {
-        return { conflict: true };
+        outcome = { conflict: true };
+        return;
       }
 
       const cardId = freshProof.getString("card");
@@ -121,7 +128,8 @@ routerAdd("POST", "/credit/redemption/confirm", (e) => {
       // siehe Kommentar in credit_helpers.js.
       const balance = helpers.computeCardBalance(cardId, txApp);
       if (unitsRequested > balance.remaining) {
-        return { insufficientBalance: true, remaining: balance.remaining };
+        outcome = { insufficientBalance: true, remaining: balance.remaining };
+        return;
       }
 
       freshProof.set("status", "consumed");
@@ -140,14 +148,22 @@ routerAdd("POST", "/credit/redemption/confirm", (e) => {
       txApp.save(redemptionTx);
 
       const newBalance = helpers.computeCardBalance(cardId, txApp);
-      return { ok: true, cardId, unitsRedeemed: unitsRequested, remaining: newBalance.remaining };
+      outcome = { ok: true, cardId, unitsRedeemed: unitsRequested, remaining: newBalance.remaining };
     });
   } catch (err) {
-    console.log("credit_redemption confirm Konflikt", err);
-    return e.json(409, { ok: false, error: "Code bereits verwendet" });
+    // Nur eine echte Unique-Index-Kollision auf operationId ist der beabsichtigte
+    // Idempotenz-Fall (parallele Doppel-Bestaetigung). Alles andere ist ein echter Fehler
+    // und muss sichtbar bleiben statt faelschlich als "409 bereits verwendet" zu gelten.
+    const msg = String((err && err.message) || err);
+    if (/unique/i.test(msg) && /operationid/i.test(msg)) {
+      console.log("credit_redemption confirm: Doppel-Bestaetigung erkannt (operationId-Kollision), ignoriert", msg);
+      return e.json(409, { ok: false, error: "Code bereits verwendet" });
+    }
+    console.log("credit_redemption confirm ECHTER FEHLER", err);
+    return e.json(500, { ok: false, error: "Einloesung fehlgeschlagen" });
   }
 
-  if (result.conflict) return e.json(409, { ok: false, error: "Code bereits verwendet" });
-  if (result.insufficientBalance) return e.json(400, { ok: false, error: "Nicht genug Guthaben (noch " + result.remaining + ")" });
-  return e.json(200, result);
+  if (outcome.conflict) return e.json(409, { ok: false, error: "Code bereits verwendet" });
+  if (outcome.insufficientBalance) return e.json(400, { ok: false, error: "Nicht genug Guthaben (noch " + outcome.remaining + ")" });
+  return e.json(200, outcome);
 }, $apis.requireAuth("users"));
