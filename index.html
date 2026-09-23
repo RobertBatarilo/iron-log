@@ -6866,7 +6866,9 @@ function renderBoxIdentityCard(box){
 function renderProfileBoxSettings(){
   const m = state.box.membership;
   let body;
-  if(!m){
+  if(!state.box.loaded){
+    body = `<div class="card"><div class="note">Lädt …</div></div>`;
+  } else if(!m){
     body = renderBoxJoinOrCreate();
   } else if(m.status==='pending'){
     const boxName = m.expand?.box?.name || 'Box';
@@ -7645,6 +7647,12 @@ function renderBoxWorkoutsTab(){
 }
 function renderBox(){
   const b = state.box;
+  if(!b.loaded){
+    // Beim (Neu-)Laden ist state.box.membership zunaechst null, bevor loadBoxData() fertig ist -
+    // ohne diesen Guard zeigt das faelschlich kurz "Box beitreten", auch fuer laengst
+    // beigetretene Mitglieder (z.B. beim Pull-to-Refresh).
+    return `<div class="card"><div class="note">Lädt …</div></div>`;
+  }
   if(!b.membership){
     return renderBoxJoinOrCreate();
   }
