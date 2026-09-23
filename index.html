@@ -3824,7 +3824,13 @@ function buildTiersFromStructured(raw){
     if(!t) return;
     const male = parseFloat(t.male), female = parseFloat(t.female);
     const calMale = parseFloat(t.calMale), calFemale = parseFloat(t.calFemale);
-    const moves = Array.isArray(t.moves) ? t.moves.filter(m=>m && m.name && m.reps!=null && m.reps!=='').map(m=>({name:String(m.name), reps:String(m.reps)})) : [];
+    const moves = Array.isArray(t.moves) ? t.moves
+      .filter(m=>m && m.name && ((m.reps!=null && m.reps!=='') || (Array.isArray(m.substitutes) && m.substitutes.length)))
+      .map(m=>({
+        name: String(m.name),
+        reps: (m.reps!=null && m.reps!=='') ? String(m.reps) : undefined,
+        substitutes: Array.isArray(m.substitutes) ? m.substitutes.filter(s=>s && String(s).trim()).map(s=>String(s).trim()) : undefined
+      })) : [];
     if(!isNaN(male) || !isNaN(female) || !isNaN(calMale) || !isNaN(calFemale) || moves.length){
       tiers[key] = {
         male: isNaN(male)?null:male, female: isNaN(female)?null:female,
@@ -3888,6 +3894,19 @@ function resolveExerciseIdFromName(rawName){
     state.tmp.exerciseAliasSuggestions[newId] = { rawName: name, suggestedId: similar.id, suggestedName: similar.name };
   }
   return newId;
+}
+function resolveSubstituteExerciseId(rawName, originalExerciseId){
+  const resolved = resolveExerciseIdFromName(rawName);
+  if(resolved !== originalExerciseId) return resolved;
+  // Der grosszuegige Teilwort-Abgleich in resolveExerciseIdFromName wuerde z.B. "Jumping
+  // Pull-Ups" faelschlich auf die bereits vorhandene Uebung "Pull-Ups" abbilden (Wortmenge
+  // ist eine Teilmenge) - bei einer Ersatzuebung ist das aber garantiert eine ANDERE Uebung
+  // als das Original, sonst waere es keine Skalierung. Deshalb hier exakte Suche bzw.
+  // Neuanlage statt der lockeren Heuristik erzwingen.
+  const name = (rawName||'').trim();
+  const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
+  if(exact) return exact.id;
+  return findOrCreateExerciseId(name);
 }
 function renderSimilarExerciseHint(exerciseId){
   const sug = state.tmp.exerciseAliasSuggestions?.[exerciseId];
@@ -4230,6 +4249,7 @@ function applyParsedWorkout(input){
   if(nameInfo.name) state.tmp.wodName = nameInfo.name;
 
   const chosenScaleTier = state.tmp.photoImport?.scaleTier;
+  const substitutionNotes = [];
   if(Object.keys(scalingInfo.tiers).length && state.profile && chosenScaleTier && activeMovements){
     const tier = scalingInfo.tiers[chosenScaleTier];
     if(tier){
@@ -4244,9 +4264,10 @@ function applyParsedWorkout(input){
           if(type==='cardio' && mv.unit==='kcal' && cal!=null && !isNaN(cal)) mv.reps = String(cal);
         });
       }
-      // Reine Wiederholungszahl-Abweichung pro Bewegung (z.B. "Int: 9 Pull-Ups"), ueber
+      // Reine Wiederholungszahl-Abweichung und/oder komplette Ersatzuebung pro Bewegung
+      // (z.B. "Int: 9 Pull-Ups" bzw. "Bas: 12 Ring Rows or Jumping Pull-Ups"), ueber
       // Namensabgleich mit den bereits erkannten Bewegungen des Workouts zugeordnet - unabhaengig
-      // vom Geschlecht, da Wiederholungszahlen (anders als Gewicht/Kalorien) nicht geschlechtsspezifisch sind.
+      // vom Geschlecht, da weder Wiederholungszahlen noch Ersatzuebungen geschlechtsspezifisch sind.
       (tier.moves||[]).forEach(tm=>{
         const tmWords = (tm.name||'').toLowerCase().split(/\s+/).filter(Boolean);
         if(!tmWords.length) return;
@@ -4256,7 +4277,21 @@ function applyParsedWorkout(input){
           const exWords = ex.name.toLowerCase().split(/\s+/);
           return ex.name.toLowerCase()===tm.name.toLowerCase() || exWords.every(w=>tmWords.includes(w)) || tmWords.every(w=>exWords.includes(w));
         });
-        if(match) match.reps = tm.reps;
+        if(!match) return;
+        if(tm.substitutes && tm.substitutes.length){
+          const originalName = state.exercises.find(e=>e.id===match.exerciseId)?.name || tm.name;
+          // Alle genannten Alternativen anlegen/aufloesen (auch die nicht gewaehlten), damit
+          // sie im bereits vorhandenen Uebungs-Dropdown der Bewegungszeile sofort waehlbar
+          // sind - keine eigene Auswahl-UI noetig, der Athlet tauscht dort bei Bedarf selbst.
+          const substituteIds = tm.substitutes.map(name=>resolveSubstituteExerciseId(name, match.exerciseId)).filter(Boolean);
+          if(substituteIds.length){
+            match.exerciseId = substituteIds[0];
+            match.weight = '';
+            const substituteName = state.exercises.find(e=>e.id===substituteIds[0])?.name || tm.substitutes[0];
+            substitutionNotes.push(`${substituteName} statt ${originalName}${substituteIds.length>1?' (Alternative in Übungsliste wählbar)':''}`);
+          }
+        }
+        if(tm.reps) match.reps = tm.reps;
       });
     }
   }
@@ -4275,7 +4310,7 @@ function applyParsedWorkout(input){
   state.tmp.newlyCreatedExerciseIds = state.exercises.filter(e=>!existingExerciseIds.has(e.id)).map(e=>e.id);
 
   state.tmp.photoImport = null;
-  showToast('Aus Foto übernommen — bitte kurz prüfen 👀');
+  showToast('Aus Foto übernommen — bitte kurz prüfen 👀' + (substitutionNotes.length ? ' · Ersatzübung: '+substitutionNotes.join(', ') : ''));
   render();
 }
 function parseQuickEntryText(text){
