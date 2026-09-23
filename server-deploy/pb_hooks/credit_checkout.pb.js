@@ -9,48 +9,20 @@
 // umgekehrter Richtung (Sidecar -> PocketBase statt PocketBase -> Sidecar).
 //
 // require() bewusst INNERHALB jedes Handlers (JSVM-Runtime-Pooling-Gotcha, siehe
-// ai_photo_parse.pb.js). e.request.header.get(...) (kleines "g" - Go-Methode Header.Get
-// wird im JSVM lowercase gebunden) und $app.runInTransaction(...) gegen PocketBase 0.40.1
-// (Live-Server, Stand 2026-09-22) via /pb_data/types.d.ts verifiziert.
-
-// Baut einen application/x-www-form-urlencoded Body im von der Stripe-REST-API
-// erwarteten Bracket-Notation-Stil (z.B. line_items[0][price_data][currency]=eur),
-// da im JSVM-Sandbox kein Stripe-SDK verfuegbar ist.
-function toStripeFormBody(obj, prefix) {
-  const parts = [];
-  for (const key in obj) {
-    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-    const value = obj[key];
-    const fullKey = prefix ? `${prefix}[${key}]` : key;
-    if (value === undefined || value === null) continue;
-    if (typeof value === "object") {
-      parts.push(toStripeFormBody(value, fullKey));
-    } else {
-      parts.push(encodeURIComponent(fullKey) + "=" + encodeURIComponent(String(value)));
-    }
-  }
-  return parts.filter(Boolean).join("&");
-}
-
-function stripeRequest(cfg, path, formBody) {
-  const res = $http.send({
-    url: "https://api.stripe.com/v1/" + path,
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + cfg.stripeSecretKey,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: formBody,
-  });
-  const parsed = JSON.parse(res.raw || "{}");
-  if (res.statusCode >= 400) {
-    throw new Error("Stripe-Fehler (" + path + "): " + (parsed.error && parsed.error.message || res.raw));
-  }
-  return parsed;
-}
+// ai_photo_parse.pb.js). WICHTIG, hier am eigenen Leib erlebt: die Pooling-Falle betrifft
+// NICHT nur require()-Aufrufe, sondern auch ganz normale function-Deklarationen auf
+// Modul-Ebene einer .pb.js-Datei - ein Handler kann in einer anderen JSVM-Instanz laufen,
+// die diese Funktion nie gesehen hat ("ReferenceError: x is not defined" in Produktion,
+// obwohl es beim Schreiben/Testen des Hooks unauffaellig war). Deshalb liegen
+// toStripeFormBody()/stripeRequest() in credit_helpers.js und werden hier IMMER frisch
+// per require() geholt, nie als lokale Funktion definiert.
+// e.request.header.get(...) (kleines "g" - Go-Methode Header.Get wird im JSVM lowercase
+// gebunden) und $app.runInTransaction(...) gegen PocketBase 0.40.1 (Live-Server, Stand
+// 2026-09-22) via /pb_data/types.d.ts verifiziert.
 
 routerAdd("POST", "/credit/checkout-session", (e) => {
   const cfg = require(`${__hooks}/config.local.js`);
+  const helpers = require(`${__hooks}/credit_helpers.js`);
   const user = e.auth;
   if (!user) return e.json(401, { ok: false, error: "unauthorized" });
 
@@ -98,7 +70,7 @@ routerAdd("POST", "/credit/checkout-session", (e) => {
 
   let session;
   try {
-    session = stripeRequest(cfg, "checkout/sessions", toStripeFormBody({
+    session = helpers.stripeRequest(cfg, "checkout/sessions", helpers.toStripeFormBody({
       mode: "payment",
       "line_items[0][price_data][currency]": offerSnapshot.currency,
       "line_items[0][price_data][unit_amount]": offerSnapshot.priceCents,
@@ -221,6 +193,7 @@ routerAdd("POST", "/credit/order-expired", (e) => {
 // Stripe-Connect-Onboarding: Box-Owner fordert einen Onboarding-Link an.
 routerAdd("POST", "/credit/connect-onboarding-link", (e) => {
   const cfg = require(`${__hooks}/config.local.js`);
+  const helpers = require(`${__hooks}/credit_helpers.js`);
   const user = e.auth;
   if (!user) return e.json(401, { ok: false, error: "unauthorized" });
 
@@ -249,7 +222,7 @@ routerAdd("POST", "/credit/connect-onboarding-link", (e) => {
   if (!account.getString("stripeAccountId")) {
     let stripeAccount;
     try {
-      stripeAccount = stripeRequest(cfg, "accounts", toStripeFormBody({
+      stripeAccount = helpers.stripeRequest(cfg, "accounts", helpers.toStripeFormBody({
         type: "express",
         country: "AT",
         "capabilities[card_payments][requested]": "true",
@@ -266,7 +239,7 @@ routerAdd("POST", "/credit/connect-onboarding-link", (e) => {
 
   let link;
   try {
-    link = stripeRequest(cfg, "account_links", toStripeFormBody({
+    link = helpers.stripeRequest(cfg, "account_links", helpers.toStripeFormBody({
       account: account.getString("stripeAccountId"),
       refresh_url: cfg.appBaseUrl + "?stripeOnboarding=retry",
       return_url: cfg.appBaseUrl + "?stripeOnboarding=done",
@@ -278,6 +251,53 @@ routerAdd("POST", "/credit/connect-onboarding-link", (e) => {
   }
 
   return e.json(200, { ok: true, url: link.url });
+}, $apis.requireAuth("users"));
+
+// Aktiver Status-Refresh, wenn der Box-Owner vom Stripe-Onboarding zurueckkehrt (return_url
+// mit ?stripeOnboarding=done, siehe index.html) - fragt den Kontostatus direkt bei Stripe
+// ab, statt ausschliesslich auf den account.updated-Webhook zu warten (siehe Kommentar in
+// credit_helpers.js:stripeGetRequest). Der Webhook bleibt zusaetzlich fuer SPAETERE
+// Statusaenderungen (z.B. nachtraegliche Sperrung) aktiv.
+routerAdd("POST", "/credit/connect-refresh-status", (e) => {
+  const cfg = require(`${__hooks}/config.local.js`);
+  const helpers = require(`${__hooks}/credit_helpers.js`);
+  const user = e.auth;
+  if (!user) return e.json(401, { ok: false, error: "unauthorized" });
+
+  const data = new DynamicModel({ boxId: "" });
+  e.bindBody(data);
+  if (!data.boxId) return e.json(400, { ok: false, error: "boxId fehlt" });
+
+  let box;
+  try { box = $app.findRecordById("boxes", data.boxId); }
+  catch (err) { return e.json(404, { ok: false, error: "Box nicht gefunden" }); }
+  if (box.getString("owner") !== user.id) {
+    return e.json(403, { ok: false, error: "Nur der Box-Owner darf das abfragen" });
+  }
+
+  let account;
+  try {
+    account = $app.findFirstRecordByFilter("box_payment_accounts", `box = {:boxId}`, { boxId: data.boxId });
+  } catch (err) {
+    return e.json(404, { ok: false, error: "Noch keine Zahlungseinrichtung gestartet" });
+  }
+  const stripeAccountId = account.getString("stripeAccountId");
+  if (!stripeAccountId) return e.json(400, { ok: false, error: "Noch kein Stripe-Konto verknuepft" });
+
+  let stripeAccount;
+  try {
+    stripeAccount = helpers.stripeGetRequest(cfg, "accounts/" + stripeAccountId);
+  } catch (err) {
+    console.log("credit_checkout Status-Refresh-Fehler", err);
+    return e.json(502, { ok: false, error: "Zahlungsanbieter nicht erreichbar" });
+  }
+
+  account.set("chargesEnabled", !!stripeAccount.charges_enabled);
+  account.set("payoutsEnabled", !!stripeAccount.payouts_enabled);
+  account.set("onboardingStatus", stripeAccount.charges_enabled ? "complete" : (stripeAccount.details_submitted ? "restricted" : "pending"));
+  $app.save(account);
+
+  return e.json(200, { ok: true, chargesEnabled: account.getBool("chargesEnabled") });
 }, $apis.requireAuth("users"));
 
 // Wird vom stripe-webhook-service bei "account.updated" aufgerufen.

@@ -2331,10 +2331,15 @@ function decodeJwtPayload(token){
   }
 }
 let pendingJoinCode = null;
+let pendingStripeOnboardingRefresh = false;
 function boot(){
   const joinCode = new URLSearchParams(location.search).get('join');
   if(joinCode){
     pendingJoinCode = joinCode;
+    history.replaceState(null, '', location.pathname);
+  }
+  if(new URLSearchParams(location.search).get('stripeOnboarding')==='done'){
+    pendingStripeOnboardingRefresh = true;
     history.replaceState(null, '', location.pathname);
   }
   const token = new URLSearchParams(location.search).get('token');
@@ -4444,6 +4449,10 @@ async function loadBoxData(){
         ? await pb.collection('memberships').getFullList({filter: pb.filter('box = {:box} && status = "pending"', {box:boxId}), expand:'user'})
         : [];
       await loadMyBookings(boxId);
+      if(pendingStripeOnboardingRefresh && mine.role==='owner'){
+        pendingStripeOnboardingRefresh = false;
+        await refreshStripeConnectStatus(boxId);
+      }
     } else {
       state.box.scheduleSlots = [];
       state.box.pendingMemberships = [];
@@ -6067,6 +6076,19 @@ async function startStripeConnectOnboarding(boxId){
     location.href = result.url;
   }catch(e){
     showToast((e&&e.message)||'Stripe-Einrichtung fehlgeschlagen');
+  }
+}
+// Wird beim Rueckkehr-Redirect von Stripe (?stripeOnboarding=done) aufgerufen - fragt den
+// Kontostatus aktiv ab, statt nur auf den account.updated-Webhook zu warten (der bei frisch
+// angelegten verbundenen Konten verzoegert/nicht ankommen kann).
+async function refreshStripeConnectStatus(boxId){
+  try{
+    const result = await pb.send('/credit/connect-refresh-status', {method:'POST', body:{boxId}});
+    if(!result || !result.ok) throw new Error((result&&result.error)||'Status konnte nicht aktualisiert werden');
+    await loadBoxPaymentAccount();
+    if(result.chargesEnabled) showToast('Zahlungen erfolgreich eingerichtet ✓');
+  }catch(e){
+    console.log('refreshStripeConnectStatus fehlgeschlagen', e);
   }
 }
 

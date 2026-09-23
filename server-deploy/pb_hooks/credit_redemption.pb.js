@@ -13,10 +13,12 @@
 // gegen PocketBase 0.40.1 (Live-Server, Stand 2026-09-22) via /pb_data/types.d.ts
 // verifiziert.
 
-const QR_REDEMPTION_TTL_SECONDS = 90;
-
 routerAdd("POST", "/credit/redemption/issue", (e) => {
   const helpers = require(`${__hooks}/credit_helpers.js`);
+  // Lokal statt Modul-Ebene (gleicher Grund wie in credit_checkout.pb.js dokumentiert -
+  // dort live als ReferenceError aufgetreten): top-level Bindings einer .pb.js-Datei
+  // koennen in einer anderen JSVM-Pool-Instanz fehlen.
+  const QR_REDEMPTION_TTL_SECONDS = 90;
   const user = e.auth;
   if (!user) return e.json(401, { ok: false, error: "unauthorized" });
 
