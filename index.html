@@ -5874,9 +5874,11 @@ async function savePlanTemplate(id){
   const name = (document.getElementById('mpTplName')?.value||'').trim();
   const type = document.getElementById('mpTplType')?.value || 'recurring';
   const amount = parseInt(document.getElementById('mpTplAmount')?.value)||0;
-  // Preis nur bei einmaligen Paketen relevant - laufende Pakete bleiben bewusst nicht
-  // selbst kaeuflich (monatliche Zahlung/Kuendigung soll dem Coach vorbehalten bleiben).
-  const priceRaw = type==='one-time' ? (document.getElementById('mpTplPrice')?.value||'').trim() : '';
+  // Preis bei "one-time" loest den Athleten-Selbstkauf aus (siehe renderMyPlansScreen-Filter
+  // auf type==='one-time'). Bei "recurring" ist der Preis rein informativ fuer die
+  // Umsatz-Uebersicht - laufende Pakete bleiben bewusst nicht selbst kaeuflich (monatliche
+  // Zahlung/Kuendigung soll dem Coach vorbehalten bleiben).
+  const priceRaw = (document.getElementById('mpTplPrice')?.value||'').trim();
   const priceCents = priceRaw ? Math.round(parseFloat(priceRaw.replace(',','.'))*100) : null;
   if(!name){ showToast('Bitte einen Namen eingeben'); return; }
   if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
@@ -5917,7 +5919,7 @@ function renderPlanTemplatesScreen(){
         <div class="history-item">
           <span class="row" style="flex-direction:column;align-items:flex-start;gap:2px;">
             <span class="val">${escapeHtml(t.name)}</span>
-            <span class="note" style="margin:0;">${t.type==='recurring'?'Laufend':'Einmalig'} · ${t.amount}${t.type==='one-time' && t.priceCents ? ' · '+fmtEuro(t.priceCents)+' (Athleten-Kauf aktiv)' : ''}</span>
+            <span class="note" style="margin:0;">${t.type==='recurring'?'Laufend':'Einmalig'} · ${t.amount}${t.priceCents ? ' · '+fmtEuro(t.priceCents)+(t.type==='one-time' ? ' (Athleten-Kauf aktiv)' : '/Monat') : ''}</span>
           </span>
           <span>
             <button class="btn-sm btn-ghost" style="width:auto;" onclick="state.tmp.mpTemplateEditId='${t.id}'; state.tmp.mpTplTypeDraft=null; render();">✎</button>
@@ -5938,7 +5940,10 @@ function renderPlanTemplatesScreen(){
           ${(state.tmp.mpTplTypeDraft||formTpl.type)==='one-time' ? `
             <div class="field"><label>Preis für Athleten-Selbstkauf (€, optional)</label><input type="number" step="0.01" min="0" id="mpTplPrice" value="${formTpl.priceCents?(formTpl.priceCents/100).toFixed(2):''}" placeholder="z.B. 149.00"></div>
             <div class="note" style="margin-top:-6px;margin-bottom:10px;">Leer lassen = wie bisher nur vom Coach zuteilbar. Preis eintragen = Athleten können dieses Paket selbst über "Mein Kontingent" kaufen.</div>
-          ` : ''}
+          ` : `
+            <div class="field"><label>Monatlicher Preis (€, optional)</label><input type="number" step="0.01" min="0" id="mpTplPrice" value="${formTpl.priceCents?(formTpl.priceCents/100).toFixed(2):''}" placeholder="z.B. 49.00"></div>
+            <div class="note" style="margin-top:-6px;margin-bottom:10px;">Nur für die Umsatz-Übersicht — löst KEINEN Athleten-Selbstkauf aus, laufende Pakete bleiben Coach-only.</div>
+          `}
           <div class="row">
             <button class="btn btn-ghost" onclick="state.tmp.mpTemplateEditId=null; state.tmp.mpTplTypeDraft=null; render();">Abbrechen</button>
             <button class="btn btn-primary" onclick="savePlanTemplate('${editId==='new'?'':editId}')">Speichern</button>
@@ -5998,12 +6003,14 @@ function applyPlanTemplateSelection(templateId){
   const nameEl = document.getElementById('mpNewName');
   const typeEl = document.getElementById('mpNewType');
   const amountEl = document.getElementById('mpNewAmount');
+  const priceEl = document.getElementById('mpNewPrice');
   if(!templateId){ if(nameEl) nameEl.value=''; return; }
   const opt = select?.querySelector(`option[value="${templateId}"]`);
   if(!opt) return;
   if(nameEl) nameEl.value = opt.dataset.name || '';
   if(typeEl) typeEl.value = opt.dataset.type || 'recurring';
   if(amountEl) amountEl.value = opt.dataset.amount || '';
+  if(priceEl) priceEl.value = opt.dataset.price ? (parseInt(opt.dataset.price)/100).toFixed(2) : '';
 }
 async function createMembershipPlan(membershipId, opts){
   opts = opts || {};
@@ -6012,9 +6019,12 @@ async function createMembershipPlan(membershipId, opts){
   const amount = opts.amount!=null ? opts.amount : parseInt(document.getElementById('mpNewAmount')?.value)||0;
   const startDate = opts.startDate || document.getElementById('mpNewStart')?.value || todayStr();
   const note = opts.note!=null ? opts.note : (document.getElementById('mpNewNote')?.value||'');
+  const priceProvided = Object.prototype.hasOwnProperty.call(opts, 'priceCents');
+  const priceRaw = priceProvided ? '' : (document.getElementById('mpNewPrice')?.value||'').trim();
+  const priceCents = priceProvided ? opts.priceCents : (priceRaw ? Math.round(parseFloat(priceRaw.replace(',','.'))*100) : null);
   if(!amount){ showToast('Bitte eine Menge eingeben'); return; }
   try{
-    await pb.collection('membership_plans').create({membership:membershipId, type, amount, startDate, status:'active', note, name});
+    await pb.collection('membership_plans').create({membership:membershipId, type, amount, startDate, status:'active', note, name, priceCents});
     showToast('Kontingent angelegt');
     await loadBoxMemberDetail(membershipId);
   }catch(e){
@@ -6024,7 +6034,7 @@ async function createMembershipPlan(membershipId, opts){
 async function grantGoodwillCredit(membershipId){
   const amount = parseInt(document.getElementById('mpGiftAmount')?.value)||1;
   const note = document.getElementById('mpGiftNote')?.value || 'Kulanz';
-  await createMembershipPlan(membershipId, {type:'one-time', amount, startDate: todayStr(), note, name:'Kulanz-Guthaben'});
+  await createMembershipPlan(membershipId, {type:'one-time', amount, startDate: todayStr(), note, name:'Kulanz-Guthaben', priceCents:null});
 }
 async function cancelMembershipPlan(planId, membershipId){
   try{
@@ -6398,15 +6408,16 @@ async function loadCreditRevenueOverview(){
   if(!isBoxOwner()) return;
   const boxId = state.box.membership.box;
   try{
-    const [creditOrders, planOrders, allCards] = await Promise.all([
+    const [creditOrders, planOrders, allCards, recurringPlans] = await Promise.all([
       pb.collection('credit_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
       pb.collection('plan_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
-      pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), requestKey:null})
+      pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), requestKey:null}),
+      pb.collection('membership_plans').getFullList({filter: pb.filter('membership.box = {:box} && type = "recurring" && status = "active"', {box:boxId}), requestKey:null})
     ]);
     const allTx = allCards.length ? await pb.collection('credit_transactions').getFullList({
       filter: allCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '), requestKey:null
     }) : [];
-    state.box.creditRevenue = { creditOrders, planOrders, allCards, allTx };
+    state.box.creditRevenue = { creditOrders, planOrders, allCards, allTx, recurringPlans };
   }catch(e){
     state.box.creditRevenue = { error:true };
   }
@@ -6418,10 +6429,15 @@ function renderCreditRevenueScreen(){
   if(rev===null || rev===undefined) return `${back}<div class="card"><div class="note">Lädt …</div></div>`;
   if(rev.error) return `${back}<div class="card"><div class="note">Umsatzdaten konnten nicht geladen werden.</div></div>`;
 
-  const { creditOrders, planOrders, allCards, allTx } = rev;
+  const { creditOrders, planOrders, allCards, allTx, recurringPlans } = rev;
+  const rowStyle = 'display:flex;justify-content:space-between;';
   const creditRevenueCents = creditOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
   const planRevenueCents = planOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
   const totalRevenueCents = creditRevenueCents + planRevenueCents;
+
+  const pricedRecurring = recurringPlans.filter(p=>p.priceCents);
+  const unpricedRecurringCount = recurringPlans.length - pricedRecurring.length;
+  const monthlyRevenueCents = pricedRecurring.reduce((s,p)=>s+(p.priceCents||0), 0);
 
   const creditByOffer = {};
   creditOrders.forEach(o=>{
@@ -6449,9 +6465,9 @@ function renderCreditRevenueScreen(){
   const unitsOutstanding = Math.max(0, unitsGranted - unitsRedeemed);
 
   const creditRows = Object.entries(creditByOffer).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
-    .map(([title,d])=>`<div><span>${escapeHtml(title)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
+    .map(([title,d])=>`<div style="${rowStyle}"><span>${escapeHtml(title)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
   const planRows = Object.entries(planByTemplate).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
-    .map(([name,d])=>`<div><span>${escapeHtml(name)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
+    .map(([name,d])=>`<div style="${rowStyle}"><span>${escapeHtml(name)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
 
   return `
     ${back}
@@ -6461,9 +6477,17 @@ function renderCreditRevenueScreen(){
       <div class="note">${creditOrders.length + planOrders.length} bezahlte Bestellungen insgesamt</div>
     </div>
     <div class="card">
+      <h2 class="small">Laufende Verträge</h2>
+      <div class="moves">
+        <div style="${rowStyle}"><span>Aktive Verträge</span><span>${recurringPlans.length}</span></div>
+        <div style="${rowStyle}"><span>Monatliche Einnahmen</span><span>${fmtEuro(monthlyRevenueCents)}</span></div>
+      </div>
+      ${unpricedRecurringCount ? `<div class="note" style="margin-top:10px;">${unpricedRecurringCount} von ${recurringPlans.length} Verträgen ohne hinterlegten Preis (nicht in der Summe enthalten) — Preis nachtragen unter "Standardpakete verwalten" oder direkt beim Mitglied.</div>` : ''}
+    </div>
+    <div class="card">
       <h2 class="small">Guthabenkarten</h2>
       <div class="moves">
-        <div><span>Umsatz gesamt</span><span>${fmtEuro(creditRevenueCents)}</span></div>
+        <div style="${rowStyle}"><span>Umsatz gesamt</span><span>${fmtEuro(creditRevenueCents)}</span></div>
         ${creditRows || '<div class="note">Noch keine Käufe.</div>'}
       </div>
       <div class="note" style="margin-top:10px;">Ausgegebene Einheiten: ${unitsGranted} · eingelöst: ${unitsRedeemed} · noch offen: ${unitsOutstanding}</div>
@@ -6471,7 +6495,7 @@ function renderCreditRevenueScreen(){
     <div class="card">
       <h2 class="small">Einmalige Kontingente</h2>
       <div class="moves">
-        <div><span>Umsatz gesamt</span><span>${fmtEuro(planRevenueCents)}</span></div>
+        <div style="${rowStyle}"><span>Umsatz gesamt</span><span>${fmtEuro(planRevenueCents)}</span></div>
         ${planRows || '<div class="note">Noch keine Käufe.</div>'}
       </div>
     </div>
@@ -6678,7 +6702,7 @@ function renderBoxMemberDetail(){
           <div class="field"><label>Standardpaket</label>
             <select id="mpNewTemplateId" onchange="applyPlanTemplateSelection(this.value)">
               <option value="">— Frei eingeben —</option>
-              ${templates.map(t=>`<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('')}
+              ${templates.map(t=>`<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-name="${escapeHtml(t.name)}" data-price="${t.priceCents||''}">${escapeHtml(t.name)}</option>`).join('')}
             </select>
           </div>
           <div class="field"><label>Name</label><input type="text" id="mpNewName" placeholder="z.B. 10er Block CrossFit"></div>
@@ -6691,6 +6715,8 @@ function renderBoxMemberDetail(){
           <div class="field"><label>Menge</label><input type="number" id="mpNewAmount" min="1" placeholder="z.B. 10"></div>
           <div class="field"><label>Startdatum</label><input type="date" id="mpNewStart" value="${todayStr()}"></div>
           <div class="field"><label>Notiz (optional)</label><input type="text" id="mpNewNote" placeholder="z.B. 10er-Monatspaket"></div>
+          <div class="field"><label>Preis (€, optional)</label><input type="number" step="0.01" min="0" id="mpNewPrice" placeholder="z.B. 49.00"></div>
+          <div class="note" style="margin-top:-6px;margin-bottom:10px;">Nur für die Umsatz-Übersicht der Box — von der Vorlage vorbefüllt, hier bei Bedarf überschreibbar (z.B. individueller Rabatt).</div>
           <button class="btn btn-primary" onclick="createMembershipPlan('${m.id}')">Kontingent anlegen</button>
         </div>
       ` : ''}
