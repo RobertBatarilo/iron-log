@@ -6159,6 +6159,7 @@ function renderBoxMembersScreen(box){
       ` : ''}
     </div>
     ${renderCreditAdminCard(box)}
+    ${renderCreditRevenueEntryCard()}
   `;
 }
 /* ---- Guthabenkarten & Boni (Coach-Verwaltung) ---- */
@@ -6255,9 +6256,15 @@ function renderCreditAdminCard(box){
         <button class="btn btn-ghost" onclick="openCreditOffersScreen()">🎟️ Angebote verwalten</button>
         <button class="btn btn-ghost" onclick="openCreditRedeemScreen()">🧾 Zähltheke / Einlösen</button>
       </div>
-      <div class="row" style="margin-top:8px;">
-        <button class="btn btn-ghost" onclick="openCreditRevenueScreen()">📊 Umsatz-Übersicht</button>
-      </div>
+    </div>
+  `;
+}
+function renderCreditRevenueEntryCard(){
+  return `
+    <div class="card">
+      <h2 class="small">Umsatz-Übersicht</h2>
+      <div class="note">Laufende Verträge, einmalige Kontingente & Guthabenkarten im Überblick.</div>
+      <button class="btn btn-ghost" style="margin-top:10px;" onclick="openCreditRevenueScreen()">📊 Umsatz-Übersicht öffnen</button>
     </div>
   `;
 }
@@ -6408,20 +6415,46 @@ async function loadCreditRevenueOverview(){
   if(!isBoxOwner()) return;
   const boxId = state.box.membership.box;
   try{
-    const [creditOrders, planOrders, allCards, recurringPlans] = await Promise.all([
+    const [creditOrders, planOrders, allCards, allPlans] = await Promise.all([
       pb.collection('credit_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
       pb.collection('plan_orders').getFullList({filter: pb.filter('box = {:box} && status = "paid"', {box:boxId}), requestKey:null}),
       pb.collection('credit_cards').getFullList({filter: pb.filter('box = {:box}', {box:boxId}), requestKey:null}),
-      pb.collection('membership_plans').getFullList({filter: pb.filter('membership.box = {:box} && type = "recurring" && status = "active"', {box:boxId}), requestKey:null})
+      pb.collection('membership_plans').getFullList({filter: pb.filter('membership.box = {:box}', {box:boxId}), requestKey:null})
     ]);
     const allTx = allCards.length ? await pb.collection('credit_transactions').getFullList({
       filter: allCards.map(c=>pb.filter('card = {:c}', {c:c.id})).join(' || '), requestKey:null
     }) : [];
-    state.box.creditRevenue = { creditOrders, planOrders, allCards, allTx, recurringPlans };
+    state.box.creditRevenue = { creditOrders, planOrders, allCards, allTx, allPlans };
   }catch(e){
     state.box.creditRevenue = { error:true };
   }
   render();
+}
+function renderRevenuePieChart(segments){
+  const total = segments.reduce((s,seg)=>s+seg.cents, 0);
+  const r = 40, cx = 50, cy = 50, circumference = 2*Math.PI*r;
+  let cumulative = 0;
+  const circles = total>0 ? segments.filter(seg=>seg.cents>0).map(seg=>{
+    const pct = seg.cents/total;
+    const dash = pct*circumference;
+    const offset = -(cumulative*circumference);
+    cumulative += pct;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="20" stroke-dasharray="${dash.toFixed(2)} ${(circumference-dash).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+  }).join('') : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--iron-700)" stroke-width="20"></circle>`;
+  const legend = segments.map(seg=>{
+    const pct = total>0 ? Math.round(seg.cents/total*100) : 0;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+      <span style="width:12px;height:12px;border-radius:3px;background:${seg.color};flex:0 0 auto;"></span>
+      <span style="flex:1;">${escapeHtml(seg.label)}</span>
+      <span class="note" style="margin:0;">${fmtEuro(seg.cents)}${total>0?' ('+pct+'%)':''}</span>
+    </div>`;
+  }).join('');
+  return `
+    <div style="display:flex;justify-content:center;margin-bottom:6px;">
+      <svg viewBox="0 0 100 100" style="width:160px;height:160px;">${circles}</svg>
+    </div>
+    ${legend}
+  `;
 }
 function renderCreditRevenueScreen(){
   const rev = state.box.creditRevenue;
@@ -6429,15 +6462,25 @@ function renderCreditRevenueScreen(){
   if(rev===null || rev===undefined) return `${back}<div class="card"><div class="note">Lädt …</div></div>`;
   if(rev.error) return `${back}<div class="card"><div class="note">Umsatzdaten konnten nicht geladen werden.</div></div>`;
 
-  const { creditOrders, planOrders, allCards, allTx, recurringPlans } = rev;
+  const { creditOrders, planOrders, allCards, allTx, allPlans } = rev;
   const rowStyle = 'display:flex;justify-content:space-between;';
   const creditRevenueCents = creditOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
-  const planRevenueCents = planOrders.reduce((s,o)=>s+(o.amountCents||0), 0);
-  const totalRevenueCents = creditRevenueCents + planRevenueCents;
 
+  const recurringPlans = allPlans.filter(p=>p.type==='recurring' && p.status==='active');
   const pricedRecurring = recurringPlans.filter(p=>p.priceCents);
   const unpricedRecurringCount = recurringPlans.length - pricedRecurring.length;
   const monthlyRevenueCents = pricedRecurring.reduce((s,p)=>s+(p.priceCents||0), 0);
+
+  // Einmalige Kontingente kommen aus zwei Quellen: Stripe-Selbstkauf (plan_orders) UND
+  // manuelle Zuteilung durch den Coach ("Kontingent anlegen", membership_plans ohne
+  // zugehoerigen plan_orders-Datensatz) - beide muessen in die Summe/Aufschluesselung.
+  const manualOneTime = allPlans.filter(p=>p.type==='one-time');
+  const pricedManualOneTime = manualOneTime.filter(p=>p.priceCents);
+  const unpricedManualOneTimeCount = manualOneTime.length - pricedManualOneTime.length;
+
+  const planRevenueCents = planOrders.reduce((s,o)=>s+(o.amountCents||0), 0)
+    + pricedManualOneTime.reduce((s,p)=>s+(p.priceCents||0), 0);
+  const totalRevenueCents = creditRevenueCents + planRevenueCents;
 
   const creditByOffer = {};
   creditOrders.forEach(o=>{
@@ -6452,6 +6495,12 @@ function renderCreditRevenueScreen(){
     if(!planByTemplate[name]) planByTemplate[name] = { count:0, revenueCents:0 };
     planByTemplate[name].count += 1;
     planByTemplate[name].revenueCents += o.amountCents||0;
+  });
+  pricedManualOneTime.forEach(p=>{
+    const name = p.name || 'Unbenanntes Kontingent';
+    if(!planByTemplate[name]) planByTemplate[name] = { count:0, revenueCents:0 };
+    planByTemplate[name].count += 1;
+    planByTemplate[name].revenueCents += p.priceCents||0;
   });
 
   const cardsById = {};
@@ -6469,12 +6518,22 @@ function renderCreditRevenueScreen(){
   const planRows = Object.entries(planByTemplate).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
     .map(([name,d])=>`<div style="${rowStyle}"><span>${escapeHtml(name)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
 
+  const pieChart = renderRevenuePieChart([
+    { label:'Laufende Verträge', cents: monthlyRevenueCents, color:'var(--accent-emom)' },
+    { label:'Einmalige Kontingente', cents: planRevenueCents, color:'var(--accent-forload)' },
+    { label:'Guthabenkarten', cents: creditRevenueCents, color:'var(--success-green)' }
+  ]);
+
   return `
     ${back}
     <div class="card">
       <h2 class="small">Gesamtumsatz</h2>
       <div class="stat-num" style="margin:6px 0;">${fmtEuro(totalRevenueCents)}</div>
       <div class="note">${creditOrders.length + planOrders.length} bezahlte Bestellungen insgesamt</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Verteilung</h2>
+      ${pieChart}
     </div>
     <div class="card">
       <h2 class="small">Laufende Verträge</h2>
@@ -6485,19 +6544,20 @@ function renderCreditRevenueScreen(){
       ${unpricedRecurringCount ? `<div class="note" style="margin-top:10px;">${unpricedRecurringCount} von ${recurringPlans.length} Verträgen ohne hinterlegten Preis (nicht in der Summe enthalten) — Preis nachtragen unter "Standardpakete verwalten" oder direkt beim Mitglied.</div>` : ''}
     </div>
     <div class="card">
+      <h2 class="small">Einmalige Kontingente</h2>
+      <div class="moves">
+        <div style="${rowStyle}"><span>Umsatz gesamt</span><span>${fmtEuro(planRevenueCents)}</span></div>
+        ${planRows || '<div class="note">Noch keine Käufe.</div>'}
+      </div>
+      ${unpricedManualOneTimeCount ? `<div class="note" style="margin-top:10px;">${unpricedManualOneTimeCount} von ${manualOneTime.length} manuell zugeteilten Kontingenten ohne hinterlegten Preis (nicht in der Summe enthalten).</div>` : ''}
+    </div>
+    <div class="card">
       <h2 class="small">Guthabenkarten</h2>
       <div class="moves">
         <div style="${rowStyle}"><span>Umsatz gesamt</span><span>${fmtEuro(creditRevenueCents)}</span></div>
         ${creditRows || '<div class="note">Noch keine Käufe.</div>'}
       </div>
       <div class="note" style="margin-top:10px;">Ausgegebene Einheiten: ${unitsGranted} · eingelöst: ${unitsRedeemed} · noch offen: ${unitsOutstanding}</div>
-    </div>
-    <div class="card">
-      <h2 class="small">Einmalige Kontingente</h2>
-      <div class="moves">
-        <div style="${rowStyle}"><span>Umsatz gesamt</span><span>${fmtEuro(planRevenueCents)}</span></div>
-        ${planRows || '<div class="note">Noch keine Käufe.</div>'}
-      </div>
     </div>
   `;
 }
