@@ -917,6 +917,7 @@ const EXERCISE_LIBRARY = [
   ]},
   { id:"box-jump", name:"Box Jump", type:"bodyweight", variants:[
     {id:'step-up', label:'Box Step-up', details:[{key:'height', label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true, unit:'cm', signed:false}]},
+    {id:"depth-jump", label:"Depth Jump", details:null},
     {id:'jump', label:'Jump', details:[{key:'height', label:'Box-Höhe (cm)', placeholder:'z.B. 50', numeric:true, unit:'cm', signed:false}]},
     {id:"burpee-box-jump-over", label:"Burpee Box Jump-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
     {id:"burpee-box-step-over", label:"Burpee Box Step-over", details:[{key:"height", label:"Höhe (cm)", placeholder:"z.B. 50", numeric:true, unit:"cm", signed:false}]},
@@ -3881,10 +3882,17 @@ function normalizeExerciseName(name){
   return (name||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/s$/,'');
 }
 function resolveExerciseIdFromName(rawName){
-  const name = (rawName||'').trim();
-  if(!name) return null;
-  const alias = (state.profile?.exerciseAliases||[]).find(a=>a.alias.toLowerCase()===name.toLowerCase());
+  const rawTrimmed = (rawName||'').trim();
+  if(!rawTrimmed) return null;
+  const alias = (state.profile?.exerciseAliases||[]).find(a=>a.alias.toLowerCase()===rawTrimmed.toLowerCase());
   if(alias && state.exercises.some(e=>e.id===alias.exerciseId)) return alias.exerciseId;
+  // Entspricht der Rohname einer bekannten Bibliotheks-Variante (z.B. "Power Snatch" -> Variante
+  // "Power" von "Snatch"), ab hier mit dem kanonischen Namen weiterarbeiten statt dem Rohnamen -
+  // betrifft ALLE Bewegungs-Importe, nicht nur Ersatzuebungen bei Skalierung (siehe
+  // resolveSubstituteExerciseId). Bereits bestehende, nicht-kanonisch benannte Uebungen werden
+  // trotzdem ueber den normalisierten Match-Tier weiter unten korrekt wiedergefunden.
+  const libMatch = matchLibraryVariantFromName(rawTrimmed);
+  const name = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : rawTrimmed;
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
   const normalized = normalizeExerciseName(name);
@@ -3921,20 +3929,17 @@ function matchLibraryVariantFromName(rawName){
   return null;
 }
 function resolveSubstituteExerciseId(rawName, originalExerciseId){
-  // Entspricht der Name einer bekannten Bibliotheks-Variante (z.B. "Jumping Pull-Ups" ->
-  // Variante "Jumping" der Basis-Uebung "Pull-up"), IMMER den kanonischen, in der Bibliothek
-  // hinterlegten Namen verwenden - damit z.B. die "Variante wechseln"-Auswahl an der
-  // Bewegungszeile diese Uebung korrekt erkennt, statt eine unverbundene Dublette anzulegen.
-  const libMatch = matchLibraryVariantFromName(rawName);
-  const nameToResolve = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : rawName;
-  const resolved = resolveExerciseIdFromName(nameToResolve);
+  // resolveExerciseIdFromName() kanonisiert Bibliotheks-Varianten bereits selbst (z.B.
+  // "Jumping Pull-Ups" -> "Jumping Pull-up"). Hier zusaetzlich noetig: der grosszuegige
+  // Teilwort-Abgleich darin wuerde eine Ersatzuebung sonst faelschlich auf die Ursprungsuebung
+  // zurueckmappen (z.B. "Jumping Pull-Ups" -> vorhandene Uebung "Pull-Ups", da deren Wortmenge
+  // eine Teilmenge ist) - bei einer Ersatzuebung ist das aber garantiert eine ANDERE Uebung,
+  // sonst waere es keine Skalierung. Deshalb bei einer Kollision exakte Suche bzw. Neuanlage
+  // auf dem kanonischen Namen erzwingen statt der lockeren Heuristik zu vertrauen.
+  const resolved = resolveExerciseIdFromName(rawName);
   if(resolved !== originalExerciseId) return resolved;
-  // Der grosszuegige Teilwort-Abgleich in resolveExerciseIdFromName wuerde z.B. "Jumping
-  // Pull-Ups" faelschlich auf die bereits vorhandene Uebung "Pull-Ups" abbilden (Wortmenge
-  // ist eine Teilmenge) - bei einer Ersatzuebung ist das aber garantiert eine ANDERE Uebung
-  // als das Original, sonst waere es keine Skalierung. Deshalb hier exakte Suche bzw.
-  // Neuanlage statt der lockeren Heuristik erzwingen.
-  const name = (nameToResolve||'').trim();
+  const libMatch = matchLibraryVariantFromName(rawName);
+  const name = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : (rawName||'').trim();
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
   return findOrCreateExerciseId(name);
@@ -4014,6 +4019,51 @@ async function confirmMergeDuplicateGroup(key){
   for(const e of list){
     if(e.id!==keepId) await mergeExercises(keepId, e.id);
   }
+}
+// Wortmenge statt exakter normalisierter String, damit auch Wortstellungs-Abweichungen wie
+// "Single Arm Kettlebell Thruster" vs. kanonisch "Kettlebell Single-Arm Thruster" erkannt
+// werden - bewusst NUR fuer die Vorschlagsliste (ein Mensch bestaetigt jeden Vorschlag),
+// nicht fuer automatische Pfade wie den Import (matchLibraryVariantFromName), wo eine
+// falsch-positive Erkennung unbemerkt durchrutschen wuerde.
+const WORD_SET_FILLERS = new Set(['to','and','with','the','a','an','&']);
+function wordSet(name){
+  return new Set((name||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean).map(w=>w.replace(/s$/,'')).filter(w=>!WORD_SET_FILLERS.has(w)));
+}
+function matchLibraryVariantLenient(rawName){
+  const strict = matchLibraryVariantFromName(rawName);
+  if(strict) return strict;
+  const targetWords = wordSet(rawName);
+  if(!targetWords.size) return null;
+  for(const base of EXERCISE_LIBRARY){
+    for(const variant of base.variants){
+      if(variant.id==='standard' || (variant.details && variant.details.length)) continue;
+      const composedWords = wordSet(composeVariantName(base, variant, ''));
+      if(composedWords.size===targetWords.size && [...composedWords].every(w=>targetWords.has(w))) return {base, variant};
+    }
+  }
+  return null;
+}
+// Findet Uebungen, deren Name einer bekannten Bibliotheks-Variante entspricht, aber nicht in
+// der dort hinterlegten Schreibweise gespeichert ist (z.B. "AbMat Sit-Ups" statt "AbMat
+// Sit-up") - reines Umbenennen, KEIN Zusammenfuehren: anders als bei echten Schreibweise-
+// Dubletten (findDuplicateExerciseGroups) sind das oft unterschiedlich schwere Bewegungen
+// (z.B. Power Snatch != voller Snatch), deren PR-Historien getrennt bleiben sollen.
+function findRenameableExercises(){
+  return state.exercises.map(e=>{
+    const match = matchLibraryVariantLenient(e.name);
+    if(!match) return null;
+    const canonicalName = composeVariantName(match.base, match.variant, '');
+    if(canonicalName.toLowerCase()===e.name.toLowerCase()) return null;
+    return { exercise:e, canonicalName, base:match.base, variant:match.variant };
+  }).filter(Boolean);
+}
+async function renameExerciseToCanonical(exerciseId, canonicalName){
+  const ex = state.exercises.find(e=>e.id===exerciseId);
+  if(!ex) return;
+  ex.name = canonicalName;
+  await saveKey('exercises', state.exercises);
+  showToast('Übung umbenannt');
+  render();
 }
 async function acceptExerciseAliasSuggestion(oldId){
   const sug = state.tmp.exerciseAliasSuggestions?.[oldId];
@@ -11693,8 +11743,21 @@ function renderProfile(){
 function renderMyExercisesScreen(){
   const aliases = state.profile?.exerciseAliases || [];
   const dupeGroups = findDuplicateExerciseGroups();
+  const renameable = findRenameableExercises();
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${renameable.length ? `
+    <div class="card">
+      <h2 class="small">Bibliotheks-Varianten erkannt</h2>
+      <div class="note" style="margin-bottom:10px;">Diese Übungen entsprechen einer bekannten Variante in der Übungsbibliothek, sind aber anders benannt — Umbenennen macht sie z.B. für "Variante wechseln" erkennbar. Reines Umbenennen, PR-Historie bleibt unverändert bei der jeweiligen Übung.</div>
+      ${renameable.map(r=>`
+        <div class="row" style="align-items:center;margin-bottom:6px;">
+          <span style="flex:1;">${escapeHtml(r.exercise.name)} → ${escapeHtml(r.canonicalName)} <span class="note" style="margin:0;">(Variante "${escapeHtml(r.variant.label)}" von "${escapeHtml(r.base.name)}")</span></span>
+          <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="renameExerciseToCanonical('${r.exercise.id}','${escapeHtml(r.canonicalName).replace(/'/g,"\\'")}')">Umbenennen</button>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
     ${dupeGroups.length ? `
     <div class="card">
       <h2 class="small">Mögliche Duplikate</h2>
