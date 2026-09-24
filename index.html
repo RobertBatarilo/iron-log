@@ -8489,6 +8489,88 @@ function generateWorkoutAutoSummary(w){
   const improved = perfBetter(score.type, score.value, compareTarget.score.value);
   return `${improved?'📈':'📉'} ${deltaLabel} ${improved?'besser':'schwächer'} als beim letzten Versuch am ${fmtDate(compareTarget.w.date)}.`;
 }
+function buildWorkoutTextForAi(w){
+  const lines = [`Name: ${w.name||'Workout'}`, `Datum: ${w.date}`, `Format: ${w.format||'strength'}`];
+  if(w.format==='for-time'){
+    const ft = w.forTime||{};
+    lines.push(`Zeit: ${ft.elapsedSec!=null?fmtClock(ft.elapsedSec*1000,false):'—'}${ft.capped?' (Time Cap)':''}`);
+    if((ft.rounds||1)>1) lines.push(`Runden: ${ft.rounds}`);
+    if(ft.repScheme) lines.push(`Schema: ${ft.repScheme}`);
+    (ft.movements||[]).forEach(m=>lines.push('- '+formatMovementLine(m)));
+  } else if(w.format==='amrap'){
+    const am = w.amrap||{};
+    lines.push(`Ergebnis: ${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}`);
+    lines.push(`Dauer: ${fmtClock((am.durationSec||0)*1000,false)}`);
+    (am.movements||[]).forEach(m=>lines.push('- '+formatMovementLine(m)));
+  } else if(w.format==='for-load'){
+    const fl = w.forLoad||{};
+    const ex = state.exercises.find(e=>e.id===fl.exerciseId);
+    lines.push(`Übung: ${ex?ex.name:'—'}`);
+    lines.push(`Ergebnis: ${fl.unit ? (fl.achievedWeight||0)+(fl.unit==='m'?'m':fl.unit==='sec'?'s':fl.unit==='reps'?'x':' kcal') : fmtWeight(fl.achievedWeight)}`);
+  } else if(w.format==='run'){
+    const r = w.run||{};
+    lines.push(`Distanz: ${toDisplayDistance(r.distanceM)}${distanceUnitLabel()}`);
+    lines.push(`Zeit: ${r.elapsedSec!=null?fmtClock(r.elapsedSec*1000,false):'—'}`);
+  } else if(w.roundsLog && w.roundsLog.length){
+    w.roundsLog.forEach((round,ri)=>{
+      lines.push(`Runde ${ri+1}: ` + round.map(item=>{
+        const ex = state.exercises.find(e=>e.id===item.exerciseId);
+        const isWeighted = getExerciseType(ex)==='weighted';
+        return `${ex?ex.name:'—'} ${item.reps}${isWeighted?'x'+item.weight+'kg':'x'}`;
+      }).join(' + '));
+    });
+  } else {
+    (w.movements||[]).forEach(m=>{
+      const ex = state.exercises.find(e=>e.id===m.exerciseId);
+      (m.sets||[]).forEach(s=>{
+        lines.push(`- ${ex?ex.name:'—'}: ${s.reps}x${s.weight}kg${s.pct?` (${s.pct}% 1RM)`:''}`);
+      });
+    });
+  }
+  if(w.note) lines.push(`Notiz: ${w.note}`);
+  return lines.join('\n').slice(0,3000);
+}
+function priorAttemptsTextForAi(w){
+  if(!w.name) return '';
+  const others = state.workouts.filter(o=>o.id!==w.id && o.name===w.name).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+  if(!others.length) return '';
+  return others.map(o=>{
+    let resultText = '—';
+    if(o.format==='for-time') resultText = o.forTime?.elapsedSec!=null ? fmtClock(o.forTime.elapsedSec*1000,false)+(o.forTime.capped?' (Cap)':'') : '—';
+    else if(o.format==='amrap') resultText = `${o.amrap?.roundsCompleted||0} Runden${o.amrap?.extraReps?' + '+o.amrap.extraReps+' Wdh.':''}`;
+    else if(o.format==='for-load') resultText = o.forLoad?.unit ? `${o.forLoad.achievedWeight||0}` : fmtWeight(o.forLoad?.achievedWeight);
+    return `${fmtDate(o.date)}: ${resultText}`;
+  }).join('; ');
+}
+async function runAiWorkoutReview(workoutId){
+  const w = state.workouts.find(x=>x.id===workoutId);
+  if(!w) return;
+  state.tmp.aiReviewLoadingId = workoutId;
+  render();
+  state.tmp.aiReviewCache = state.tmp.aiReviewCache || {};
+  try{
+    const body = { workoutText: buildWorkoutTextForAi(w), priorAttemptsText: priorAttemptsTextForAi(w) };
+    const result = await pb.send('/ai-workout-review', { method:'POST', body });
+    if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Auswertung fehlgeschlagen');
+    state.tmp.aiReviewCache[workoutId] = { text: result.text };
+  } catch(err){
+    state.tmp.aiReviewCache[workoutId] = { error: (err && err.message) ? err.message : 'KI-Auswertung fehlgeschlagen' };
+  }
+  state.tmp.aiReviewLoadingId = null;
+  render();
+}
+function renderAiWorkoutReviewBlock(w){
+  if(!state.profile?.hasPro) return '';
+  const cached = state.tmp.aiReviewCache?.[w.id];
+  const loading = state.tmp.aiReviewLoadingId === w.id;
+  if(cached?.text) return `<div class="note" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--iron-700);">✨ ${escapeHtml(cached.text)}</div>`;
+  if(loading) return `<div class="note" style="margin-top:8px;">KI analysiert …</div>`;
+  if(cached?.error) return `
+    <div class="note" style="margin-top:8px;color:var(--plate-red);">${escapeHtml(cached.error)}</div>
+    <button type="button" class="btn-sm btn-ghost" style="margin-top:4px;" onclick="event.stopPropagation(); runAiWorkoutReview('${w.id}')">Erneut versuchen</button>
+  `;
+  return `<button type="button" class="btn-sm btn-ghost" style="margin-top:8px;" onclick="event.stopPropagation(); runAiWorkoutReview('${w.id}')">✨ KI-Auswertung <span class="chip" style="margin-left:4px;">Pro</span></button>`;
+}
 function toggleWorkoutExpanded(id){
   state.tmp.expandedWorkoutId = state.tmp.expandedWorkoutId===id ? null : id;
   render();
@@ -8615,6 +8697,7 @@ function renderWorkoutHistoryEntry(w){
         ${isExpanded ? body : `<div class="note">${escapeHtml(summaryLine)}</div>`}
         ${autoSummary ? `<div class="note" style="color:var(--chalk-yellow);">${escapeHtml(autoSummary)}</div>` : ''}
         ${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}
+        ${isExpanded ? renderAiWorkoutReviewBlock(w) : ''}
       </div>
     </div>
   `;

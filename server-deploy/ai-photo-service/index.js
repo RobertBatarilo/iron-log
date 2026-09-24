@@ -57,6 +57,14 @@ Regeln:
 - Bei "strength": "pctList" muss genau "setsCount" kommagetrennte Werte enthalten, falls gesetzt.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare.`;
 
+const WORKOUT_REVIEW_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und gibst kurzes, konkretes Feedback zu einem bereits geloggten Workout eines Athleten. Du bekommst eine Textbeschreibung des Workouts (Name, Datum, Format, Bewegungen mit Wiederholungen/Gewicht/Zeit) sowie optional die Ergebnisse der letzten Versuche desselben Workouts zum Vergleich.
+
+Antworte NUR mit reinem Fliesstext auf Deutsch (kein JSON, kein Markdown, keine Ueberschriften, keine Aufzaehlungszeichen) in 2-4 kurzen Saetzen:
+1. Kurze Einschaetzung der Leistung, ggf. im Vergleich zu frueheren Versuchen (Trend, Pacing, Konsistenz).
+2. Ein konkreter, umsetzbarer Tipp fuer das naechste Mal (z.B. Pacing-Strategie, Skalierung anpassen, welche Bewegung als naechstes Fokus verdient).
+
+Sei ermutigend aber ehrlich, keine Floskeln, keine medizinischen Ratschlaege oder Trainingsplan-Vorschriften. Maximal 400 Zeichen.`;
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -104,6 +112,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/generate-training-plan') {
     if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }
     return handleGenerateTrainingPlan(req, res);
+  }
+  if (req.method === 'POST' && req.url === '/analyze-workout') {
+    if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }
+    return handleAnalyzeWorkout(req, res);
   }
   res.writeHead(404); res.end();
 });
@@ -260,6 +272,68 @@ async function handleGenerateTrainingPlan(req, res) {
     res.end(JSON.stringify({ ok: true, days: parsed.days, summaryNote: parsed.summaryNote || '' }));
   } catch (e) {
     console.error('ai-photo-service Fehler (training-plan)', e);
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'unerwarteter Fehler' }));
+  }
+}
+
+async function handleAnalyzeWorkout(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch (e) {
+    res.writeHead(400); res.end('invalid json'); return;
+  }
+
+  const { workoutText, priorAttemptsText } = payload || {};
+  if (!workoutText || typeof workoutText !== 'string' || !workoutText.trim()) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'workoutText fehlt' }));
+    return;
+  }
+  if (workoutText.length > 3000 || (priorAttemptsText && String(priorAttemptsText).length > 1000)) {
+    res.writeHead(413, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Eingabe zu lang' }));
+    return;
+  }
+
+  const userText = `Workout:\n${workoutText}` + (priorAttemptsText ? `\n\nFruehere Versuche desselben Workouts (neueste zuerst): ${priorAttemptsText}` : '');
+
+  try {
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 300,
+        temperature: 0.5,
+        system: WORKOUT_REVIEW_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }]
+      })
+    });
+
+    if (!anthropicRes.ok) {
+      const errBody = await anthropicRes.text().catch(() => '');
+      console.error('Anthropic API Fehler (workout-review)', anthropicRes.status, errBody);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'AI-Anfrage fehlgeschlagen' }));
+      return;
+    }
+
+    const data = await anthropicRes.json();
+    const text = (data.content || []).map(b => b.text || '').join('').trim();
+    if (!text) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'KI-Antwort leer' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, text }));
+  } catch (e) {
+    console.error('ai-photo-service Fehler (workout-review)', e);
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'unerwarteter Fehler' }));
   }
