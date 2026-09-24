@@ -39,7 +39,7 @@ Regeln:
 - Bei "for-time": Nutze repScheme NUR, wenn in JEDER Runde DIESELBE Wiederholungszahl fuer ALLE Bewegungen gilt und sich diese Zahl von Runde zu Runde aendert (klassisches Benchmark-Schema wie "21-15-9", z.B. Fran) - in diesem Fall lasse reps bei den einzelnen movements leer. Hat dagegen jede Bewegungszeile ihre EIGENE, unterschiedliche Wiederholungszahl (z.B. eine Checkliste/Chipper mit vielen einzelnen Zeilen), trage diese Zahl bei jeder Bewegung einzeln in reps ein und lasse repScheme leer.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare oder Codeblock-Markierungen.`;
 
-const TRAINING_PLAN_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und erstellst einen individuellen woechentlichen Trainingsplan fuer einen Athleten. Du bekommst als Kontext: Ziel, Schwerpunkt, Trainingsstand, Trainingsort (bestimmt verfuegbares Equipment), gewuenschte Trainingshaeufigkeit pro Woche, die Anzahl an Trainingseinheiten der letzten 14 Tage pro Muskelgruppe (arme/brust/bauch/beine/ruecken) sowie die Namen der zuletzt trainierten Uebungen.
+const TRAINING_PLAN_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und erstellst einen individuellen woechentlichen Trainingsplan fuer einen Athleten. Du bekommst als Kontext: Ziel, Schwerpunkt, Trainingsstand, Trainingsort (bestimmt verfuegbares Equipment), gewuenschte Trainingshaeufigkeit pro Woche, die Anzahl an Trainingseinheiten der letzten 14 Tage pro Muskelgruppe (arme/brust/bauch/beine/ruecken), die Namen der zuletzt trainierten Uebungen, sowie optional vom Athleten favorisierte und ausgeschlossene Uebungen.
 
 Gib NUR ein einziges JSON-Objekt zurueck (kein Markdown, kein Fliesstext, keine Codeblock-Markierung) in exakt dieser Form:
 {"days":[{"kind":"wod"|"strength","wod":{"name":"<kurzer Name>","format":"for-time"|"amrap","movements":[{"name":"<Uebungsname>","reps":<Zahl>}],"rounds":<Zahl, NUR bei format "for-time", sonst weglassen>,"repScheme":"<z.B. '21-15-9', NUR bei format 'for-time' mit gleichem Rep-Schema pro Runde, sonst leer>","durationSec":<Gesamtdauer in Sekunden, NUR bei format 'amrap'>},"prog":{"name":"<kurzer Name>","exerciseName":"<Uebungsname>","setsCount":<Zahl>,"pctList":"<z.B. '70,75,80,80,80', kommagetrennt, ein Wert pro Satz, oder leer wenn kein Prozent-Bezug sinnvoll ist>"}}],"summaryNote":"<1-2 Saetze auf Deutsch, die kurz erklaeren warum der Plan so aussieht>"}
@@ -55,6 +55,8 @@ Regeln:
 - Schwerpunkt "fortsetzen": baue auf den zuletzt trainierten Uebungen sinnvoll auf (aehnliche Bewegungsmuster/Progression fortsetzen), ohne die Uebungen 1:1 zu wiederholen - Ziel ist ein natuerlicher naechster Trainingsschritt, keine Neuausrichtung.
 - Bei "wod": setze "rounds" NUR bei format "for-time", "durationSec" NUR bei format "amrap" (sinnvoller Bereich 600-1500 Sekunden), niemals beide gleichzeitig.
 - Bei "strength": "pctList" muss genau "setsCount" kommagetrennte Werte enthalten, falls gesetzt.
+- Favorisierte Uebungen (falls angegeben): baue diese bevorzugt in den Plan ein, wo es zu Ziel/Ort/Trainingsstand passt - deutlich haeufiger als vergleichbare Alternativen, aber nicht zwingend jede einzelne in jedem Plan.
+- Ausgeschlossene Uebungen (falls angegeben): verwende diese NIEMALS im Plan, auch nicht als Teil eines Benchmark-Workouts oder einer Variante - waehle stattdessen eine sinnvolle Alternativbewegung mit aehnlichem Trainingsreiz und passendem Equipment. Diese Regel ist strikt (z.B. wegen Schmerzen/Verletzung) und hat Vorrang vor allen anderen Ueberlegungen.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare.`;
 
 const WORKOUT_REVIEW_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und gibst kurzes, konkretes Feedback zu einem bereits geloggten Workout eines Athleten. Du bekommst eine Textbeschreibung des Workouts (Name, Datum, Format, Bewegungen mit Wiederholungen/Gewicht/Zeit) sowie optional die Ergebnisse der letzten Versuche desselben Workouts zum Vergleich.
@@ -216,7 +218,7 @@ async function handleGenerateTrainingPlan(req, res) {
     res.writeHead(400); res.end('invalid json'); return;
   }
 
-  const { goal, focus, status, location, frequency, muscleGroupLoad, recentExercises } = payload || {};
+  const { goal, focus, status, location, frequency, muscleGroupLoad, recentExercises, favoriteExercises, excludedExercises } = payload || {};
   if (!PLAN_GOALS.includes(goal) || !PLAN_FOCUSES.includes(focus) || !PLAN_STATUSES.includes(status) || !PLAN_LOCATIONS.includes(location)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'ungueltige Plan-Parameter' }));
@@ -225,8 +227,10 @@ async function handleGenerateTrainingPlan(req, res) {
   const freq = Math.min(7, Math.max(1, parseInt(frequency) || 3));
   const load = (muscleGroupLoad && typeof muscleGroupLoad === 'object') ? muscleGroupLoad : {};
   const recent = Array.isArray(recentExercises) ? recentExercises.slice(0, 60).map(String) : [];
+  const favorites = Array.isArray(favoriteExercises) ? favoriteExercises.slice(0, 30).map(String) : [];
+  const excluded = Array.isArray(excludedExercises) ? excludedExercises.slice(0, 30).map(String) : [];
 
-  const userText = `Ziel: ${goal}\nSchwerpunkt: ${focus}\nTrainingsstand: ${status}\nTrainingsort: ${location}\nHaeufigkeit pro Woche: ${freq}\nTrainingseinheiten je Muskelgruppe (letzte 14 Tage): ${JSON.stringify(load)}\nZuletzt trainierte Uebungen (letzte 14 Tage): ${recent.length ? recent.join(', ') : '(keine)'}\n\nErstelle den Trainingsplan gemaess Systemanweisung und gib das JSON zurueck.`;
+  const userText = `Ziel: ${goal}\nSchwerpunkt: ${focus}\nTrainingsstand: ${status}\nTrainingsort: ${location}\nHaeufigkeit pro Woche: ${freq}\nTrainingseinheiten je Muskelgruppe (letzte 14 Tage): ${JSON.stringify(load)}\nZuletzt trainierte Uebungen (letzte 14 Tage): ${recent.length ? recent.join(', ') : '(keine)'}\nFavorisierte Uebungen: ${favorites.length ? favorites.join(', ') : '(keine)'}\nAusgeschlossene Uebungen: ${excluded.length ? excluded.join(', ') : '(keine)'}\n\nErstelle den Trainingsplan gemaess Systemanweisung und gib das JSON zurueck.`;
 
   try {
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {

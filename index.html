@@ -2169,6 +2169,21 @@ function planEntryLabel(planDay){
   if(planDay.type==='ai-strength') return planDay.prog?.name || 'KI-Kraft';
   return (STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId)||{}).name;
 }
+function planDayMovementsText(planDay){
+  if(!planDay) return '';
+  if(planDay.type==='wod' || planDay.type==='ai-wod'){
+    const wod = planDay.type==='ai-wod' ? planDay.wod : CROSSFIT_WODS.find(w=>w.id===planDay.refId);
+    if(!wod) return '';
+    const moves = (wod.movements||[]).map(m=>`${m.reps?m.reps+'x ':''}${m.name}`).join(', ');
+    const header = wod.format==='amrap'
+      ? `AMRAP ${Math.floor((wod.durationSec||0)/60)}:${String((wod.durationSec||0)%60).padStart(2,'0')}`
+      : (wod.repScheme || ((wod.rounds||1)>1 ? `${wod.rounds} Runden` : ''));
+    return [header, moves].filter(Boolean).join(' — ');
+  }
+  const prog = planDay.type==='ai-strength' ? planDay.prog : STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId);
+  if(!prog) return '';
+  return `${prog.exerciseName}: ${prog.setsCount||5} Sätze${prog.pctList ? ' @ '+prog.pctList+'%' : ''}`;
+}
 
 /* ---------- Migration (old separate Training/WOD format -> unified Workout format) ---------- */
 function migrateToWorkouts(oldTrainingLogs, oldWods){
@@ -2863,6 +2878,7 @@ function renderDayDetailModalRoot(){
       <div class="suggestion-box">
         <div class="stat-label">Geplant</div>
         <div class="stat-num" style="font-size:20px;">${escapeHtml(planEntryLabel(planDay)||'Training')}</div>
+        <div class="note" style="margin-top:4px;">${escapeHtml(planDayMovementsText(planDay))}</div>
       </div>
       ${d===todayStr() ? `<button class="btn btn-primary" style="margin-top:10px;" onclick="closeDayDetailModal();startPlannedWorkout();">Training starten</button>` : ''}
     ` : `<div class="note">Kein Training an diesem Tag.</div>`));
@@ -2979,6 +2995,7 @@ function renderToday(){
       <div class="suggestion-box">
         <div class="stat-label">Heute geplant</div>
         <div class="stat-num" style="font-size:22px;">${escapeHtml(planEntryLabel(planDay)||'Training')}</div>
+        <div class="note" style="margin-top:4px;">${escapeHtml(planDayMovementsText(planDay))}</div>
       </div>
       <button class="btn btn-primary" onclick="startPlannedWorkout()">Training starten</button>
     `;
@@ -4164,6 +4181,26 @@ async function addExerciseAlias(){
 }
 async function deleteExerciseAlias(id){
   state.profile.exerciseAliases = (state.profile.exerciseAliases||[]).filter(a=>a.id!==id);
+  await saveKey('profile', state.profile);
+  render();
+}
+async function toggleExerciseFavorite(exerciseId){
+  state.profile = state.profile || {};
+  const favs = new Set(state.profile.favoriteExerciseIds||[]);
+  const excluded = new Set(state.profile.excludedExerciseIds||[]);
+  if(favs.has(exerciseId)) favs.delete(exerciseId); else { favs.add(exerciseId); excluded.delete(exerciseId); }
+  state.profile.favoriteExerciseIds = [...favs];
+  state.profile.excludedExerciseIds = [...excluded];
+  await saveKey('profile', state.profile);
+  render();
+}
+async function toggleExerciseExcluded(exerciseId){
+  state.profile = state.profile || {};
+  const favs = new Set(state.profile.favoriteExerciseIds||[]);
+  const excluded = new Set(state.profile.excludedExerciseIds||[]);
+  if(excluded.has(exerciseId)) excluded.delete(exerciseId); else { excluded.add(exerciseId); favs.delete(exerciseId); }
+  state.profile.favoriteExerciseIds = [...favs];
+  state.profile.excludedExerciseIds = [...excluded];
   await saveKey('profile', state.profile);
   render();
 }
@@ -11872,6 +11909,7 @@ function renderCurrentPlanSummaryCard(){
       <div class="note" style="margin-bottom:10px;">${plan.frequency}× / Woche${plan.aiGenerated ? ' · KI-generiert' : ' · ohne KI'}</div>
       ${PLAN_DAY_KEYS.filter(k=>plan.days[k]).map(k=>`
         <div class="history-item"><span class="date">${WEEKDAY_LABELS[PLAN_DAY_KEYS.indexOf(k)]}</span><span class="val">${escapeHtml(planEntryLabel(plan.days[k])||'—')}</span></div>
+        <div class="note" style="margin:-4px 0 8px;">${escapeHtml(planDayMovementsText(plan.days[k]))}</div>
       `).join('')}
       ${plan.aiGenerated && plan.aiNote ? `<div class="note" style="margin-top:8px;">💬 ${escapeHtml(plan.aiNote)}</div>` : ''}
       <div class="note" style="margin-top:8px;">Am jeweiligen Tag unter "Today" auf "Training starten" tippen, um das geplante Training zu loggen.</div>
@@ -12034,10 +12072,13 @@ async function generateAiTrainingPlan(){
   render();
   try{
     const frequency = Math.min(7, Math.max(1, parseInt(form.frequency)||3));
+    const favoriteExercises = (state.profile?.favoriteExerciseIds||[]).map(id=>state.exercises.find(e=>e.id===id)?.name).filter(Boolean);
+    const excludedExercises = (state.profile?.excludedExerciseIds||[]).map(id=>state.exercises.find(e=>e.id===id)?.name).filter(Boolean);
     const body = {
       goal: form.goal, focus: form.focus, status: form.status, location: form.location, frequency,
       muscleGroupLoad: computeMuscleGroupLoad(14),
-      recentExercises: recentExerciseNamesForAiPlan(14)
+      recentExercises: recentExerciseNamesForAiPlan(14),
+      favoriteExercises, excludedExercises
     };
     const result = await pb.send('/ai-training-plan', { method:'POST', body });
     if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Plan konnte nicht erstellt werden');
@@ -12120,14 +12161,19 @@ function renderMyExercisesScreen(){
     ` : ''}
     <div class="card">
       <h2 class="small">Meine Übungen</h2>
-      <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten.</div>
-      ${sortedExercises().map(e=>`
+      <div class="note" style="margin-bottom:10px;">Name oder Typ einer Übung nachträglich korrigieren (z.B. wenn beim Anlegen ein falscher Typ gewählt wurde) — bestehende Log-Einträge bleiben dabei erhalten. ⭐ favorisiert = wird im KI-Trainingsplan bevorzugt eingebaut. 🚫 ausgeschlossen = wird im KI-Trainingsplan vermieden (z.B. bei Schmerzen).</div>
+      ${sortedExercises().map(e=>{
+        const isFav = (state.profile?.favoriteExerciseIds||[]).includes(e.id);
+        const isExcluded = (state.profile?.excludedExerciseIds||[]).includes(e.id);
+        return `
         <div class="row" style="align-items:center;margin-bottom:6px;">
           <span style="flex:1;">${escapeHtml(e.name)}</span>
           <span class="note" style="margin:0 8px;">${({weighted:'Gewicht', bodyweight:'Bodyweight', cardio:'Cardio', mobility:'Mobility'})[e.type] || e.type}</span>
+          <button class="btn-sm ${isFav?'btn-primary':'btn-ghost'}" style="width:auto;flex:0 0 auto;" title="Favorisieren" onclick="toggleExerciseFavorite('${e.id}')">⭐</button>
+          <button class="btn-sm ${isExcluded?'btn-primary':'btn-ghost'}" style="width:auto;flex:0 0 auto;" title="Ausschließen" onclick="toggleExerciseExcluded('${e.id}')">🚫</button>
           <button class="btn-sm btn-ghost" style="width:auto;flex:0 0 auto;" onclick="openExerciseModal(()=>{}, '${e.id}')">✎</button>
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>
     <div class="card">
       <h2 class="small">Abkürzungen &amp; Aliasnamen</h2>

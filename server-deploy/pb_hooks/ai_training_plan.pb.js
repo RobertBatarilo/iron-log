@@ -20,7 +20,7 @@ routerAdd("POST", "/ai-training-plan", (e) => {
 
   const data = new DynamicModel({
     goal: "", focus: "", status: "", location: "", frequency: 0,
-    muscleGroupLoad: {}, recentExercises: []
+    muscleGroupLoad: {}, recentExercises: [], favoriteExercises: [], excludedExercises: []
   });
   e.bindBody(data);
 
@@ -36,7 +36,8 @@ routerAdd("POST", "/ai-training-plan", (e) => {
       },
       body: JSON.stringify({
         goal: data.goal, focus: data.focus, status: data.status, location: data.location,
-        frequency: data.frequency, muscleGroupLoad: data.muscleGroupLoad, recentExercises: data.recentExercises
+        frequency: data.frequency, muscleGroupLoad: data.muscleGroupLoad, recentExercises: data.recentExercises,
+        favoriteExercises: data.favoriteExercises, excludedExercises: data.excludedExercises
       })
     });
     const parsed = JSON.parse(res.raw || "{}");
