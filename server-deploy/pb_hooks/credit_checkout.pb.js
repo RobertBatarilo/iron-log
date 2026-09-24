@@ -122,20 +122,10 @@ routerAdd("POST", "/credit/order-fulfilled", (e) => {
       const freshOrder = txApp.findRecordById("credit_orders", order.id);
       if (freshOrder.getString("status") === "paid") return; // Race: parallele Zustellung war schneller
 
-      // Record.get() liefert bei JSON-Feldern im JSVM ein types.JSONMap-Objekt zurueck,
-      // das NUR per .get(key) lesbar ist, nicht per normalem objekt.feld-Zugriff (siehe
-      // /pb_data/types.d.ts Kommentar zu DynamicModel: "Objects are loaded into
-      // types.JSONMap..."). snapshot.unitsGranted war deshalb immer "undefined" -> 0 ->
-      // von PocketBase als "cannot be blank" abgelehnt. Fix: ueber JSON hin- und
-      // zurueckwandeln normalisiert JSONMap/String/Objekt zuverlässig zu einem echten,
-      // per Punktnotation lesbaren JS-Objekt.
-      // Record.get() liefert bei JSON-Feldern im JSVM ein Byte-Array-artiges Objekt
-      // zurueck (typeof "object", KEIN JSONMap mit .get(), JSON.stringify() zerlegt es
-      // faelschlich in einzelne Byte-Zahlen) - live per Debug-Log bestaetigt: nur
-      // String(rawSnapshot) liefert korrekt den eigentlichen JSON-Text zurueck.
-      let snapshot = {};
-      try { snapshot = JSON.parse(String(freshOrder.get("offerSnapshot") || "{}")); }
-      catch (parseErr) { snapshot = {}; }
+      // JSON-Feld-Auslesen: siehe helpers.getJsonField()-Kommentar in credit_helpers.js
+      // (Byte-Array-artiges JSVM-Objekt, nur String()->JSON.parse() liefert zuverlaessig
+      // den eigentlichen JSON-Text zurueck).
+      const snapshot = helpers.getJsonField(freshOrder, "offerSnapshot");
       const cardsCollection = txApp.findCollectionByNameOrId("credit_cards");
       const card = new Record(cardsCollection);
       card.set("box", freshOrder.getString("box"));

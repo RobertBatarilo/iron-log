@@ -36,6 +36,16 @@ module.exports = {
     return { grantedUnits, redeemedUnits, correctionUnits, remaining: Math.max(0, remaining) };
   },
 
+  // Record.get() liefert bei JSON-Feldern im JSVM ein Byte-Array-artiges Objekt zurueck
+  // (typeof "object", KEIN JSONMap mit .get(), JSON.stringify() zerlegt es faelschlich in
+  // einzelne Byte-Zahlen) - live per Debug-Log bestaetigt: nur String(rawValue) liefert
+  // korrekt den eigentlichen JSON-Text zurueck. Zentral hier statt in jedem Hook einzeln
+  // kopiert (siehe credit_checkout.pb.js/credit_plan_checkout.pb.js).
+  getJsonField(record, key) {
+    try { return JSON.parse(String(record.get(key) || "{}")); }
+    catch (parseErr) { return {}; }
+  },
+
   // Deterministische operationId, damit doppelte Aufrufe (Webhook-Redelivery, doppelter
   // Confirm-Request) am Unique-Index von credit_transactions.operationId scheitern statt
   // doppelt zu buchen.

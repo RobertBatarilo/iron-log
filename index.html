@@ -3980,10 +3980,14 @@ function replaceExerciseIdInPersistedData(oldId, newId){
   walk(state.profile?.exerciseAliases);
   replaceExerciseIdEverywhere(oldId, newId);
 }
-async function mergeExercises(keepId, removeId){
-  if(!keepId || !removeId || keepId===removeId) return;
-  replaceExerciseIdInPersistedData(removeId, keepId);
-  state.exercises = state.exercises.filter(e=>e.id!==removeId);
+// Ein Speicher-Durchlauf fuer beliebig viele removeIds statt einem pro Uebung - eine
+// N-koepfige Dublettengruppe braucht sonst N-1 volle State-Durchlaeufe UND N-1x 7
+// saveKey()-Aufrufe (localStorage+Cloud-Sync) statt einmal.
+async function mergeExercisesInto(keepId, removeIds){
+  removeIds = (removeIds||[]).filter(id=>id && id!==keepId);
+  if(!keepId || !removeIds.length) return;
+  removeIds.forEach(id=>replaceExerciseIdInPersistedData(id, keepId));
+  state.exercises = state.exercises.filter(e=>!removeIds.includes(e.id));
   await Promise.all([
     saveKey('workouts', state.workouts),
     saveKey('prEntries', state.prEntries),
@@ -3993,9 +3997,12 @@ async function mergeExercises(keepId, removeId){
     saveKey('profile', state.profile),
     saveKey('exercises', state.exercises)
   ]);
-  if(state.tmp.newlyCreatedExerciseIds) state.tmp.newlyCreatedExerciseIds = state.tmp.newlyCreatedExerciseIds.filter(id=>id!==removeId);
+  if(state.tmp.newlyCreatedExerciseIds) state.tmp.newlyCreatedExerciseIds = state.tmp.newlyCreatedExerciseIds.filter(id=>!removeIds.includes(id));
   showToast('Übungen zusammengeführt');
   render();
+}
+async function mergeExercises(keepId, removeId){
+  await mergeExercisesInto(keepId, [removeId]);
 }
 function findDuplicateExerciseGroups(){
   const groups = {};
@@ -4016,9 +4023,7 @@ async function confirmMergeDuplicateGroup(key){
   if(!group) return;
   const [, list] = group;
   const keepId = state.tmp.dupeKeeper?.[key] || list[0].id;
-  for(const e of list){
-    if(e.id!==keepId) await mergeExercises(keepId, e.id);
-  }
+  await mergeExercisesInto(keepId, list.map(e=>e.id));
 }
 // Wortmenge statt exakter normalisierter String, damit auch Wortstellungs-Abweichungen wie
 // "Single Arm Kettlebell Thruster" vs. kanonisch "Kettlebell Single-Arm Thruster" erkannt
@@ -4416,12 +4421,20 @@ function applyParsedWorkout(input){
         const tmWords = (tm.name||'').toLowerCase().split(/\s+/).filter(Boolean);
         if(!tmWords.length) return;
         const tmNormalized = normalizeExerciseName(tm.name);
-        const match = activeMovements.find(mv=>{
+        // Exakten/normalisierten Treffer IMMER vor dem lockeren Teilwort-Test bevorzugen -
+        // sonst kann bei mehreren Bewegungen mit ueberlappenden Woertern (z.B. "Pull-Ups"
+        // UND "Chest-to-Bar Pull-Ups" im selben Workout) die falsche Bewegung getroffen
+        // werden, da .find() sonst den ERSTEN Teilwort-Treffer nimmt statt des korrekten.
+        const exactMatch = activeMovements.find(mv=>{
+          const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+          if(!ex) return false;
+          return ex.name.toLowerCase()===tm.name.toLowerCase() || normalizeExerciseName(ex.name)===tmNormalized;
+        });
+        const match = exactMatch || activeMovements.find(mv=>{
           const ex = state.exercises.find(e=>e.id===mv.exerciseId);
           if(!ex) return false;
           const exWords = ex.name.toLowerCase().split(/\s+/);
-          return ex.name.toLowerCase()===tm.name.toLowerCase() || normalizeExerciseName(ex.name)===tmNormalized
-            || exWords.every(w=>tmWords.includes(w)) || tmWords.every(w=>exWords.includes(w));
+          return exWords.every(w=>tmWords.includes(w)) || tmWords.every(w=>exWords.includes(w));
         });
         if(!match) return;
         if(tm.substitutes && tm.substitutes.length){
@@ -4602,7 +4615,7 @@ async function saveWodDraft(){
   } else if(format==='amrap'){
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
-    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec, setsCount:b.setsCount, restMin:b.restMin, restSec:b.restSec };
+    payload = amrapPayloadFromBuilder(b);
   } else if(format==='for-load'){
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
@@ -4644,7 +4657,7 @@ function loadDraftIntoBuilder(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(draft.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, applyAmrapPayloadToBuilder(p));
   } else if(draft.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -6655,7 +6668,13 @@ function renderCreditRevenueScreen(){
   // Einmalige Kontingente kommen aus zwei Quellen: Stripe-Selbstkauf (plan_orders) UND
   // manuelle Zuteilung durch den Coach ("Kontingent anlegen", membership_plans ohne
   // zugehoerigen plan_orders-Datensatz) - beide muessen in die Summe/Aufschluesselung.
-  const manualOneTime = allPlans.filter(p=>p.type==='one-time');
+  // Selbstkaeufe per Stripe (erkennbar an einem zugehoerigen plan_orders-Datensatz) NICHT
+  // als "manuell zugeteilt ohne Preis" zaehlen - deren Umsatz ist bereits ueber planOrders
+  // erfasst, und /credit/plan-order-fulfilled setzt bei ihnen bewusst kein priceCents
+  // (siehe server-deploy/pb_hooks/credit_plan_checkout.pb.js), das sind keine fehlenden
+  // Preise, sondern schlicht keine manuellen Zuteilungen.
+  const selfPurchasedPlanIds = new Set(planOrders.map(o=>o.membershipPlan).filter(Boolean));
+  const manualOneTime = allPlans.filter(p=>p.type==='one-time' && !selfPurchasedPlanIds.has(p.id));
   const pricedManualOneTime = manualOneTime.filter(p=>p.priceCents);
   const unpricedManualOneTimeCount = manualOneTime.length - pricedManualOneTime.length;
 
@@ -6684,15 +6703,16 @@ function renderCreditRevenueScreen(){
     planByTemplate[name].revenueCents += p.priceCents||0;
   });
 
-  const cardsById = {};
-  allCards.forEach(c=>{ cardsById[c.id] = c; });
-  let unitsGranted = 0, unitsRedeemed = 0;
-  allTx.forEach(tx=>{
-    if(!cardsById[tx.card]) return;
-    if(tx.deltaUnits>0) unitsGranted += tx.deltaUnits;
-    else unitsRedeemed += -tx.deltaUnits;
+  // Bestehende computeCardBalance() wiederverwenden statt Vorzeichen-basiert selbst zu
+  // zaehlen - die zaehlt "correction"-Buchungen bereits korrekt separat statt sie
+  // faelschlich als "eingeloest"/"ausgegeben" zu werten (index.html:6353-6362).
+  let unitsGranted = 0, unitsRedeemed = 0, unitsOutstanding = 0;
+  allCards.forEach(c=>{
+    const balance = computeCardBalance(c.id, allTx);
+    unitsGranted += balance.granted;
+    unitsRedeemed += balance.redeemed;
+    unitsOutstanding += balance.remaining;
   });
-  const unitsOutstanding = Math.max(0, unitsGranted - unitsRedeemed);
 
   const creditRows = Object.entries(creditByOffer).sort((a,b)=>b[1].revenueCents-a[1].revenueCents)
     .map(([title,d])=>`<div style="${rowStyle}"><span>${escapeHtml(title)} (${d.count}×)</span><span>${fmtEuro(d.revenueCents)}</span></div>`).join('');
@@ -7069,7 +7089,7 @@ async function publishBoxWorkout(){
   } else if(format==='amrap'){
     ensureAmrapBuilder();
     const b = state.tmp.amrapBuilder;
-    payload = { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec, setsCount:b.setsCount, restMin:b.restMin, restSec:b.restSec };
+    payload = amrapPayloadFromBuilder(b);
   } else if(format==='for-load'){
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
@@ -7108,7 +7128,7 @@ function importBoxWorkout(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(w.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, applyAmrapPayloadToBuilder(p));
   } else if(w.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -7143,7 +7163,7 @@ function editBoxWorkout(id){
     Object.assign(state.tmp.forTimeBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), rounds:p.rounds, repScheme:p.repScheme, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, phase:'build' });
   } else if(w.format==='amrap'){
     ensureAmrapBuilder();
-    Object.assign(state.tmp.amrapBuilder, { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' });
+    Object.assign(state.tmp.amrapBuilder, applyAmrapPayloadToBuilder(p));
   } else if(w.format==='for-load'){
     ensureForLoadBuilder();
     Object.assign(state.tmp.forLoadBuilder, { exerciseId:p.exerciseId, targetReps:p.targetReps, timeCapMin:p.timeCapMin, timeCapSec:p.timeCapSec, unit:p.unit, phase:'build' });
@@ -9595,6 +9615,16 @@ function ensureAmrapBuilder(){
     state.tmp.amrapBuilder = { phase:'build', movements:[blankAmrapMove()], durationMin:'20', durationSec:'0', startedAt:null, running:false, remainingMs:0, durationMs:0, roundsCompleted:0, extraReps:'', timedOut:false,
       setsCount:'1', restMin:'0', restSec:'0', currentSet:1, setPhase:'work', setsLog:[] };
   }
+}
+// Gemeinsame Payload-Form fuer Entwurf/Box-Veroeffentlichung/-Import (bisher an 5 Stellen
+// kopiert, mit abweichenden Defaults zwischen Speichern und Wiederherstellen) - hier EINMAL
+// definiert, damit ein kuenftiges neues Feld nicht an mehreren Stellen von Hand nachgezogen
+// werden muss.
+function amrapPayloadFromBuilder(b){
+  return { movements: JSON.parse(JSON.stringify(b.movements)), durationMin:b.durationMin, durationSec:b.durationSec, setsCount:b.setsCount, restMin:b.restMin, restSec:b.restSec };
+}
+function applyAmrapPayloadToBuilder(p){
+  return { movements: JSON.parse(JSON.stringify(p.movements)), durationMin:p.durationMin, durationSec:p.durationSec, setsCount:p.setsCount||'1', restMin:p.restMin||'0', restSec:p.restSec||'0', phase:'build' };
 }
 function toggleAmrapMultiSet(){ state.tmp.amrapMultiSetOpen = !state.tmp.amrapMultiSetOpen; render(); }
 function renderAmrapFlow(historyHtml){

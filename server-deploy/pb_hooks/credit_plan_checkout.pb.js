@@ -97,6 +97,7 @@ routerAdd("POST", "/credit/plan-checkout-session", (e) => {
 // metadata-Feld "planOrderId" (statt "creditOrderId") im Checkout-Event steht.
 routerAdd("POST", "/credit/plan-order-fulfilled", (e) => {
   const cfg = require(`${__hooks}/config.local.js`);
+  const helpers = require(`${__hooks}/credit_helpers.js`);
   if (e.request.header.get("X-Internal-Secret") !== cfg.stripeWebhookInternalSecret) {
     return e.json(401, { ok: false, error: "unauthorized" });
   }
@@ -120,10 +121,7 @@ routerAdd("POST", "/credit/plan-order-fulfilled", (e) => {
       const freshOrder = txApp.findRecordById("plan_orders", order.id);
       if (freshOrder.getString("status") === "paid") return; // Race: parallele Zustellung war schneller
 
-      // Byte-Array-artiges JSON-Feld -> String() -> JSON.parse(), siehe credit_checkout.pb.js.
-      let snapshot = {};
-      try { snapshot = JSON.parse(String(freshOrder.get("templateSnapshot") || "{}")); }
-      catch (parseErr) { snapshot = {}; }
+      const snapshot = helpers.getJsonField(freshOrder, "templateSnapshot");
 
       const plansCollection = txApp.findCollectionByNameOrId("membership_plans");
       const plan = new Record(plansCollection);
@@ -134,6 +132,11 @@ routerAdd("POST", "/credit/plan-order-fulfilled", (e) => {
       plan.set("status", "active");
       plan.set("name", snapshot.name || "");
       plan.set("note", "Selbst gekauft");
+      // Idempotenz-Anker: Unique-Index auf sourceOrderId (siehe Migration
+      // 1790300000_..._idempotency.js) faengt eine echte parallele Stripe-Webhook-
+      // Zustellung ab, falls beide Aufrufe den status==='paid'-Check oben noch als
+      // "pending" sehen - analog zum operationId-Unique-Index in credit_checkout.pb.js.
+      plan.set("sourceOrderId", freshOrder.id);
       txApp.save(plan);
 
       freshOrder.set("status", "paid");
@@ -142,6 +145,16 @@ routerAdd("POST", "/credit/plan-order-fulfilled", (e) => {
       txApp.save(freshOrder);
     });
   } catch (err) {
+    // NUR eine echte Unique-Index-Kollision auf sourceOrderId (= eine parallele Zustellung
+    // hat bereits gebucht) ist der beabsichtigte Idempotenz-Fall - gleiches Muster wie
+    // credit_checkout.pb.js order-fulfilled. Alles andere ist ein echter Fehler und MUSS
+    // als 5xx zurueckgegeben werden, sonst wiederholt Stripe eine fehlgeschlagene
+    // Zustellung nie.
+    const msg = String((err && err.message) || err);
+    if (/unique/i.test(msg) && /sourceorderid/i.test(msg)) {
+      console.log("credit_plan_checkout plan-order-fulfilled: Doppel-Zustellung erkannt (sourceOrderId-Kollision), ignoriert", msg);
+      return e.json(200, { ok: true, alreadyProcessed: true });
+    }
     console.log("credit_plan_checkout plan-order-fulfilled ECHTER FEHLER", err);
     return e.json(500, { ok: false, error: "Verarbeitung fehlgeschlagen" });
   }
