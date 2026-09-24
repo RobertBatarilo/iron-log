@@ -729,6 +729,7 @@ function defaultTmp(){
     boxSubTab:'home',
     scheduleSelectedDate:null, scheduleWeekOffset:0,
     workoutsSelectedDate:null, workoutsWeekOffset:0,
+    todayWeekOffset:0,
     boxFreeformOpen:false,
     boxDraftsOpen:false, boxHistoryOpen:false, boxArchiveSearch:'',
     leaderboardDetailOpen:false, leaderboardSearch:'', inviteLinkOpen:false,
@@ -1946,8 +1947,11 @@ function generateTrainingPlan(status, location, frequency){
   });
   return { status, location, frequency, days };
 }
+function planKeyForDate(d){
+  return PLAN_DAY_KEYS[(new Date(d+'T00:00:00').getDay()+6)%7];
+}
 function todaysPlanKey(){
-  return PLAN_DAY_KEYS[(new Date().getDay()+6)%7];
+  return planKeyForDate(todayStr());
 }
 const CARDIO_MACHINE_NAMES = ['Row','Air Bike','Bike','Ski Erg','Run'];
 const GPS_RUN_NAMES = ['run','lauf'];
@@ -2852,9 +2856,16 @@ function renderDayDetailModalRoot(){
   if(!d) return '';
   const dayWorkouts = workoutsOnDate(d);
   const dayDrafts = draftsOnDate(d);
+  const planDay = state.trainingPlan?.days?.[planKeyForDate(d)] || null;
   const workoutsBody = dayWorkouts.length
     ? dayWorkouts.map(renderWorkoutHistoryEntry).join('')
-    : (dayDrafts.length ? '' : `<div class="note">Kein Training an diesem Tag.</div>`);
+    : (dayDrafts.length ? '' : (planDay ? `
+      <div class="suggestion-box">
+        <div class="stat-label">Geplant</div>
+        <div class="stat-num" style="font-size:20px;">${escapeHtml(planEntryLabel(planDay)||'Training')}</div>
+      </div>
+      ${d===todayStr() ? `<button class="btn btn-primary" style="margin-top:10px;" onclick="closeDayDetailModal();startPlannedWorkout();">Training starten</button>` : ''}
+    ` : `<div class="note">Kein Training an diesem Tag.</div>`));
   const draftsBody = dayDrafts.length ? `
     <h2 class="small" style="margin-top:${dayWorkouts.length?'14px':'0'};">Entwürfe</h2>
     ${dayDrafts.map(dr=>`
@@ -2937,18 +2948,23 @@ function renderReadinessCard(){
   `;
 }
 function renderToday(){
-  const dates = weekDates();
+  const weekOffset = state.tmp.todayWeekOffset||0;
+  const dates = weekDates(weekOffset);
   const trainedDates = new Set(state.workouts.map(w=>w.date));
   const todayD = todayStr();
+  const weekLabel = weekOffset===0 ? 'Diese Woche' : (weekOffset>0 ? `+${weekOffset} Woche${weekOffset>1?'n':''}` : `${weekOffset} Woche${weekOffset<-1?'n':''}`);
 
   const weekStrip = dates.map((d,i)=>{
     const trained = trainedDates.has(d);
     const isToday = d===todayD;
+    const planDay = state.trainingPlan?.days?.[planKeyForDate(d)] || null;
     const circleStyle = isToday
       ? 'background:var(--chalk-yellow);color:var(--graphite-900);'
       : trained
         ? 'background:var(--success-green);color:var(--chalk-50);'
-        : 'border:1px solid var(--iron-700);color:var(--iron-500);';
+        : planDay
+          ? 'border:2px solid var(--chalk-yellow);color:var(--chalk-yellow);'
+          : 'border:1px solid var(--iron-700);color:var(--iron-500);';
     return `
       <div style="text-align:center;flex:1;cursor:pointer;" onclick="openDayDetailModal('${d}')">
         <div class="stat-label">${WEEKDAY_LABELS[i]}</div>
@@ -2977,8 +2993,10 @@ function renderToday(){
 
   return `
     <div class="card">
-      <h2 class="small">Diese Woche</h2>
-      <div class="row" style="gap:4px;">${weekStrip}</div>
+      <div class="row" style="align-items:center;gap:6px;margin-bottom:8px;">
+        <span class="note" style="flex:1;text-align:center;margin:0;">${weekLabel}${weekOffset!==0 ? ` <a href="#" onclick="event.preventDefault();resetTodayWeek();" style="color:var(--chalk-yellow);">Heute</a>` : ''}</span>
+      </div>
+      <div class="row" style="gap:4px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftTodayWeek(1), ()=>shiftTodayWeek(-1))">${weekStrip}</div>
     </div>
     ${renderReadinessCard()}
     ${planHtml ? `<div class="card">
@@ -7819,6 +7837,14 @@ function resetWorkoutsWeek(){
   state.tmp.workoutsWeekOffset = 0;
   selectWorkoutsDate(todayStr());
 }
+function shiftTodayWeek(delta){
+  state.tmp.todayWeekOffset = (state.tmp.todayWeekOffset||0) + delta;
+  render();
+}
+function resetTodayWeek(){
+  state.tmp.todayWeekOffset = 0;
+  render();
+}
 let _weekSwipe = null;
 function weekSwipeStart(event){
   const t = event.touches ? event.touches[0] : event;
@@ -11837,23 +11863,29 @@ function mountProgressCharts(){
 }
 
 /* ---------- PROFILE TAB ---------- */
+function renderCurrentPlanSummaryCard(){
+  const plan = state.trainingPlan;
+  if(!plan) return '';
+  return `
+    <div class="card">
+      <h2 class="small">Aktueller Trainingsplan${plan.aiGenerated ? ' ✨' : ''}</h2>
+      <div class="note" style="margin-bottom:10px;">${plan.frequency}× / Woche${plan.aiGenerated ? ' · KI-generiert' : ' · ohne KI'}</div>
+      ${PLAN_DAY_KEYS.filter(k=>plan.days[k]).map(k=>`
+        <div class="history-item"><span class="date">${WEEKDAY_LABELS[PLAN_DAY_KEYS.indexOf(k)]}</span><span class="val">${escapeHtml(planEntryLabel(plan.days[k])||'—')}</span></div>
+      `).join('')}
+      ${plan.aiGenerated && plan.aiNote ? `<div class="note" style="margin-top:8px;">💬 ${escapeHtml(plan.aiNote)}</div>` : ''}
+      <div class="note" style="margin-top:8px;">Am jeweiligen Tag unter "Today" auf "Training starten" tippen, um das geplante Training zu loggen.</div>
+    </div>
+  `;
+}
 function renderTrainingPlanCard(){
   const plan = state.trainingPlan;
   const form = state.tmp.planForm || (plan ? {status:plan.status, location:plan.location, frequency:plan.frequency} : {status:'anfaenger', location:'box', frequency:3});
-
-  const summary = plan ? `
-    <div class="note" style="margin-bottom:10px;">Aktueller Plan: ${plan.frequency}× / Woche</div>
-    ${PLAN_DAY_KEYS.filter(k=>plan.days[k]).map(k=>`
-      <div class="history-item"><span class="date">${WEEKDAY_LABELS[PLAN_DAY_KEYS.indexOf(k)]}</span><span class="val">${escapeHtml(planEntryLabel(plan.days[k])||'—')}</span></div>
-    `).join('')}
-    <hr class="hairline">
-  ` : `<div class="note" style="margin-bottom:10px;">Noch kein Plan erstellt.</div>`;
 
   return `
     <div class="card">
       <h2>Trainingsplan ohne KI</h2>
       <div class="note" style="margin-bottom:10px;">Wählt automatisch aus einer festen Bibliothek an Benchmark-WODs und Kraft-Progressionen — ohne KI, für alle kostenlos.</div>
-      ${summary}
       <div class="field"><label>Trainingsstatus</label>
         <select id="planStatus" onchange="updatePlanForm('status',this.value)">
           <option value="anfaenger" ${form.status==='anfaenger'?'selected':''}>Anfänger</option>
@@ -11895,6 +11927,7 @@ async function createTrainingPlan(){
 function renderTrainingPlanScreen(){
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${renderCurrentPlanSummaryCard()}
     ${renderAiPlanWizardCard()}
     ${renderTrainingPlanCard()}
   `;
@@ -11964,7 +11997,6 @@ function renderAiPlanWizardCard(){
       </div>
       ${err ? `<div class="note" style="color:var(--danger-red,#e05353);margin-bottom:10px;">${escapeHtml(err)}</div>` : ''}
       <button class="btn btn-primary" ${loading?'disabled':''} onclick="generateAiTrainingPlan()">${loading?'Wird erstellt …':'KI-Plan generieren'}</button>
-      ${state.trainingPlan?.aiGenerated && state.trainingPlan.aiNote ? `<div class="note" style="margin-top:10px;">💬 ${escapeHtml(state.trainingPlan.aiNote)}</div>` : ''}
     </div>
   `;
 }
