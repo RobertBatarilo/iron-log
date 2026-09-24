@@ -11508,7 +11508,7 @@ function renderProgress(){
   if(section==='body') return renderProgressBody();
   if(section==='history') return renderProgressHistory();
   if(section==='search') return renderWorkoutSearchScreen();
-  if(section==='load') return renderMuscleLoadScreen();
+  if(section==='load' && state.profile?.hasPro) return renderMuscleLoadScreen();
   return renderProgressMenu();
 }
 function renderProgressMenu(){
@@ -11526,7 +11526,7 @@ function renderProgressMenu(){
     <div class="card">
       <h2 class="small">Meine Fortschritte</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('history')">📋 Verlauf</button>
-      <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('load')">📊 Belastung</button>
+      ${state.profile?.hasPro ? `<button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProgressSection('load')">📊 Belastung <span class="chip" style="margin-left:6px;">Pro</span></button>` : ''}
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProgressSection('body')">📏 Körpermaße</button>
     </div>
     <div class="card">
