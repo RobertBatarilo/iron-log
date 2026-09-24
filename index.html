@@ -3111,6 +3111,47 @@ function manualBest(exId){
   const list = prEntriesFor(exId);
   return list.length ? list[0].value : null;
 }
+// Kombiniert errechnete Session-e1RM-Werte (aus geloggten Workouts) UND manuelle 1RM-
+// Eintraege zu EINER chronologischen Zeitreihe fuer die Trendgrafik (Pro-Feature) - pro Datum
+// wird der jeweils hoechste Wert genommen, falls an einem Tag beides vorliegt.
+function buildE1RMTrendSeries(exId){
+  const byDate = {};
+  exerciseLogs(exId).forEach(entry=>{
+    const v = sessionE1RM(entry);
+    if(!byDate[entry.date] || v > byDate[entry.date]) byDate[entry.date] = v;
+  });
+  prEntriesFor(exId).forEach(p=>{
+    if(!byDate[p.date] || p.value > byDate[p.date]) byDate[p.date] = p.value;
+  });
+  return Object.entries(byDate).map(([date,value])=>({date, value})).sort((a,b)=>a.date.localeCompare(b.date));
+}
+function renderE1RMTrendChart(exId){
+  const series = buildE1RMTrendSeries(exId);
+  if(series.length < 2) return `<div class="note" style="margin-bottom:8px;">Noch nicht genug Datenpunkte für eine Trendgrafik.</div>`;
+  const width = 320, height = 110, padX = 8, padY = 16;
+  const values = series.map(p=>p.value);
+  const minV = Math.min(...values), maxV = Math.max(...values);
+  const range = (maxV - minV) || 1;
+  const n = series.length;
+  const points = series.map((p,i)=>{
+    const x = padX + (n>1 ? (i/(n-1)) : 0.5) * (width - padX*2);
+    const y = height - padY - ((p.value - minV)/range) * (height - padY*2);
+    return {x, y, ...p};
+  });
+  const pathD = points.map((p,i)=> (i===0?'M':'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+  const dots = points.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="var(--chalk-yellow)"></circle>`).join('');
+  return `
+    <div class="note" style="margin-bottom:4px;">Trend (${Math.round(minV)}–${Math.round(maxV)}kg)</div>
+    <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;display:block;">
+      <path d="${pathD}" fill="none" stroke="var(--chalk-yellow)" stroke-width="2"></path>
+      ${dots}
+    </svg>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px;">
+      <span class="note" style="margin:0;">${fmtDate(series[0].date)}</span>
+      <span class="note" style="margin:0;">${fmtDate(series[n-1].date)}</span>
+    </div>
+  `;
+}
 function bestE1RM(exId){
   const c = computedBest(exId), m = manualBest(exId);
   if(c==null && m==null) return null;
@@ -10940,6 +10981,10 @@ function renderHallOfFameEntry(e){
       <div class="wname" style="font-size:16px;margin-bottom:4px;">${escapeHtml(e.name)}</div>
       <div class="stat-num accent" style="margin-bottom:8px;">${Math.round(official)}kg</div>
       ${computed!=null ? `<div class="note" style="margin-bottom:8px;">aus Training errechnet: ${Math.round(computed)}kg</div>` : ''}
+      ${state.profile?.hasPro ? `
+        <div class="note" style="margin-bottom:2px;">📈 Trend <span class="chip" style="margin-left:4px;">Pro</span></div>
+        ${renderE1RMTrendChart(e.id)}
+      ` : ''}
       ${repSchemeBests.length ? `
         <div class="note" style="margin-bottom:4px;">Bestleistung je Wiederholungszahl:</div>
         ${repSchemeBests.map(b=>`
