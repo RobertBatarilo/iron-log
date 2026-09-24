@@ -39,6 +39,24 @@ Regeln:
 - Bei "for-time": Nutze repScheme NUR, wenn in JEDER Runde DIESELBE Wiederholungszahl fuer ALLE Bewegungen gilt und sich diese Zahl von Runde zu Runde aendert (klassisches Benchmark-Schema wie "21-15-9", z.B. Fran) - in diesem Fall lasse reps bei den einzelnen movements leer. Hat dagegen jede Bewegungszeile ihre EIGENE, unterschiedliche Wiederholungszahl (z.B. eine Checkliste/Chipper mit vielen einzelnen Zeilen), trage diese Zahl bei jeder Bewegung einzeln in reps ein und lasse repScheme leer.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare oder Codeblock-Markierungen.`;
 
+const TRAINING_PLAN_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und erstellst einen individuellen woechentlichen Trainingsplan fuer einen Athleten. Du bekommst als Kontext: Ziel, Schwerpunkt, Trainingsstand, Trainingsort (bestimmt verfuegbares Equipment), gewuenschte Trainingshaeufigkeit pro Woche, die Anzahl an Trainingseinheiten der letzten 14 Tage pro Muskelgruppe (arme/brust/bauch/beine/ruecken) sowie die Namen der zuletzt trainierten Uebungen.
+
+Gib NUR ein einziges JSON-Objekt zurueck (kein Markdown, kein Fliesstext, keine Codeblock-Markierung) in exakt dieser Form:
+{"days":[{"kind":"wod"|"strength","wod":{"name":"<kurzer Name>","format":"for-time"|"amrap","movements":[{"name":"<Uebungsname>","reps":<Zahl>}],"rounds":<Zahl, NUR bei format "for-time", sonst weglassen>,"repScheme":"<z.B. '21-15-9', NUR bei format 'for-time' mit gleichem Rep-Schema pro Runde, sonst leer>","durationSec":<Gesamtdauer in Sekunden, NUR bei format 'amrap'>},"prog":{"name":"<kurzer Name>","exerciseName":"<Uebungsname>","setsCount":<Zahl>,"pctList":"<z.B. '70,75,80,80,80', kommagetrennt, ein Wert pro Satz, oder leer wenn kein Prozent-Bezug sinnvoll ist>"}}],"summaryNote":"<1-2 Saetze auf Deutsch, die kurz erklaeren warum der Plan so aussieht>"}
+
+Regeln:
+- Erzeuge GENAU so viele Eintraege in "days" wie die angegebene Haeufigkeit pro Woche - nicht mehr, nicht weniger.
+- Jeder Eintrag hat entweder "wod" (kind:"wod", "prog" dann weglassen) ODER "prog" (kind:"strength", "wod" dann weglassen), nie beides.
+- Uebungsnamen auf Englisch in ueblicher CrossFit-Schreibweise (z.B. "Pull-up", "Air Squat", "Back Squat", "Kettlebell Swing").
+- Trainingsort bestimmt verfuegbares Equipment - benutze AUSSCHLIESSLICH dazu passende Uebungen: "box" = Langhantel, Klimmzugstange, Kettlebell und alles Bodyweight; "zuhause-geraete" = NUR Klimmzugstange, Kettlebell und Bodyweight (KEINE Langhantel-Uebungen); "zuhause-ohne" = NUR Bodyweight-Uebungen (Air Squat, Push-up, Sit-up, Burpee, Lunge, Mountain Climber etc.), keine Geraete jeglicher Art.
+- Trainingsstand bestimmt Komplexitaet: "anfaenger" = einfache Grundbewegungen, keine komplexen olympischen Kombinationen (kein Clean & Jerk / Snatch in voller Technik, stattdessen z.B. Kettlebell Swing/Goblet Squat); "fortgeschritten" = Grundbewegungen plus einfachere olympische Varianten (Power Clean, Push Press); "profi" = alles inkl. voller olympischer Bewegungen (Snatch, Clean & Jerk) und hoeherer Intensitaet.
+- Ziel bestimmt den Mix aus "wod" (Konditionierung) und "strength" (Kraftaufbau) Einheiten: "staerker" = mehrheitlich "strength" mit hoeheren Prozentsaetzen (75-90%); "schneller" = mehrheitlich "wod" mit kurzen, intensiven Formaten; "ausdauer" = mehrheitlich "wod" mit hoeheren Wiederholungszahlen/laengerer AMRAP-Dauer; "ausgewogen" = ca. 50/50-Mix aus beiden.
+- Schwerpunkt "luecken": bevorzuge bei der Uebungsauswahl gezielt Bewegungsmuster, die zu Muskelgruppen mit NIEDRIGER Trainingseinheiten-Anzahl der letzten 14 Tage passen (Zuordnung: Kniebeuge/Kreuzheben/Olympisches Heben -> "beine", Druckbewegungen wie Bankdruecken/Liegestuetz/Dips -> "brust", Zugbewegungen wie Klimmzug/Rudern -> "ruecken", Sit-up/Toes-to-Bar/Plank -> "bauch", Muscle-up/Handstand/Rope Climb/Pistol -> "arme") - vernachlaessigte Muskelgruppen (niedrige Zahl) sollen im Plan bewusst mehr Gewicht bekommen als bereits stark trainierte.
+- Schwerpunkt "fortsetzen": baue auf den zuletzt trainierten Uebungen sinnvoll auf (aehnliche Bewegungsmuster/Progression fortsetzen), ohne die Uebungen 1:1 zu wiederholen - Ziel ist ein natuerlicher naechster Trainingsschritt, keine Neuausrichtung.
+- Bei "wod": setze "rounds" NUR bei format "for-time", "durationSec" NUR bei format "amrap" (sinnvoller Bereich 600-1500 Sekunden), niemals beide gleichzeitig.
+- Bei "strength": "pctList" muss genau "setsCount" kommagetrennte Werte enthalten, falls gesetzt.
+- Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare.`;
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -79,13 +97,18 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200); res.end('ok'); return;
   }
-  if (req.method !== 'POST' || req.url !== '/parse-photo') {
-    res.writeHead(404); res.end(); return;
+  if (req.method === 'POST' && req.url === '/parse-photo') {
+    if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }
+    return handleParsePhoto(req, res);
   }
-  if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) {
-    res.writeHead(401); res.end(); return;
+  if (req.method === 'POST' && req.url === '/generate-training-plan') {
+    if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }
+    return handleGenerateTrainingPlan(req, res);
   }
+  res.writeHead(404); res.end();
+});
 
+async function handleParsePhoto(req, res) {
   let payload;
   try { payload = await readBody(req); } catch (e) {
     res.writeHead(400); res.end('invalid json'); return;
@@ -168,6 +191,78 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'unerwarteter Fehler' }));
   }
-});
+}
+
+const PLAN_GOALS = ['staerker', 'schneller', 'ausdauer', 'ausgewogen'];
+const PLAN_FOCUSES = ['luecken', 'fortsetzen'];
+const PLAN_STATUSES = ['anfaenger', 'fortgeschritten', 'profi'];
+const PLAN_LOCATIONS = ['box', 'zuhause-geraete', 'zuhause-ohne'];
+
+async function handleGenerateTrainingPlan(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch (e) {
+    res.writeHead(400); res.end('invalid json'); return;
+  }
+
+  const { goal, focus, status, location, frequency, muscleGroupLoad, recentExercises } = payload || {};
+  if (!PLAN_GOALS.includes(goal) || !PLAN_FOCUSES.includes(focus) || !PLAN_STATUSES.includes(status) || !PLAN_LOCATIONS.includes(location)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'ungueltige Plan-Parameter' }));
+    return;
+  }
+  const freq = Math.min(7, Math.max(1, parseInt(frequency) || 3));
+  const load = (muscleGroupLoad && typeof muscleGroupLoad === 'object') ? muscleGroupLoad : {};
+  const recent = Array.isArray(recentExercises) ? recentExercises.slice(0, 60).map(String) : [];
+
+  const userText = `Ziel: ${goal}\nSchwerpunkt: ${focus}\nTrainingsstand: ${status}\nTrainingsort: ${location}\nHaeufigkeit pro Woche: ${freq}\nTrainingseinheiten je Muskelgruppe (letzte 14 Tage): ${JSON.stringify(load)}\nZuletzt trainierte Uebungen (letzte 14 Tage): ${recent.length ? recent.join(', ') : '(keine)'}\n\nErstelle den Trainingsplan gemaess Systemanweisung und gib das JSON zurueck.`;
+
+  try {
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 2048,
+        temperature: 0.4,
+        system: TRAINING_PLAN_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }]
+      })
+    });
+
+    if (!anthropicRes.ok) {
+      const errBody = await anthropicRes.text().catch(() => '');
+      console.error('Anthropic API Fehler (training-plan)', anthropicRes.status, errBody);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'AI-Anfrage fehlgeschlagen' }));
+      return;
+    }
+
+    const data = await anthropicRes.json();
+    const text = (data.content || []).map(b => b.text || '').join('');
+    let parsed;
+    try { parsed = extractJson(text); } catch (e) {
+      console.error('Konnte KI-Plan-Antwort nicht als JSON parsen', text);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'KI-Antwort ungueltig' }));
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.days) || !parsed.days.length) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'KI-Antwort ungueltig' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, days: parsed.days, summaryNote: parsed.summaryNote || '' }));
+  } catch (e) {
+    console.error('ai-photo-service Fehler (training-plan)', e);
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'unerwarteter Fehler' }));
+  }
+}
 
 server.listen(PORT, () => console.log('AI-Photo-Dienst laeuft auf Port ' + PORT));

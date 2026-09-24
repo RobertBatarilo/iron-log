@@ -1911,14 +1911,14 @@ const PLAN_DAY_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
 const PLAN_LEVEL_RANK = {beginner:0, intermediate:1, advanced:2};
 const PLAN_STATUS_TO_LEVEL = {anfaenger:'beginner', fortgeschritten:'intermediate', profi:'advanced'};
 
+const PLAN_FREQUENCY_DAY_PATTERNS = {
+  1:['wed'], 2:['mon','thu'], 3:['mon','wed','fri'], 4:['mon','tue','thu','fri'],
+  5:['mon','tue','wed','thu','fri'], 6:['mon','tue','wed','thu','fri','sat'],
+  7:['mon','tue','wed','thu','fri','sat','sun']
+};
 function generateTrainingPlan(status, location, frequency){
   frequency = Math.min(7, Math.max(1, parseInt(frequency)||3));
-  const patterns = {
-    1:['wed'], 2:['mon','thu'], 3:['mon','wed','fri'], 4:['mon','tue','thu','fri'],
-    5:['mon','tue','wed','thu','fri'], 6:['mon','tue','wed','thu','fri','sat'],
-    7:['mon','tue','wed','thu','fri','sat','sun']
-  };
-  const selectedDays = patterns[frequency];
+  const selectedDays = PLAN_FREQUENCY_DAY_PATTERNS[frequency];
   const allowedEquipment = LOCATION_EQUIPMENT[location] || [];
   const targetLevel = PLAN_STATUS_TO_LEVEL[status] || 'beginner';
   const fitsEquipment = (eq)=> (eq||[]).every(tag=>allowedEquipment.includes(tag));
@@ -2161,6 +2161,8 @@ function renderExerciseModalRoot(){
 function planEntryLabel(planDay){
   if(!planDay) return null;
   if(planDay.type==='wod') return (CROSSFIT_WODS.find(w=>w.id===planDay.refId)||{}).name;
+  if(planDay.type==='ai-wod') return planDay.wod?.name || 'KI-WOD';
+  if(planDay.type==='ai-strength') return planDay.prog?.name || 'KI-Kraft';
   return (STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId)||{}).name;
 }
 
@@ -3015,8 +3017,8 @@ function renderDraftsCard(){
 function startPlannedWorkout(){
   const planDay = state.trainingPlan.days[todaysPlanKey()];
   if(!planDay){ setTab('workout'); return; }
-  if(planDay.type==='wod'){
-    const wod = CROSSFIT_WODS.find(w=>w.id===planDay.refId);
+  if(planDay.type==='wod' || planDay.type==='ai-wod'){
+    const wod = planDay.type==='ai-wod' ? planDay.wod : CROSSFIT_WODS.find(w=>w.id===planDay.refId);
     if(wod){
       state.tmp.wodName = wod.name;
       if(wod.format==='amrap'){
@@ -3028,7 +3030,8 @@ function startPlannedWorkout(){
       }
     }
   } else {
-    const template = buildTemplateFromProgression(STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId));
+    const prog = planDay.type==='ai-strength' ? planDay.prog : STRENGTH_PROGRESSIONS.find(p=>p.id===planDay.refId);
+    const template = buildTemplateFromProgression(prog);
     if(template){
       state.tmp.wodFormat = 'strength';
       state.tmp.wodTemplate = template;
@@ -11765,7 +11768,8 @@ function renderTrainingPlanCard(){
 
   return `
     <div class="card">
-      <h2>Trainingsplan (CrossFit)</h2>
+      <h2>Trainingsplan ohne KI</h2>
+      <div class="note" style="margin-bottom:10px;">Wählt automatisch aus einer festen Bibliothek an Benchmark-WODs und Kraft-Progressionen — ohne KI, für alle kostenlos.</div>
       ${summary}
       <div class="field"><label>Trainingsstatus</label>
         <select id="planStatus" onchange="updatePlanForm('status',this.value)">
@@ -11805,6 +11809,151 @@ async function createTrainingPlan(){
   showToast('Trainingsplan erstellt 📋');
   render();
 }
+function renderTrainingPlanScreen(){
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${renderAiPlanWizardCard()}
+    ${renderTrainingPlanCard()}
+  `;
+}
+function recentExerciseNamesForAiPlan(days){
+  const cutoff = (()=>{ const d=new Date(todayStr()+'T00:00:00'); d.setDate(d.getDate()-days); return localDateStr(d); })();
+  const names = new Set();
+  state.workouts.filter(w=>w.date>=cutoff).forEach(w=>{
+    (w.movements||[]).forEach(m=>{
+      const ex = state.exercises.find(e=>e.id===m.exerciseId);
+      if(ex) names.add(ex.name);
+    });
+  });
+  return [...names];
+}
+function renderAiPlanWizardCard(){
+  const hasPro = !!state.profile?.hasPro;
+  const form = state.tmp.aiPlanForm || (state.trainingPlan
+    ? {status:state.trainingPlan.status, location:state.trainingPlan.location, frequency:state.trainingPlan.frequency, goal: state.trainingPlan.goal||'ausgewogen', focus: state.trainingPlan.focus||'fortsetzen'}
+    : {status:'anfaenger', location:'box', frequency:3, goal:'ausgewogen', focus:'fortsetzen'});
+  if(!hasPro){
+    return `
+      <div class="card">
+        <h2>✨ KI-Trainingsplan <span class="chip" style="margin-left:6px;">Pro</span></h2>
+        <div class="note">Lässt einen Trainingsplan von der KI erstellen, der deine Ziele und dein bisheriges Training berücksichtigt (z.B. vernachlässigte Muskelgruppen gezielt einbaut oder auf den letzten 14 Tagen aufbaut).</div>
+      </div>
+    `;
+  }
+  const err = state.tmp.aiPlanError;
+  const loading = !!state.tmp.aiPlanLoading;
+  return `
+    <div class="card">
+      <h2>✨ KI-Trainingsplan <span class="chip" style="margin-left:6px;">Pro</span></h2>
+      <div class="note" style="margin-bottom:10px;">Die KI erstellt dir einen individuellen Plan auf Basis deines Ziels, deines Trainingsstands und deiner bisherigen Trainings.</div>
+      <div class="field"><label>Ziel</label>
+        <select onchange="updateAiPlanForm('goal',this.value)">
+          <option value="staerker" ${form.goal==='staerker'?'selected':''}>Stärker werden</option>
+          <option value="schneller" ${form.goal==='schneller'?'selected':''}>Schneller / konditionsstärker werden</option>
+          <option value="ausdauer" ${form.goal==='ausdauer'?'selected':''}>Ausdauer aufbauen</option>
+          <option value="ausgewogen" ${form.goal==='ausgewogen'?'selected':''}>Ausgewogen, etwas von allem</option>
+        </select>
+      </div>
+      <div class="field"><label>Schwerpunkt</label>
+        <select onchange="updateAiPlanForm('focus',this.value)">
+          <option value="luecken" ${form.focus==='luecken'?'selected':''}>Vernachlässigte Muskelgruppen mit einbauen</option>
+          <option value="fortsetzen" ${form.focus==='fortsetzen'?'selected':''}>Auf den letzten 14 Tagen aufbauen</option>
+        </select>
+      </div>
+      <div class="field"><label>Trainingsstatus</label>
+        <select onchange="updateAiPlanForm('status',this.value)">
+          <option value="anfaenger" ${form.status==='anfaenger'?'selected':''}>Anfänger</option>
+          <option value="fortgeschritten" ${form.status==='fortgeschritten'?'selected':''}>Fortgeschritten</option>
+          <option value="profi" ${form.status==='profi'?'selected':''}>Profi</option>
+        </select>
+      </div>
+      <div class="field"><label>Trainingsort</label>
+        <select onchange="updateAiPlanForm('location',this.value)">
+          <option value="box" ${form.location==='box'?'selected':''}>Box / Fitnessstudio</option>
+          <option value="zuhause-geraete" ${form.location==='zuhause-geraete'?'selected':''}>Zuhause mit Geräten</option>
+          <option value="zuhause-ohne" ${form.location==='zuhause-ohne'?'selected':''}>Zuhause ohne Geräte</option>
+        </select>
+      </div>
+      <div class="field"><label>Häufigkeit (pro Woche)</label>
+        <select onchange="updateAiPlanForm('frequency',this.value)">
+          ${[1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${parseInt(form.frequency)===n?'selected':''}>${n}×</option>`).join('')}
+        </select>
+      </div>
+      ${err ? `<div class="note" style="color:var(--danger-red,#e05353);margin-bottom:10px;">${escapeHtml(err)}</div>` : ''}
+      <button class="btn btn-primary" ${loading?'disabled':''} onclick="generateAiTrainingPlan()">${loading?'Wird erstellt …':'KI-Plan generieren'}</button>
+      ${state.trainingPlan?.aiGenerated && state.trainingPlan.aiNote ? `<div class="note" style="margin-top:10px;">💬 ${escapeHtml(state.trainingPlan.aiNote)}</div>` : ''}
+    </div>
+  `;
+}
+function updateAiPlanForm(field, val){
+  if(!state.tmp.aiPlanForm){
+    const plan = state.trainingPlan;
+    state.tmp.aiPlanForm = plan
+      ? {status:plan.status, location:plan.location, frequency:plan.frequency, goal: plan.goal||'ausgewogen', focus: plan.focus||'fortsetzen'}
+      : {status:'anfaenger', location:'box', frequency:3, goal:'ausgewogen', focus:'fortsetzen'};
+  }
+  state.tmp.aiPlanForm[field] = val;
+}
+function normalizeAiWodDay(wod){
+  return {
+    name: String(wod?.name || 'KI-WOD').slice(0,80),
+    format: wod?.format==='amrap' ? 'amrap' : 'for-time',
+    movements: Array.isArray(wod?.movements) ? wod.movements.filter(m=>m && m.name).map(m=>({name:String(m.name).slice(0,60), reps: m.reps!=null ? parseInt(m.reps)||undefined : undefined})) : [],
+    rounds: parseInt(wod?.rounds)||1,
+    repScheme: String(wod?.repScheme||''),
+    durationSec: parseInt(wod?.durationSec)||1200
+  };
+}
+function normalizeAiStrengthDay(prog){
+  return {
+    name: String(prog?.name || 'KI-Kraft').slice(0,80),
+    exerciseName: String(prog?.exerciseName || '').slice(0,60),
+    setsCount: parseInt(prog?.setsCount)||5,
+    pctList: String(prog?.pctList||'')
+  };
+}
+async function generateAiTrainingPlan(){
+  const form = state.tmp.aiPlanForm || {status:'anfaenger', location:'box', frequency:3, goal:'ausgewogen', focus:'fortsetzen'};
+  state.tmp.aiPlanLoading = true;
+  state.tmp.aiPlanError = '';
+  render();
+  try{
+    const frequency = Math.min(7, Math.max(1, parseInt(form.frequency)||3));
+    const body = {
+      goal: form.goal, focus: form.focus, status: form.status, location: form.location, frequency,
+      muscleGroupLoad: computeMuscleGroupLoad(14),
+      recentExercises: recentExerciseNamesForAiPlan(14)
+    };
+    const result = await pb.send('/ai-training-plan', { method:'POST', body });
+    if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Plan konnte nicht erstellt werden');
+    const aiDays = Array.isArray(result.days) ? result.days : [];
+    const selectedDays = PLAN_FREQUENCY_DAY_PATTERNS[frequency];
+    const days = {};
+    selectedDays.forEach((dayKey, i)=>{
+      const entry = aiDays[i];
+      if(!entry) return;
+      if(entry.kind==='strength' && entry.prog){
+        days[dayKey] = {type:'ai-strength', prog: normalizeAiStrengthDay(entry.prog)};
+      } else if(entry.wod){
+        days[dayKey] = {type:'ai-wod', wod: normalizeAiWodDay(entry.wod)};
+      }
+    });
+    state.trainingPlan = {
+      status: form.status, location: form.location, frequency, days,
+      aiGenerated: true, goal: form.goal, focus: form.focus,
+      aiNote: String(result.summaryNote||'').slice(0,300)
+    };
+    state.tmp.aiPlanForm = null;
+    state.tmp.aiPlanLoading = false;
+    await saveKey('trainingPlan', state.trainingPlan);
+    showToast('KI-Trainingsplan erstellt ✨');
+    render();
+  } catch(err){
+    state.tmp.aiPlanLoading = false;
+    state.tmp.aiPlanError = (err && err.message) ? err.message : 'KI-Plan konnte nicht erstellt werden';
+    render();
+  }
+}
 function renderProfile(){
   const section = state.tmp.profileSection;
   if(section==='account') return renderProfileAccount();
@@ -11813,6 +11962,7 @@ function renderProfile(){
   if(section==='appsettings') return renderProfileAppSettings();
   if(section==='data') return renderProfileData();
   if(section==='exercises') return renderMyExercisesScreen();
+  if(section==='trainingplan') return renderTrainingPlanScreen();
   return renderProfileMenu();
 }
 function renderMyExercisesScreen(){
@@ -11915,6 +12065,10 @@ function renderProfileMenu(){
     <div class="card">
       <h2 class="small">Meine Übungen</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('exercises')">📋 Verwalten →</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Trainingsplan</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('trainingplan')">📅 Verwalten →</button>
     </div>
   `;
 }
