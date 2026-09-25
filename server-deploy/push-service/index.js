@@ -47,7 +47,7 @@ const server = http.createServer(async (req, res) => {
   try {
     await webpush.sendNotification(
       subscription,
-      JSON.stringify({ title: title || 'WOD Ledger', body: body || '', url: url || './index.html' })
+      JSON.stringify({ title: title || 'Thruster Crew', body: body || '', url: url || './index.html' })
     );
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));

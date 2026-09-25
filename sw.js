@@ -1,9 +1,9 @@
 self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; }
-  catch (e) { data = { title: 'WOD Ledger', body: event.data ? event.data.text() : '' }; }
+  catch (e) { data = { title: 'Thruster Crew', body: event.data ? event.data.text() : '' }; }
 
-  const title = data.title || 'WOD Ledger';
+  const title = data.title || 'Thruster Crew';
   const options = {
     body: data.body || '',
     icon: 'icon-192.png',

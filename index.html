@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>WOD Ledger — Trainingstracker</title>
+<title>Thruster Crew — Trainingstracker</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#1B1D21">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="WOD Ledger">
+<meta name="apple-mobile-web-app-title" content="Thruster Crew">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.25.1/dist/pocketbase.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js"></script>
@@ -25,8 +25,8 @@
     --iron-500:#565C68;
     --chalk-50:#F1EDE4;
     --chalk-200:#D8D2C2;
-    --plate-red:#C8443C;
-    --plate-red-dim:#8E2F2A;
+    --plate-red:#731D35;
+    --plate-red-dim:#521426;
     --chalk-yellow:#E8B93F;
     --success-green:#6B9E63;
     --accent-amrap:#E8B93F;
@@ -2531,8 +2531,8 @@ function renderAuthScreen(){
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div class="card" style="max-width:380px;width:100%;">
         <div style="text-align:center;margin-bottom:18px;">
-          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
-          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+          <img src="icon-192.png" alt="Thruster Crew" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">THRUSTER <span style="color:var(--plate-red);">CREW</span></h1>
         </div>
         <h2>${isRegister?'Konto erstellen':'Anmelden'}</h2>
         ${pendingJoinCode ? `<div class="note" style="margin-bottom:10px;">Du hast einen Einladungslink geöffnet — nach der Anmeldung wird deine Beitrittsanfrage automatisch gesendet.</div>` : ''}
@@ -2555,8 +2555,8 @@ function renderForgotScreen(){
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div class="card" style="max-width:380px;width:100%;">
         <div style="text-align:center;margin-bottom:18px;">
-          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
-          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+          <img src="icon-192.png" alt="Thruster Crew" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">THRUSTER <span style="color:var(--plate-red);">CREW</span></h1>
         </div>
         <h2>Passwort vergessen</h2>
         <div class="note" style="margin-bottom:10px;">Gib deine E-Mail-Adresse ein, wir schicken dir einen Link zum Zurücksetzen.</div>
@@ -2575,8 +2575,8 @@ function renderResetScreen(){
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div class="card" style="max-width:380px;width:100%;">
         <div style="text-align:center;margin-bottom:18px;">
-          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
-          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+          <img src="icon-192.png" alt="Thruster Crew" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">THRUSTER <span style="color:var(--plate-red);">CREW</span></h1>
         </div>
         <h2>Neues Passwort festlegen</h2>
         ${a.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(a.error)}</div>` : ''}
@@ -2593,8 +2593,8 @@ function renderVerifyingScreen(){
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div class="card" style="max-width:380px;width:100%;text-align:center;">
         <div style="margin-bottom:18px;">
-          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
-          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+          <img src="icon-192.png" alt="Thruster Crew" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">THRUSTER <span style="color:var(--plate-red);">CREW</span></h1>
         </div>
         <div class="note">Bestätige E-Mail …</div>
       </div>
@@ -2607,8 +2607,8 @@ function renderVerifiedScreen(){
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div class="card" style="max-width:380px;width:100%;text-align:center;">
         <div style="margin-bottom:18px;">
-          <img src="icon-192.png" alt="WOD Ledger" style="width:56px;height:56px;border-radius:14px;">
-          <h1 style="margin:10px 0 0;">WOD <span style="color:var(--plate-red);">LEDGER</span></h1>
+          <img src="icon-192.png" alt="Thruster Crew" style="width:56px;height:56px;border-radius:14px;">
+          <h1 style="margin:10px 0 0;">THRUSTER <span style="color:var(--plate-red);">CREW</span></h1>
         </div>
         ${a.error
           ? `<div class="note" style="color:var(--plate-red);margin-bottom:14px;">${escapeHtml(a.error)}</div>`
@@ -2764,9 +2764,9 @@ function appShell(){
   return `
     <header class="top">
       <div class="brand">
-        <img src="icon-192.png" alt="WOD Ledger" class="brand-logo">
+        <img src="icon-192.png" alt="Thruster Crew" class="brand-logo">
         <div>
-          <h1>WOD <span>LEDGER</span></h1>
+          <h1>THRUSTER <span>CREW</span></h1>
           <p>Dein CrossFit-Trainingstracker</p>
         </div>
       </div>
@@ -6403,7 +6403,7 @@ function renderBoxMembersScreen(box){
     return !search || name.toLowerCase().includes(search);
   }) : null;
   const inviteLink = location.origin+location.pathname+'?join='+(box?.inviteCode||'');
-  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in WOD Ledger bei: '+inviteLink;
+  const inviteMsg = 'Tritt "'+(box?.name||'')+'" in Thruster Crew bei: '+inviteLink;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
     ${toggleHtml}
@@ -11645,7 +11645,7 @@ function mountNutritionChart(){
   if(charts.kcal) charts.kcal.destroy();
   charts.kcal = new Chart(canvas, {
     type:'bar',
-    data:{ labels: days.map(d=>fmtDate(d)), datasets:[{ data: totals, backgroundColor:'#C8443C', borderRadius:4 }]},
+    data:{ labels: days.map(d=>fmtDate(d)), datasets:[{ data: totals, backgroundColor:'#731D35', borderRadius:4 }]},
     options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:chartTickColor(),font:{size:9}},grid:{display:false}}, y:{ticks:{color:chartTickColor()},grid:{color:chartGridColor()}}}}
   });
 }
@@ -11681,7 +11681,7 @@ const BODY_METRICS = [
   {key:'chest', label:'Brust', unit:'cm', color:'#5B8DEF', goodDirection:'up'},
   {key:'weight', label:'Gewicht', unit:'kg', color:'#E8B93F', goodDirection:null},
   {key:'hip', label:'Hüfte', unit:'cm', color:'#6B9E63', goodDirection:'down'},
-  {key:'waist', label:'Taille', unit:'cm', color:'#C8443C', goodDirection:'down'}
+  {key:'waist', label:'Taille', unit:'cm', color:'#731D35', goodDirection:'down'}
 ];
 function previousMeasurementValue(m, key){
   const sorted = state.measurements.slice().sort((a,b)=>a.date.localeCompare(b.date));
@@ -11893,7 +11893,7 @@ function mountProgressCharts(){
     if(charts.e1rm) charts.e1rm.destroy();
     charts.e1rm = new Chart(eCanvas, {
       type:'line',
-      data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>Math.round(sessionE1RM(p))), borderColor:'#C8443C', backgroundColor:'rgba(200,68,60,0.15)', fill:true, tension:0.3 }]},
+      data:{ labels: pts.map(p=>fmtDate(p.date)), datasets:[{ data: pts.map(p=>Math.round(sessionE1RM(p))), borderColor:'#731D35', backgroundColor:'rgba(115,29,53,0.15)', fill:true, tension:0.3 }]},
       options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:chartTickColor(),font:{size:9}},grid:{display:false}}, y:{ticks:{color:chartTickColor()},grid:{color:chartGridColor()}}}}
     });
   }
