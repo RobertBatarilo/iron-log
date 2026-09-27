@@ -9,5 +9,5 @@ module.exports = {
   stripeSecretKey: "sk_test_...", // Stripe Testmodus-Secret-Key der Plattform
   // Muss exakt STRIPE_WEBHOOK_INTERNAL_SECRET im .env des stripe-webhook-service entsprechen
   stripeWebhookInternalSecret: "HIER_DAS_GLEICHE_SECRET_WIE_STRIPE_WEBHOOK_INTERNAL_SECRET_IM_STRIPE_WEBHOOK_SERVICE",
-  appBaseUrl: "https://robertbatarilo.github.io/iron-log/index.html" // fuer Stripe success_url/cancel_url/return_url
+  appBaseUrl: "https://thrustercrew.app/index.html" // fuer Stripe success_url/cancel_url/return_url
 };
