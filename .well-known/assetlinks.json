@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.thrustercrew.twa",
+    "sha256_cert_fingerprints": [
+      "54:87:AF:84:14:54:CA:4C:83:5B:E2:B5:27:38:73:15:D0:80:AE:34:65:50:DD:2D:32:6D:59:C5:EE:0B:83:BC"
+    ]
+  }
+}]

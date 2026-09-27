@@ -6,3 +6,8 @@
 # Ältere, überholte Entwicklungsstände
 iron-log.html
 iron-log_1.html
+
+# Android-TWA-Projekt fuer den Play Store: enthaelt den Signierschluessel
+# (Keystore + Passwoerter) - darf NIEMALS in dieses OEFFENTLICHE Repo,
+# lebt komplett lokal.
+android-twa/
