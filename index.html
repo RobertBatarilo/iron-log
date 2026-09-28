@@ -2809,7 +2809,7 @@ function render(){
   if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
-  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal() + renderEditWorkoutModalRoot();
+  document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal() + renderEditWorkoutModalRoot() + renderAiReviewModal();
 
   if(focusInfo){
     const el = document.getElementById(focusInfo.id);
@@ -8654,6 +8654,32 @@ function renderAiWorkoutReviewBlock(w){
   `;
   return `<button type="button" class="btn-sm btn-ghost" style="margin-top:8px;" onclick="event.stopPropagation(); runAiWorkoutReview('${w.id}')">✨ KI-Auswertung <span class="chip" style="margin-left:4px;">Pro</span></button>`;
 }
+function triggerPostSaveAiReview(workoutId){
+  if(!state.profile?.hasPro) return;
+  state.tmp.aiReviewModal = { workoutId };
+  runAiWorkoutReview(workoutId);
+}
+function closeAiReviewModal(){
+  state.tmp.aiReviewModal = null;
+  render();
+}
+function renderAiReviewModal(){
+  const m = state.tmp.aiReviewModal;
+  if(!m) return '';
+  const cached = state.tmp.aiReviewCache?.[m.workoutId];
+  const loading = state.tmp.aiReviewLoadingId === m.workoutId;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this) closeAiReviewModal()">
+      <div class="modal-box" style="text-align:center;">
+        <h2>✨ KI-Auswertung</h2>
+        ${loading ? `<div class="note">KI analysiert …</div>` : ''}
+        ${cached?.text ? `<div class="note" style="margin:10px 0;">${escapeHtml(cached.text)}</div>` : ''}
+        ${cached?.error ? `<div class="note" style="color:var(--plate-red);">${escapeHtml(cached.error)}</div>` : ''}
+        <button class="btn btn-primary" onclick="closeAiReviewModal()">Weiter</button>
+      </div>
+    </div>
+  `;
+}
 function toggleWorkoutExpanded(id){
   state.tmp.expandedWorkoutId = state.tmp.expandedWorkoutId===id ? null : id;
   render();
@@ -9406,6 +9432,7 @@ function renderForTimeFlow(historyHtml){
   ensureForTimeBuilder();
   const b = state.tmp.forTimeBuilder;
   if(b.phase==='summary') return renderForTimeSummary(b);
+  if(b.phase==='capConfirm') return renderForTimeCapConfirm(b);
   if(b.phase==='running') return renderForTimeRunning(b);
 
   const uniqueNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
@@ -9576,13 +9603,33 @@ function tickForTime(){
   if(b.timeCapMs>0 && elapsed>=b.timeCapMs){
     b.elapsedMs = b.timeCapMs;
     b.running = false;
-    b.capped = true;
     stopTicking();
     beep();
-    finishForTime();
+    b.phase = 'capConfirm';
+    render();
     return;
   }
   if(display) display.textContent = fmtClock(elapsed,false);
+}
+function confirmForTimeCapDone(finished){
+  const b = state.tmp.forTimeBuilder;
+  b.capped = !finished;
+  if(finished){
+    (b.roundsLog||[]).forEach(round => round.forEach(item => { item.done = true; item.reps = item.target; }));
+  }
+  finishForTime();
+}
+function renderForTimeCapConfirm(b){
+  return `
+    <div class="card" style="text-align:center;">
+      <h2>⏰ Zeit ist um!</h2>
+      <div class="note" style="margin-bottom:14px;">Hast du das Workout trotzdem komplett geschafft?</div>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="confirmForTimeCapDone(false)">Nein, nicht ganz</button>
+        <button class="btn btn-primary" onclick="confirmForTimeCapDone(true)">✅ Ja, geschafft</button>
+      </div>
+    </div>
+  `;
 }
 function finishForTime(){
   const b = state.tmp.forTimeBuilder;
@@ -9758,6 +9805,7 @@ async function saveForTimeWorkout(){
   state.tmp.forTimeBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast(generateWorkoutAutoSummary(workout) || (isNewBestTime ? `🏆 Neue Bestzeit bei "${name}"!` : 'Workout gespeichert 🏋️'));
+  triggerPostSaveAiReview(workout.id);
   render();
 }
 
@@ -9812,6 +9860,7 @@ async function saveGpsRun(){
   state.tmp.gps = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null;
   showToast('Lauf gespeichert 🏃');
+  triggerPostSaveAiReview(workout.id);
   render();
 }
 
@@ -10187,6 +10236,7 @@ async function saveAmrapWorkout(){
   state.tmp.amrapBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast(generateWorkoutAutoSummary(workout) || (isNewRoundsPR ? `🏆 Neue Bestleistung bei "${name}"!` : 'Workout gespeichert 🏋️'));
+  triggerPostSaveAiReview(workout.id);
   render();
 }
 
@@ -10445,6 +10495,7 @@ async function saveForLoadWorkout(){
   state.tmp.forLoadBuilder = null;
   state.tmp.wodDate = null; state.tmp.wodName = null; state.tmp.wodNote = null; state.tmp.loadedDraftId = null;
   showToast(generateWorkoutAutoSummary(workout) || 'Workout gespeichert 🏋️');
+  triggerPostSaveAiReview(workout.id);
   render();
 }
 
@@ -10732,7 +10783,8 @@ async function saveWod(liveFlat){
         return { exerciseId: mv.exerciseId, reps: mv.sets[si].reps, weight: mv.sets[si].weight };
       }).filter(e=>e.reps!=='' && e.reps!=null)).filter(round=>round.length>0)
     : null;
-  state.workouts.push({id:uid(), date, name, note, format: state.tmp.wodFormat, movements, roundsLog});
+  const workout = {id:uid(), date, name, note, format: state.tmp.wodFormat, movements, roundsLog};
+  state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
   if(state.tmp.loadedDraftId){
     state.drafts = state.drafts.filter(d=>d.id!==state.tmp.loadedDraftId);
@@ -10748,6 +10800,7 @@ async function saveWod(liveFlat){
   state.tmp.wodNote = null;
   state.tmp.loadedDraftId = null;
   showToast('Workout gespeichert 🏋️');
+  triggerPostSaveAiReview(workout.id);
   render();
 }
 

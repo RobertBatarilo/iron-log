@@ -66,7 +66,7 @@ Antworte NUR mit reinem Fliesstext auf Deutsch (kein JSON, kein Markdown, keine 
 
 1. Kurze Einschaetzung der Leistung, ggf. im Vergleich zu frueheren Versuchen (Trend, Pacing, Konsistenz).
 2. Ein konkreter, umsetzbarer Tipp, abhaengig vom Ergebnis:
-   - Nicht vollstaendig geschafft (Cap erreicht, erkennbar am Text): schlage konkret vor, naechstes Mal WENIGER Gewicht oder eine NIEDRIGERE Skalierungsstufe zu waehlen.
+   - Nicht vollstaendig geschafft (Cap erreicht, erkennbar am Text): deine EINZIGE Empfehlung in diesem Fall ist, beim naechsten Versuch WENIGER GEWICHT oder eine NIEDRIGERE SKALIERUNGSSTUFE zu waehlen, damit das Workout im Zeitlimit schaffbar wird. Erwaehne KEINE Pacing-, Technik- oder Motivations-Tipps als Empfehlung in diesem Fall, auch wenn sie plausibel erscheinen - nur die Gewichts-/Skalierungs-Reduktion zaehlt.
    - Mit Skalierung "Rx" erfolgreich geschafft: gratuliere deutlich, UND gib trotzdem einen produktiven Tipp zur Weiterentwicklung (z.B. Pacing, naechstes Mal schneller, schwereres Folge-Ziel).
    - Mit Skalierung "Intermediate" erfolgreich geschafft: gratulieren + konkret motivieren, schrittweise Richtung "Rx" zu arbeiten.
    - Mit Skalierung "Scaled/Basic" erfolgreich geschafft: gratulieren + konkret motivieren, Richtung "Intermediate" als naechsten Schritt zu arbeiten.
