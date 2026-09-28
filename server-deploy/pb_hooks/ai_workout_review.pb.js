@@ -17,7 +17,7 @@ routerAdd("POST", "/ai-workout-review", (e) => {
   const hasPro = !!(user.getBool("isAppAdmin") || user.getBool("isPro"));
   if (!hasPro) return e.json(403, { ok: false, error: "Pro-Zugang erforderlich" });
 
-  const data = new DynamicModel({ workoutText: "", priorAttemptsText: "" });
+  const data = new DynamicModel({ workoutText: "", priorAttemptsText: "", tone: "" });
   e.bindBody(data);
   if (!data.workoutText || !data.workoutText.trim()) {
     return e.json(400, { ok: false, error: "workoutText fehlt" });
@@ -33,7 +33,7 @@ routerAdd("POST", "/ai-workout-review", (e) => {
         "Content-Type": "application/json",
         "X-Internal-Secret": cfg.aiPhotoInternalSecret
       },
-      body: JSON.stringify({ workoutText: data.workoutText, priorAttemptsText: data.priorAttemptsText })
+      body: JSON.stringify({ workoutText: data.workoutText, priorAttemptsText: data.priorAttemptsText, tone: data.tone })
     });
     const parsed = JSON.parse(res.raw || "{}");
     return e.json(res.statusCode || 502, parsed);

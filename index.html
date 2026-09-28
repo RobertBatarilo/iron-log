@@ -4476,7 +4476,7 @@ function applyParsedWorkout(input){
     state.tmp.wodFormat = 'strength';
     if(p.moves.length){
       state.tmp.wodTemplate = p.moves.map(mv=>({
-        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount: mv.setsCount||'', pctList: mv.pctList||'', weight: mv.weight||'', unit:'kcal', qty:'', repsTarget: mv.repsTarget||'', groupWithNext:false
+        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount: mv.setsCount||'', pctList: mv.pctList||'', weight: mv.weight||'', unit:'kcal', qty:'', repsTarget: mv.repsTarget||'', groupWithNext: !!mv.groupWithNext
       }));
     } else ensureWodTemplate();
   } else {
@@ -4497,6 +4497,12 @@ function applyParsedWorkout(input){
   if(nameInfo.name) state.tmp.wodName = nameInfo.name;
 
   const chosenScaleTier = state.tmp.photoImport?.scaleTier;
+  // Fuer die spaetere KI-Auswertung nach dem Workout: welche Skalierung tatsaechlich gewaehlt
+  // wurde, am Builder mitfuehren, damit sie beim Speichern aufs Workout-Objekt uebernommen wird.
+  if(chosenScaleTier){
+    if(state.tmp.wodFormat==='for-time' && state.tmp.forTimeBuilder) state.tmp.forTimeBuilder.scaleTier = chosenScaleTier;
+    else if(state.tmp.wodFormat==='amrap' && state.tmp.amrapBuilder) state.tmp.amrapBuilder.scaleTier = chosenScaleTier;
+  }
   const substitutionNotes = [];
   if(Object.keys(scalingInfo.tiers).length && state.profile && chosenScaleTier && activeMovements){
     const tier = scalingInfo.tiers[chosenScaleTier];
@@ -8554,12 +8560,26 @@ function generateWorkoutAutoSummary(w){
 }
 function buildWorkoutTextForAi(w){
   const lines = [`Name: ${w.name||'Workout'}`, `Datum: ${w.date}`, `Format: ${w.format||'strength'}`];
+  if(w.scaleTier){
+    lines.push(`Skalierung: ${({rx:'Rx', intermediate:'Intermediate', scaled:'Scaled/Basic'})[w.scaleTier] || w.scaleTier}`);
+  }
   if(w.format==='for-time'){
     const ft = w.forTime||{};
     lines.push(`Zeit: ${ft.elapsedSec!=null?fmtClock(ft.elapsedSec*1000,false):'—'}${ft.capped?' (Time Cap)':''}`);
     if((ft.rounds||1)>1) lines.push(`Runden: ${ft.rounds}`);
     if(ft.repScheme) lines.push(`Schema: ${ft.repScheme}`);
     (ft.movements||[]).forEach(m=>lines.push('- '+formatMovementLine(m)));
+    if(ft.capped){
+      lines.push(`Nicht vollständig geschafft (Cap erreicht): ${ft.roundsCompleted||0} volle Runden.`);
+      const lastRound = (ft.roundsLog||[])[ft.roundsLog.length-1];
+      if(lastRound){
+        const partial = lastRound.map(item=>{
+          const ex = state.exercises.find(e=>e.id===item.exerciseId);
+          return `${ex?ex.name:'—'} ${item.done?'fertig':(item.reps||'0')+'/'+item.target}`;
+        }).join(', ');
+        lines.push(`Letzte begonnene Runde: ${partial}`);
+      }
+    }
   } else if(w.format==='amrap'){
     const am = w.amrap||{};
     lines.push(`Ergebnis: ${am.roundsCompleted||0} Runden${am.extraReps?' + '+am.extraReps+' Wdh.':''}`);
@@ -8612,7 +8632,7 @@ async function runAiWorkoutReview(workoutId){
   render();
   state.tmp.aiReviewCache = state.tmp.aiReviewCache || {};
   try{
-    const body = { workoutText: buildWorkoutTextForAi(w), priorAttemptsText: priorAttemptsTextForAi(w) };
+    const body = { workoutText: buildWorkoutTextForAi(w), priorAttemptsText: priorAttemptsTextForAi(w), tone: state.profile?.aiTone || 'motivierend' };
     const result = await pb.send('/ai-workout-review', { method:'POST', body });
     if(!result || !result.ok) throw new Error((result && result.error) || 'KI-Auswertung fehlgeschlagen');
     state.tmp.aiReviewCache[workoutId] = { text: result.text };
@@ -8969,7 +8989,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
     const setsField = isEmom
       ? ''
       : `<div class="field" style="margin-bottom:0;"><label>Sets</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="z.B. 5"></div>`;
-    const groupToggle = (isEmom && mi < state.tmp.wodTemplate.length-1) ? `
+    const groupToggle = ((isEmom || state.tmp.wodFormat==='strength') && mi < state.tmp.wodTemplate.length-1) ? `
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;color:var(--chalk-60);">
         <input type="checkbox" ${t.groupWithNext?'checked':''} onchange="updateTemplateField(${mi},'groupWithNext',this.checked)">
         Mit nächster Übung zu einem Komplex kombinieren
@@ -9717,7 +9737,7 @@ async function saveForTimeWorkout(){
   }).filter(m=>m.exerciseId);
   const prMovements = buildPrMovementsFromFlat(movements);
   const workout = {
-    id: uid(), date, name, note, format:'for-time', movements: prMovements,
+    id: uid(), date, name, note, format:'for-time', movements: prMovements, scaleTier: b.scaleTier || null,
     forTime: { movements, rounds: parseInt(b.rounds)||1, repScheme: b.repScheme||'', timeCapSec: b.timeCapMs ? Math.round(b.timeCapMs/1000) : null, elapsedSec: b.finalElapsedSec, capped: !!b.capped, roundsCompleted: b.roundsCompleted||0, roundsLog: b.roundsLog||[] }
   };
   const isNewBestTime = !!(name && b.finalElapsedSec!=null && !b.capped && (()=>{
@@ -10149,7 +10169,7 @@ async function saveAmrapWorkout(){
     extraReps = parseInt(b.extraReps)||0;
   }
   const workout = {
-    id: uid(), date, name, note, format:'amrap', movements: prMovements,
+    id: uid(), date, name, note, format:'amrap', movements: prMovements, scaleTier: b.scaleTier || null,
     amrap: { movements, durationSec, roundsCompleted, extraReps, ...multiSetFields }
   };
   const isNewRoundsPR = !!(name && (()=>{
@@ -10572,6 +10592,21 @@ function generateWodRows(){
     }
   }
 
+  // Bei einem Complex (mehrere Bewegungen per groupWithNext verbunden, z.B. Power Clean +
+  // Front Squat + Split Jerk) teilen sich alle Bewegungen EIN Arbeitsgewicht - das muss sich
+  // nach der schwaechsten Bewegung (niedrigstes hochgerechnetes 1RM) richten, nicht nach jeder
+  // Bewegung einzeln.
+  const groupMinE1RM = {};
+  tmpl.forEach((t, ti) => {
+    const gid = groupIdArr[ti];
+    if (!gid) return;
+    const ex = state.exercises.find(e => e.id === t.exerciseId);
+    if (getExerciseType(ex) !== 'weighted') return;
+    const e1rm = bestE1RM(t.exerciseId);
+    if (e1rm == null) return;
+    if (groupMinE1RM[gid] == null || e1rm < groupMinE1RM[gid]) groupMinE1RM[gid] = e1rm;
+  });
+
   state.tmp.wodMoves = tmpl.map((t,ti)=>{
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const type = getExerciseType(ex);
@@ -10580,7 +10615,8 @@ function generateWodRows(){
     const pctArr = parsePctList(t.pctList);
     const repsArr = parseRepScheme(t.repsTarget);
     const setsCount = effectiveSetsCount[ti];
-    const known1rm = bestE1RM(t.exerciseId);
+    const gid = groupIdArr[ti];
+    const known1rm = (gid && groupMinE1RM[gid] != null) ? groupMinE1RM[gid] : bestE1RM(t.exerciseId);
     const sets = [];
     for(let si=0; si<setsCount; si++){
       if(isCardio){
@@ -12461,6 +12497,18 @@ function renderProfileAppSettings(){
     </div>
     `}
     <div class="card">
+      <h2 class="small">KI-Tonfall</h2>
+      <div class="note" style="margin-bottom:10px;">Wie soll dich die KI-Auswertung nach dem Workout ansprechen?</div>
+      <div class="field">
+        <select id="pAiTone">
+          <option value="motivierend" ${(!p.aiTone||p.aiTone==='motivierend')?'selected':''}>Positiv motivierend</option>
+          <option value="humorvoll" ${p.aiTone==='humorvoll'?'selected':''}>Lustig motivierend</option>
+          <option value="streng" ${p.aiTone==='streng'?'selected':''}>Streng</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="saveProfile()">Speichern</button>
+    </div>
+    <div class="card">
       <h2 class="small">Mehr</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('notifications')">🔔 Benachrichtigungen →</button>
       <button class="btn btn-ghost" style="justify-content:space-between;${adminView ? '' : 'margin-bottom:10px;'}" onclick="setProfileSection('data')">🗑️ Daten-Verwaltung →</button>
@@ -12506,11 +12554,13 @@ async function saveProfile(){
   const birthDateEl = document.getElementById('pBirthDate');
   const weightUnitEl = document.getElementById('pWeightUnit');
   const distanceUnitEl = document.getElementById('pDistanceUnit');
+  const aiToneEl = document.getElementById('pAiTone');
   state.profile = {
     ...state.profile,
     birthDate: birthDateEl ? (birthDateEl.value || null) : state.profile?.birthDate,
     weightUnit: weightUnitEl ? weightUnitEl.value : state.profile?.weightUnit,
-    distanceUnit: distanceUnitEl ? distanceUnitEl.value : state.profile?.distanceUnit
+    distanceUnit: distanceUnitEl ? distanceUnitEl.value : state.profile?.distanceUnit,
+    aiTone: aiToneEl ? aiToneEl.value : state.profile?.aiTone
   };
   await saveKey('profile', state.profile);
   showToast('Profil gespeichert');

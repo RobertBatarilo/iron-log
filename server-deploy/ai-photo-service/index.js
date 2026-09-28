@@ -23,7 +23,7 @@ EMOM:
 {"format":"emom","name":"<Name oder null>","movements":[{"name":"<Uebungsname>","reps":"<Zahl als String>","unit":"<'m'|'km'|'cal'|null>","weight":"<kg als String oder leer, nur falls im Bild ein Gewicht zu dieser Bewegung steht>"}],"intervalMin":"<Zahl als String>","intervalSec":"<Zahl als String>","rounds":"<Anzahl Minuten/Intervalle als String>"}
 
 Strength (Sets x Reps, ggf. mit Gewicht/Prozent):
-{"format":"strength","name":"<Name oder null>","moves":[{"name":"<Uebungsname>","setsCount":"<Zahl als String>","repsTarget":"<Reps als String, z.B. '5' bei gleicher Wiederholungszahl in jedem Satz, ODER kommagetrennt z.B. '7,5,3,5,3' wenn jeder Satz eine ANDERE Wiederholungszahl hat - IMMER in derselben Reihenfolge und mit derselben Anzahl an Werten wie pctList>","pctList":"<z.B. '70' oder '70,75,80,75,80' oder leer>","weight":"<kg als String oder leer>"}]}
+{"format":"strength","name":"<Name oder null>","moves":[{"name":"<Uebungsname>","setsCount":"<Zahl als String>","repsTarget":"<Reps als String, z.B. '5' bei gleicher Wiederholungszahl in jedem Satz, ODER kommagetrennt z.B. '7,5,3,5,3' wenn jeder Satz eine ANDERE Wiederholungszahl hat - IMMER in derselben Reihenfolge und mit derselben Anzahl an Werten wie pctList>","pctList":"<z.B. '70' oder '70,75,80,75,80' oder leer>","weight":"<kg als String oder leer>","groupWithNext":"<'true', NUR falls diese Bewegung Teil eines Complexes ist und sich mit der naechsten Bewegung ein gemeinsames Arbeitsgewicht teilt, sonst weglassen>"}]}
 
 For Load (1RM-Testtag, z.B. "Find your 1RM Back Squat"):
 {"format":"for-load","name":"<Uebungsname>","timeCapMin":"<Zahl oder '10'>","timeCapSec":"<Zahl oder '0'>"}
@@ -36,6 +36,7 @@ Regeln:
 - Wenn eine Angabe nicht im Bild steht, verwende einen sinnvollen Default (rounds:"1", timeCapMin/Sec:"", etc.) statt das Feld wegzulassen.
 - Bei AMRAP: Steht dort ein Muster wie "3 Sets 5:00 AMRAP ... Rest 1:00 b/t Sets" oder "3 Runden je 5 Min. AMRAP, 1 Min. Pause zwischen den Saetzen" (WIEDERHOLTE AMRAP-Saetze mit Pause dazwischen, NICHT ein einzelnes AMRAP-Fenster), dann: durationMin/durationSec = Dauer EINES einzelnen Satzes (im Beispiel "5:00", NICHT die Gesamtzeit); setsCount = Anzahl der Saetze (im Beispiel "3"); restMin/restSec = Pause ZWISCHEN den Saetzen (im Beispiel "1:00"). Steht zusaetzlich eine explizite Gesamt-Clock-Zeit dabei (z.B. "17:00 Clock"), nutze sie NUR als Plausibilitaets-Check gegen setsCount*durationMin+durationSec je Satz plus (setsCount-1)*restMin+restSec - trage im Zweifel NICHT die Gesamtzeit als durationMin ein. Ist nur ein einzelnes AMRAP-Zeitfenster ohne Wiederholung/Pause abgebildet (Normalfall), lasse setsCount/restMin/restSec komplett weg statt "1"/"0" einzutragen.
 - Bei "strength": steht dort z.B. "Set 1: 7 Reps @ 70%, Set 2: 5 Reps @ 75%, Set 3: 3 Reps @ 80%" (unterschiedliche Reps pro Satz), dann NICHT nur die erste Zahl fuer repsTarget nehmen, sondern ALLE Wiederholungszahlen kommagetrennt in der Reihenfolge der Saetze auflisten (hier also "7,5,3"), passend zur ebenfalls kommagetrennten pctList ("70,75,80").
+- Bei "strength": Steht dort ein "Complex" aus mehreren AUFEINANDERFOLGENDEN Bewegungen, die mit "+" verknuepft sind und sich DASSELBE Gewicht/denselben Prozentsatz teilen (z.B. "Complex (x5): 1 Power Clean + 1 Front Squat + 1 Split Jerk @ 70%", statt einzeln aufgelisteten Bewegungen mit je eigenem Gewicht), setze bei JEDER Bewegung dieses Complexes AUSSER DER LETZTEN "groupWithNext":"true" (die letzte Bewegung der Gruppe bekommt kein groupWithNext-Feld). Alle Bewegungen einer solchen Gruppe bekommen dieselbe pctList/repsTarget wie im Bild angegeben.
 - Bei "for-time": Nutze repScheme NUR, wenn in JEDER Runde DIESELBE Wiederholungszahl fuer ALLE Bewegungen gilt und sich diese Zahl von Runde zu Runde aendert (klassisches Benchmark-Schema wie "21-15-9", z.B. Fran) - in diesem Fall lasse reps bei den einzelnen movements leer. Hat dagegen jede Bewegungszeile ihre EIGENE, unterschiedliche Wiederholungszahl (z.B. eine Checkliste/Chipper mit vielen einzelnen Zeilen), trage diese Zahl bei jeder Bewegung einzeln in reps ein und lasse repScheme leer.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare oder Codeblock-Markierungen.`;
 
@@ -59,13 +60,25 @@ Regeln:
 - Ausgeschlossene Uebungen (falls angegeben): verwende diese NIEMALS im Plan, auch nicht als Teil eines Benchmark-Workouts oder einer Variante - waehle stattdessen eine sinnvolle Alternativbewegung mit aehnlichem Trainingsreiz und passendem Equipment. Diese Regel ist strikt (z.B. wegen Schmerzen/Verletzung) und hat Vorrang vor allen anderen Ueberlegungen.
 - Gib IMMER gueltiges JSON zurueck, keine zusaetzlichen Kommentare.`;
 
-const WORKOUT_REVIEW_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und gibst kurzes, konkretes Feedback zu einem bereits geloggten Workout eines Athleten. Du bekommst eine Textbeschreibung des Workouts (Name, Datum, Format, Bewegungen mit Wiederholungen/Gewicht/Zeit) sowie optional die Ergebnisse der letzten Versuche desselben Workouts zum Vergleich.
+const WORKOUT_REVIEW_SYSTEM_PROMPT = `Du bist ein erfahrener CrossFit-Coach und gibst kurzes, konkretes Feedback zu einem bereits geloggten Workout eines Athleten. Du bekommst eine Textbeschreibung des Workouts (Name, Datum, Format, Skalierung, Bewegungen mit Wiederholungen/Gewicht/Zeit) sowie optional die Ergebnisse der letzten Versuche desselben Workouts zum Vergleich.
 
-Antworte NUR mit reinem Fliesstext auf Deutsch (kein JSON, kein Markdown, keine Ueberschriften, keine Aufzaehlungszeichen) in 2-4 kurzen Saetzen:
+Antworte NUR mit reinem Fliesstext auf Deutsch (kein JSON, kein Markdown, keine Ueberschriften, keine Aufzaehlungszeichen) in 2-4 kurzen Saetzen. Gib IMMER inhaltliches Feedback - auch bei einem erfolgreich geschafften Workout NIE nur reines Lob ohne Mehrwert:
+
 1. Kurze Einschaetzung der Leistung, ggf. im Vergleich zu frueheren Versuchen (Trend, Pacing, Konsistenz).
-2. Ein konkreter, umsetzbarer Tipp fuer das naechste Mal (z.B. Pacing-Strategie, Skalierung anpassen, welche Bewegung als naechstes Fokus verdient).
+2. Ein konkreter, umsetzbarer Tipp, abhaengig vom Ergebnis:
+   - Nicht vollstaendig geschafft (Cap erreicht, erkennbar am Text): schlage konkret vor, naechstes Mal WENIGER Gewicht oder eine NIEDRIGERE Skalierungsstufe zu waehlen.
+   - Mit Skalierung "Rx" erfolgreich geschafft: gratuliere deutlich, UND gib trotzdem einen produktiven Tipp zur Weiterentwicklung (z.B. Pacing, naechstes Mal schneller, schwereres Folge-Ziel).
+   - Mit Skalierung "Intermediate" erfolgreich geschafft: gratulieren + konkret motivieren, schrittweise Richtung "Rx" zu arbeiten.
+   - Mit Skalierung "Scaled/Basic" erfolgreich geschafft: gratulieren + konkret motivieren, Richtung "Intermediate" als naechsten Schritt zu arbeiten.
+   - Keine Skalierung bekannt, aber erfolgreich geschafft: gratulieren + allgemeiner, sinnvoller Tipp zur Weiterentwicklung.
 
 Sei ermutigend aber ehrlich, keine Floskeln, keine medizinischen Ratschlaege oder Trainingsplan-Vorschriften. Maximal 400 Zeichen.`;
+
+const WORKOUT_REVIEW_TONE_INSTRUCTIONS = {
+  motivierend: 'Tonfall: positiv motivierend und aufbauend, z.B. "Beim naechsten Mal schaffst du das!"',
+  humorvoll: 'Tonfall: locker-humorvoll mit einem Augenzwinkern, nie gemein, z.B. "Was war da los? Ok ok, naechstes Mal kriegst du das hin."',
+  streng: 'Tonfall: streng und fordernd wie ein anspruchsvoller Coach, z.B. "Hast du wirklich alles gegeben? Das geht noch besser."'
+};
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -287,7 +300,7 @@ async function handleAnalyzeWorkout(req, res) {
     res.writeHead(400); res.end('invalid json'); return;
   }
 
-  const { workoutText, priorAttemptsText } = payload || {};
+  const { workoutText, priorAttemptsText, tone } = payload || {};
   if (!workoutText || typeof workoutText !== 'string' || !workoutText.trim()) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'workoutText fehlt' }));
@@ -298,6 +311,8 @@ async function handleAnalyzeWorkout(req, res) {
     res.end(JSON.stringify({ ok: false, error: 'Eingabe zu lang' }));
     return;
   }
+  const toneInstruction = WORKOUT_REVIEW_TONE_INSTRUCTIONS[tone] || WORKOUT_REVIEW_TONE_INSTRUCTIONS.motivierend;
+  const system = WORKOUT_REVIEW_SYSTEM_PROMPT + '\n\n' + toneInstruction;
 
   const userText = `Workout:\n${workoutText}` + (priorAttemptsText ? `\n\nFruehere Versuche desselben Workouts (neueste zuerst): ${priorAttemptsText}` : '');
 
@@ -313,7 +328,7 @@ async function handleAnalyzeWorkout(req, res) {
         model: MODEL,
         max_tokens: 300,
         temperature: 0.5,
-        system: WORKOUT_REVIEW_SYSTEM_PROMPT,
+        system: system,
         messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }]
       })
     });
