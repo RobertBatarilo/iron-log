@@ -9605,11 +9605,30 @@ function tickForTime(){
     b.running = false;
     stopTicking();
     beep();
+    requestFinishForTime();
+    return;
+  }
+  if(display) display.textContent = fmtClock(elapsed,false);
+}
+// Gemeinsamer Einstiegspunkt fuer "Zeit abgelaufen" UND den manuellen "Fertig"-Button: fragt
+// nur dann per Zwischenschritt nach ("Geschafft?"), wenn es unklar ist - entweder weil nicht
+// alle Runden/Wiederholungen abgehakt wurden (echtes Teil-Ergebnis), oder weil die gestoppte
+// Zeit verdaechtig kurz ist (z.B. 5 Sekunden - das Workout wurde vermutlich nachtraeglich
+// eingetragen statt live mitgezaehlt, die Haken sind dann nicht aussagekraeftig). Ist alles
+// abgehakt UND die Dauer plausibel, wird direkt als vollstaendig geschafft gewertet, ohne
+// unnoetig nachzufragen.
+function requestFinishForTime(){
+  const b = state.tmp.forTimeBuilder;
+  if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
+  stopTicking();
+  const allDone = (b.roundsLog||[]).length>0 && b.roundsLog.every(round=>round.every(item=>item.done));
+  const quickFinish = b.elapsedMs < 15000;
+  if(!allDone || quickFinish){
     b.phase = 'capConfirm';
     render();
     return;
   }
-  if(display) display.textContent = fmtClock(elapsed,false);
+  finishForTime();
 }
 function confirmForTimeCapDone(finished){
   const b = state.tmp.forTimeBuilder;
@@ -9622,8 +9641,8 @@ function confirmForTimeCapDone(finished){
 function renderForTimeCapConfirm(b){
   return `
     <div class="card" style="text-align:center;">
-      <h2>⏰ Zeit ist um!</h2>
-      <div class="note" style="margin-bottom:14px;">Hast du das Workout trotzdem komplett geschafft?</div>
+      <h2>Geschafft?</h2>
+      <div class="note" style="margin-bottom:14px;">Hast du das Workout komplett geschafft, so wie oben eingetragen?</div>
       <div class="row">
         <button class="btn btn-ghost" onclick="confirmForTimeCapDone(false)">Nein, nicht ganz</button>
         <button class="btn btn-primary" onclick="confirmForTimeCapDone(true)">✅ Ja, geschafft</button>
@@ -9720,7 +9739,7 @@ function renderForTimeRunning(b){
       </div>
       <div class="row">
         <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseForTimeClock()':'resumeForTimeClock()'}">${b.running?'Pause':'Weiter'}</button>
-        <button class="btn btn-primary" onclick="finishForTime()">Fertig</button>
+        <button class="btn btn-primary" onclick="requestFinishForTime()">Fertig</button>
       </div>
     </div>
   `;

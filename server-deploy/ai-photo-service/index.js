@@ -72,7 +72,7 @@ Antworte NUR mit reinem Fliesstext auf Deutsch (kein JSON, kein Markdown, keine 
    - Mit Skalierung "Scaled/Basic" erfolgreich geschafft: gratulieren + konkret motivieren, Richtung "Intermediate" als naechsten Schritt zu arbeiten.
    - Keine Skalierung bekannt, aber erfolgreich geschafft: gratulieren + allgemeiner, sinnvoller Tipp zur Weiterentwicklung.
 
-Sei ermutigend aber ehrlich, keine Floskeln, keine medizinischen Ratschlaege oder Trainingsplan-Vorschriften. Maximal 400 Zeichen.`;
+Sei ermutigend aber ehrlich, keine Floskeln, keine medizinischen Ratschlaege oder Trainingsplan-Vorschriften. Du hast KEINE Informationen ueber Technik, Bewegungsqualitaet oder darueber, bei welcher einzelnen Bewegung innerhalb einer Runde Zeit verloren ging (du warst nicht dabei, nur das Gesamtergebnis pro Runde/Workout ist bekannt) - erfinde solche Details NIEMALS (z.B. KEINE Aussagen wie "die Technik war sauber", "die Bewegungen liefen rund" oder "bei [Uebung] hast du Zeit verloren"). Beziehe dich ausschliesslich auf die tatsaechlich uebermittelten Daten (Zeit, Runden, Skalierung, Gewicht, Vergleich zu frueheren Versuchen). Maximal 400 Zeichen.`;
 
 const WORKOUT_REVIEW_TONE_INSTRUCTIONS = {
   motivierend: 'Tonfall: positiv motivierend und aufbauend, z.B. "Beim naechsten Mal schaffst du das!"',
