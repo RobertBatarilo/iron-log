@@ -1964,9 +1964,11 @@ function isDistanceWeightedExercise(ex){
   const n = ex.name.toLowerCase();
   return DISTANCE_WEIGHTED_NAMES.some(k=>n.includes(k));
 }
+const JUMP_ROPE_NAME_RE = /\b(double|single|triple)[\s-]*unders?\b|\bjump\s*rope\b|\bskipping\b/i;
 function guessExerciseType(name){
   const n = name.toLowerCase();
   if(CARDIO_MACHINE_NAMES.some(c=>new RegExp('\\b'+c.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(n))) return 'cardio';
+  if(JUMP_ROPE_NAME_RE.test(n)) return 'bodyweight';
   const libMatch = EXERCISE_LIBRARY.find(b=>n.includes(b.name.toLowerCase()));
   if(libMatch) return libMatch.type;
   return 'weighted';
@@ -2309,7 +2311,13 @@ function migrateStaleExerciseTypes(){
   let changed = false;
   state.exercises.forEach(ex=>{
     const match = matchLibraryVariant(ex);
-    if(!match) return;
+    if(!match){
+      if(ex.custom && ex.type==='weighted' && JUMP_ROPE_NAME_RE.test(ex.name)){
+        ex.type = 'bodyweight';
+        changed = true;
+      }
+      return;
+    }
     const correctType = match.variant.type || match.base.type;
     if(correctType && ex.type !== correctType){
       ex.type = correctType;
@@ -2317,6 +2325,14 @@ function migrateStaleExerciseTypes(){
     }
   });
   return changed;
+}
+// Fruehere Importe haben "Double Unders" als eigene Custom-Uebung angelegt; stattdessen gilt die
+// Grundübung Jump Rope mit Variante Double-under. Verlauf/PRs werden auf diese umgehaengt.
+async function mergeStrayDoubleUnders(){
+  const strayIds = state.exercises.filter(e=>e.custom && normalizeExerciseName(e.name)==='doubleunder').map(e=>e.id);
+  if(!strayIds.length) return;
+  const keepId = findOrCreateExerciseId('Double-under Jump Rope', 'bodyweight');
+  await mergeExercisesInto(keepId, strayIds);
 }
 function migrateMovementPatterns(){
   let changed = false;
@@ -2680,6 +2696,7 @@ async function initApp(){
   state.timeRecords = timeRecords;
   state.readinessLogs = readinessLogs;
   state.drafts = drafts || [];
+  await mergeStrayDoubleUnders();
 
   // Beim Neuladen der Seite auf dem zuletzt besuchten Tab bleiben, statt immer auf
   // "Today" zurueckzufallen - rein lokal (nicht ueber saveKey/Cloud-Sync), da es sich um
@@ -3960,27 +3977,54 @@ function findSimilarExercise(name){
 function normalizeExerciseName(name){
   return (name||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/s$/,'');
 }
+// Vereinheitlicht typische Whiteboard-Schreibweisen auf die Bibliotheks-Namenskonvention
+// ("Dual DB ... and ..." -> "Dumbbell Double ... & ...", "Double Unders" -> "Double-under Jump Rope").
+function canonicalizeImportExerciseName(raw){
+  let n = (raw||'').trim().replace(/\s+/g,' ');
+  const unders = n.match(/^(double|single|triple)[\s-]*unders?$/i);
+  if(unders) return unders[1][0].toUpperCase() + unders[1].slice(1).toLowerCase() + '-under Jump Rope';
+  if(/^du$/i.test(n)) return 'Double-under Jump Rope';
+  return n
+    .replace(/\b(?:dual|double|dbl|2)[\s-]*(?:db|dbs|dumbbells?)\b/gi, 'Dumbbell Double')
+    .replace(/\b(?:single|1)[\s-]*(?:arm\s*)?(?:db|dbs|dumbbell)\b/gi, 'Dumbbell Single-Arm')
+    .replace(/\b(?:db|dbs|dumbbells?)\b/gi, 'Dumbbell')
+    .replace(/\band\b/gi, '&');
+}
 function resolveExerciseIdFromName(rawName){
   const rawTrimmed = (rawName||'').trim();
   if(!rawTrimmed) return null;
   const alias = (state.profile?.exerciseAliases||[]).find(a=>a.alias.toLowerCase()===rawTrimmed.toLowerCase());
   if(alias && state.exercises.some(e=>e.id===alias.exerciseId)) return alias.exerciseId;
+  const canonical = canonicalizeImportExerciseName(rawTrimmed);
   // Entspricht der Rohname einer bekannten Bibliotheks-Variante (z.B. "Power Snatch" -> Variante
   // "Power" von "Snatch"), ab hier mit dem kanonischen Namen weiterarbeiten statt dem Rohnamen -
   // betrifft ALLE Bewegungs-Importe, nicht nur Ersatzuebungen bei Skalierung (siehe
   // resolveSubstituteExerciseId). Bereits bestehende, nicht-kanonisch benannte Uebungen werden
   // trotzdem ueber den normalisierten Match-Tier weiter unten korrekt wiedergefunden.
-  const libMatch = matchLibraryVariantFromName(rawTrimmed);
-  const name = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : rawTrimmed;
+  let libMatch = matchLibraryVariantFromName(canonical);
+  // Die Bibliothek hat keine Kombi "Hang + Hantel/Kettlebell"; dann die Hantel-/KB-Variante ohne "Hang" nehmen.
+  if(!libMatch && /\b(dumbbell|kettlebell)\b/i.test(canonical) && /\bhang\b/i.test(canonical)){
+    libMatch = matchLibraryVariantFromName(canonical.replace(/\bhang\s*/i,'').trim());
+  }
+  const name = libMatch ? composeVariantName(libMatch.base, libMatch.variant, '') : canonical;
   const exact = state.exercises.find(e=>e.name.toLowerCase()===name.toLowerCase());
   if(exact) return exact.id;
   const normalized = normalizeExerciseName(name);
   const normMatch = normalized ? state.exercises.find(e=>normalizeExerciseName(e.name)===normalized) : null;
   if(normMatch) return normMatch.id;
+  // Bibliotheks-Variante noch nicht angelegt: neu anlegen, statt per Teilwort auf die Basis-Uebung
+  // ("Clean") zurueckzufallen.
+  if(libMatch) return findOrCreateExerciseId(name, libMatch.variant.type || libMatch.base.type);
+  const rawNormalized = normalizeExerciseName(rawTrimmed);
+  const rawMatch = rawNormalized ? state.exercises.find(e=>normalizeExerciseName(e.name)===rawNormalized) : null;
+  if(rawMatch) return rawMatch.id;
   const nameWords = name.toLowerCase().split(/\s+/);
-  const partial = state.exercises.find(e=>{
+  let partial = null, partialScore = 0;
+  state.exercises.forEach(e=>{
     const exWords = e.name.toLowerCase().split(/\s+/);
-    return exWords.every(w=>nameWords.includes(w)) || nameWords.every(w=>exWords.includes(w));
+    if(!(exWords.every(w=>nameWords.includes(w)) || nameWords.every(w=>exWords.includes(w)))) return;
+    const score = exWords.filter(w=>nameWords.includes(w)).length;
+    if(score > partialScore){ partial = e; partialScore = score; }
   });
   if(partial) return partial.id;
   const similar = findSimilarExercise(name);
@@ -4366,6 +4410,10 @@ function resolveStructuredMoveUnitReps(mv, exerciseId){
   }
   return { unit, reps };
 }
+function weightForExercise(exerciseId, rawWeight){
+  const ex = state.exercises.find(e=>e.id===exerciseId);
+  return getExerciseType(ex)==='weighted' ? (rawWeight||'') : '';
+}
 function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
   const exerciseId = resolveExerciseIdFromName(mv.name);
   const ex = state.exercises.find(e=>e.id===exerciseId);
@@ -4384,7 +4432,7 @@ function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
     repsTarget = '';
     extraLeftover.push(`${mv.reps}${mv.unit} ${mv.name}`);
   }
-  return { exerciseId, timing:'', setsCount, pctList:'', weight: mv.weight||'', unit, qty, repsTarget, groupWithNext };
+  return { exerciseId, timing:'', setsCount, pctList:'', weight: weightForExercise(exerciseId, mv.weight), unit, qty, repsTarget, groupWithNext };
 }
 function missing1RMWarnings(moves){
   if(!moves || !moves.length) return [];
@@ -4460,7 +4508,7 @@ function applyParsedWorkout(input){
     if(p.movements.length) b.movements = p.movements.map(mv=>{
       const exerciseId = resolveExerciseIdFromName(mv.name);
       const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
-      return {exerciseId, reps, weight: mv.weight||'', unit};
+      return {exerciseId, reps, weight: weightForExercise(exerciseId, mv.weight), unit};
     });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
@@ -4475,9 +4523,10 @@ function applyParsedWorkout(input){
     const p = structured ? { moves: input.moves||[] } : parseStrengthText(text);
     state.tmp.wodFormat = 'strength';
     if(p.moves.length){
-      state.tmp.wodTemplate = p.moves.map(mv=>({
-        exerciseId: resolveExerciseIdFromName(mv.name), timing:'', setsCount: mv.setsCount||'', pctList: mv.pctList||'', weight: mv.weight||'', unit:'kcal', qty:'', repsTarget: mv.repsTarget||'', groupWithNext: !!mv.groupWithNext
-      }));
+      state.tmp.wodTemplate = p.moves.map(mv=>{
+        const exerciseId = resolveExerciseIdFromName(mv.name);
+        return { exerciseId, timing:'', setsCount: mv.setsCount||'', pctList: mv.pctList||'', weight: weightForExercise(exerciseId, mv.weight), unit:'kcal', qty:'', repsTarget: mv.repsTarget||'', groupWithNext: !!mv.groupWithNext };
+      });
     } else ensureWodTemplate();
   } else {
     const p = structured ? { movements: input.movements||[], rounds: input.rounds||'1', repScheme: input.repScheme||'', timeCapMin: input.timeCapMin||'', timeCapSec: input.timeCapSec||'', leftover: [] } : parseForTimeText(parseLines);
@@ -4488,7 +4537,7 @@ function applyParsedWorkout(input){
     if(p.movements.length) b.movements = p.movements.map(mv=>{
       const exerciseId = resolveExerciseIdFromName(mv.name);
       const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
-      return {exerciseId, reps, weight: mv.weight||'', unit};
+      return {exerciseId, reps, weight: weightForExercise(exerciseId, mv.weight), unit};
     });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
