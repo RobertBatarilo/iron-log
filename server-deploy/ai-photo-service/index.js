@@ -199,10 +199,10 @@ async function handleParsePhoto(req, res) {
     }
 
     const data = await anthropicRes.json();
-    const text = (data.content || []).map(b => b.text || '').join('');
+    const aiText = (data.content || []).map(b => b.text || '').join('');
     let parsed;
-    try { parsed = extractJson(text); } catch (e) {
-      console.error('Konnte KI-Antwort nicht als JSON parsen', text);
+    try { parsed = extractJson(aiText); } catch (e) {
+      console.error('Konnte KI-Antwort nicht als JSON parsen', aiText);
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'KI-Antwort ungueltig' }));
       return;
