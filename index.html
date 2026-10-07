@@ -4721,6 +4721,7 @@ function setWodFormat(fmt){
 }
 function cancelForTimeRunning(){
   const b = state.tmp.forTimeBuilder;
+  finishEmbeddedGps(false, false);
   stopTicking();
   b.phase = 'build';
   b.startedAt = null; b.elapsedMs = 0; b.running = false;
@@ -8750,7 +8751,8 @@ function renderWorkoutHistoryEntry(w){
         const mv = ft.movements[mi];
         const ex = state.exercises.find(e=>e.id===mv?.exerciseId);
         const val = item.done ? item.target : (item.reps || '0');
-        return `${escapeHtml(ex?ex.name:'—')} ${escapeHtml(val)}${item.done?'':'/'+escapeHtml(item.target)}`;
+        const gpsInfo = item.gpsDistanceM ? ` (📍 ${toDisplayDistance(item.gpsDistanceM)}${distanceUnitLabel()}, ${fmtClock((item.gpsElapsedSec||0)*1000,false)})` : '';
+        return `${escapeHtml(ex?ex.name:'—')} ${escapeHtml(val)}${item.done?'':'/'+escapeHtml(item.target)}${escapeHtml(gpsInfo)}`;
       }).join(' · ')}</div>`).join('')}
     </div>`;
   } else if(format==='amrap'){
@@ -8866,7 +8868,7 @@ function renderWorkout(){
   return back + renderWorkoutInner();
 }
 function renderWorkoutInner(){
-  if(state.tmp.gps && state.tmp.gps.active) return renderGpsLiveView();
+  if(state.tmp.gps && state.tmp.gps.active && !state.tmp.gps.embedded) return renderGpsLiveView();
   const historyHtml = ''; // Verlauf ist jetzt unter Fortschritt zu finden
   const inProgress = isWodInProgress();
   const formatSelector = inProgress ? '' : renderFormatSelector();
@@ -9658,6 +9660,7 @@ function tickForTime(){
     return;
   }
   if(display) display.textContent = fmtClock(elapsed,false);
+  if(state.tmp.gps && state.tmp.gps.embedded) tickGpsRun();
 }
 // Gemeinsamer Einstiegspunkt fuer "Zeit abgelaufen" UND den manuellen "Fertig"-Button: fragt
 // nur dann per Zwischenschritt nach ("Geschafft?"), wenn es unklar ist - entweder weil nicht
@@ -9668,6 +9671,7 @@ function tickForTime(){
 // unnoetig nachzufragen.
 function requestFinishForTime(){
   const b = state.tmp.forTimeBuilder;
+  finishEmbeddedGps(true, false);
   if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
   stopTicking();
   const allDone = (b.roundsLog||[]).length>0 && b.roundsLog.every(round=>round.every(item=>item.done));
@@ -9701,6 +9705,7 @@ function renderForTimeCapConfirm(b){
 }
 function finishForTime(){
   const b = state.tmp.forTimeBuilder;
+  finishEmbeddedGps(true, false);
   if(b.running){ b.elapsedMs += Date.now()-b.startedAt; b.running=false; }
   stopTicking();
   b.finalElapsedSec = Math.round(b.elapsedMs/1000);
@@ -9716,6 +9721,8 @@ function pauseForTimeClock(){
     b.elapsedMs += Date.now()-b.startedAt;
     b.running = false;
     stopTicking();
+    const g = state.tmp.gps;
+    if(g && g.embedded && g.running){ g.elapsedMs += Date.now()-g.startedAt; g.running = false; }
   }
   render();
 }
@@ -9723,12 +9730,16 @@ function resumeForTimeClock(){
   const b = state.tmp.forTimeBuilder;
   b.startedAt = Date.now();
   b.running = true;
+  const g = state.tmp.gps;
+  if(g && g.embedded && !g.running){ g.startedAt = Date.now(); g.running = true; }
   startTicking('live', tickForTime);
   render();
 }
 function toggleForTimeRoundDone(ri, mi){
   const b = state.tmp.forTimeBuilder;
   const item = b.roundsLog[ri][mi];
+  const g = state.tmp.gps;
+  if(g && g.embedded && g.inlineTarget.ri===ri && g.inlineTarget.mi===mi) finishEmbeddedGps(true, false);
   item.done = !item.done;
   const scrollTop = document.getElementById('ftChecklist')?.scrollTop;
   render();
@@ -9751,6 +9762,30 @@ function forTimeQtyUnitSuffix(m){
   if(type==='mobility') return m.unit==='sec' ? 's' : 'reps';
   return 'reps';
 }
+// GPS-Start/-Live-Widget/Messergebnis fuer Lauf-Items (Meter) in der Running-Checkliste.
+function renderForTimeGpsRow(ex, m, item, ri, mi){
+  if(!(ex && isRunExercise(ex) && m.unit==='m')) return '';
+  const g = state.tmp.gps;
+  const trackingHere = g && g.embedded && g.inlineTarget.ri===ri && g.inlineTarget.mi===mi;
+  if(trackingHere){
+    const targetM = parseFloat(item.target)||0;
+    return `
+      <div style="margin:4px 0 2px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.05);text-align:center;">
+        <div class="stat-label">📍 Lauf wird getrackt</div>
+        <div style="margin:4px 0;">
+          <span id="gpsDistanceDisplay" class="stat-num" style="font-size:28px;">${toDisplayDistance(g.distanceM)}${distanceUnitLabel()}</span>${targetM>0?`<span class="note"> / ${toDisplayDistance(targetM)}${distanceUnitLabel()}</span>`:''}
+        </div>
+        <div class="note" style="margin-bottom:6px;"><span id="gpsTimeDisplay">${fmtClock(gpsElapsedMs(g),false)}</span> · <span id="gpsPaceDisplay">${formatPace(g.distanceM, gpsElapsedMs(g))}</span></div>
+        <button class="btn btn-primary" onclick="stopGpsRun()">Stopp</button>
+      </div>`;
+  }
+  if(item.gpsDistanceM){
+    return `<div class="note" style="margin:2px 0 0 42px;">📍 ${toDisplayDistance(item.gpsDistanceM)}${distanceUnitLabel()} · ${fmtClock((item.gpsElapsedSec||0)*1000,false)} · ${formatPace(item.gpsDistanceM,(item.gpsElapsedSec||0)*1000)}</div>`;
+  }
+  if(item.done) return '';
+  const busy = g && g.active;
+  return `<div style="margin:2px 0 0 42px;"><button class="btn btn-ghost" style="padding:4px 10px;font-size:13px;" ${busy?'disabled':''} onclick="startGpsRun('inline',{flow:'for-time-run',ri:${ri},mi:${mi},targetM:${parseFloat(item.target)||0}})">📍 Lauf tracken</button></div>`;
+}
 function renderForTimeRunning(b){
   const displayMs = b.timeCapMs>0 ? Math.max(0, b.timeCapMs-b.elapsedMs) : b.elapsedMs;
   const checklistHtml = (b.roundsLog||[]).map((round,ri)=>{
@@ -9758,13 +9793,16 @@ function renderForTimeRunning(b){
       const m = b.movements[mi];
       const ex = state.exercises.find(e=>e.id===m.exerciseId);
       return `
-        <div class="checkbox-row" style="justify-content:space-between;margin-bottom:6px;">
+        <div style="margin-bottom:6px;">
+        <div class="checkbox-row" style="justify-content:space-between;">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
             <span style="font-size:12px;color:var(--chalk-60);flex:0 0 auto;width:34px;">${forTimeQtyUnitSuffix(m)}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(ex?ex.name:'—')}</span>
           </div>
           <input type="number" step="1" id="ftRoundVal_${ri}_${mi}" value="${item.reps}" oninput="updateForTimeRoundValue(${ri},${mi},this.value)" style="width:64px;flex:0 0 auto;" placeholder="${escapeHtml(item.target)}">
           <input type="checkbox" id="ftRoundCheck_${ri}_${mi}" ${item.done?'checked':''} onchange="toggleForTimeRoundDone(${ri},${mi})" style="flex:0 0 auto;">
+        </div>
+        ${renderForTimeGpsRow(ex, m, item, ri, mi)}
         </div>`;
     }).join('');
     return `<div style="margin-bottom:14px;">
@@ -10929,23 +10967,69 @@ function formatPace(distanceM, elapsedMs){
   const s = Math.round(secPerUnit%60);
   return `${m}:${String(s).padStart(2,'0')}/${distanceUnitLabel()==='mi'?'mi':'km'}`;
 }
+// Bildschirm waehrend des Trackings an lassen - sonst pausiert watchPosition meist bei gesperrtem Display.
+let wakeLockSentinel = null;
+async function acquireWakeLock(){
+  try{
+    if(!('wakeLock' in navigator) || wakeLockSentinel) return;
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', ()=>{ wakeLockSentinel = null; });
+  }catch(e){ wakeLockSentinel = null; }
+}
+function releaseWakeLock(){
+  try{ if(wakeLockSentinel) wakeLockSentinel.release(); }catch(e){}
+  wakeLockSentinel = null;
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState!=='visible') return;
+  if(state.tmp.gps && state.tmp.gps.active) acquireWakeLock(); else releaseWakeLock();
+});
+function gpsElapsedMs(g){
+  return g.running ? g.elapsedMs + (Date.now()-g.startedAt) : g.elapsedMs;
+}
+// Eingebetteter Modus ("for-time-run"): GPS laeuft als Mini-Widget in der Running-Checkliste des
+// For-Time-WODs mit - ohne eigenen Ticker (die WOD-Uhr tickt weiter und aktualisiert die GPS-Zeit mit).
 function startGpsRun(mode, inlineTarget){
   if(!navigator.geolocation){ showToast('GPS wird von diesem Browser nicht unterstützt'); return; }
+  const embedded = !!(inlineTarget && inlineTarget.flow==='for-time-run');
   state.tmp.gps = {
-    mode, inlineTarget: inlineTarget||null,
+    mode, inlineTarget: inlineTarget||null, embedded,
+    targetM: embedded ? (parseFloat(inlineTarget.targetM)||0) : 0, targetReached: false,
     watchId: null, active: true, distanceM: 0, lastFix: null,
     startedAt: Date.now(), elapsedMs: 0, running: true, error: null
   };
   state.tmp.gps.watchId = navigator.geolocation.watchPosition(onGpsFix, onGpsError, {enableHighAccuracy:true, maximumAge:0, timeout:15000});
-  startTicking('live', tickGpsRun);
+  acquireWakeLock();
+  if(!embedded) startTicking('live', tickGpsRun);
   render();
+  if(embedded) tickGpsRun();
+}
+// Beendet das eingebettete Tracking sauber; speichert die Messung am For-Time-Item (falls sinnvoll).
+function finishEmbeddedGps(save, markDone){
+  const g = state.tmp.gps;
+  if(!g || !g.embedded) return;
+  if(g.watchId!=null) navigator.geolocation.clearWatch(g.watchId);
+  if(g.running){ g.elapsedMs += Date.now()-g.startedAt; g.running = false; }
+  const b = state.tmp.forTimeBuilder;
+  const t = g.inlineTarget;
+  const item = b && b.roundsLog && b.roundsLog[t.ri] && b.roundsLog[t.ri][t.mi];
+  if(save && item){
+    if(g.distanceM>=10){
+      item.gpsDistanceM = Math.round(g.distanceM);
+      item.gpsElapsedSec = Math.round(g.elapsedMs/1000);
+    }
+    if(markDone) item.done = true;
+  }
+  state.tmp.gps = null;
+  releaseWakeLock();
 }
 function onGpsFix(pos){
   const g = state.tmp.gps;
   if(!g || !g.active) return;
   const {latitude, longitude, accuracy} = pos.coords;
   if(accuracy!=null && accuracy>30) return; // zu ungenauer Fix, verwerfen
-  if(g.lastFix){
+  const pausedEmbedded = g.embedded && !g.running; // WOD-Uhr pausiert: Position merken, aber keine Strecke zaehlen
+  if(g.lastFix && !pausedEmbedded){
     const dt = (pos.timestamp - g.lastFix.t)/1000;
     const segment = haversineMeters(g.lastFix.lat, g.lastFix.lon, latitude, longitude);
     const speed = dt>0 ? segment/dt : 0;
@@ -10954,34 +11038,51 @@ function onGpsFix(pos){
     }
   }
   g.lastFix = {lat:latitude, lon:longitude, t:pos.timestamp};
+  if(g.embedded && g.targetM>0 && !g.targetReached && g.distanceM>=g.targetM){
+    g.targetReached = true;
+    beep();
+  }
   const distEl = document.getElementById('gpsDistanceDisplay');
   if(distEl) distEl.textContent = `${toDisplayDistance(g.distanceM)}${distanceUnitLabel()}`;
   const paceEl = document.getElementById('gpsPaceDisplay');
-  if(paceEl) paceEl.textContent = formatPace(g.distanceM, Date.now()-g.startedAt+g.elapsedMs);
+  if(paceEl) paceEl.textContent = formatPace(g.distanceM, gpsElapsedMs(g));
 }
 function onGpsError(err){
   const g = state.tmp.gps;
   if(!g) return;
   const messages = {1:'Standortzugriff verweigert.', 2:'Kein GPS-Signal gefunden.', 3:'Zeitüberschreitung beim Standortabruf.'};
-  g.error = messages[err.code] || 'GPS-Fehler.';
+  const msg = messages[err.code] || 'GPS-Fehler.';
+  if(g.embedded){
+    if(g.watchId!=null) navigator.geolocation.clearWatch(g.watchId);
+    state.tmp.gps = null;
+    releaseWakeLock();
+    showToast(msg);
+    render();
+    return;
+  }
+  g.error = msg;
   g.active = false;
   g.running = false;
   stopTicking();
+  releaseWakeLock();
   render();
 }
 function tickGpsRun(){
   const g = state.tmp.gps;
-  if(!g || !g.running){ stopTicking(); return; }
-  const elapsed = g.elapsedMs + (Date.now()-g.startedAt);
+  if(!g || !g.running){ if(!g || !g.embedded) stopTicking(); return; }
   const el = document.getElementById('gpsTimeDisplay');
-  if(el) el.textContent = fmtClock(elapsed,false);
+  if(el) el.textContent = fmtClock(gpsElapsedMs(g),false);
+  if(g.embedded){
+    const paceEl = document.getElementById('gpsPaceDisplay');
+    if(paceEl) paceEl.textContent = formatPace(g.distanceM, gpsElapsedMs(g));
+  }
 }
 function pauseGpsRun(){
   const g = state.tmp.gps;
   if(g && g.running){
     g.elapsedMs += Date.now()-g.startedAt;
     g.running = false;
-    stopTicking();
+    if(!g.embedded) stopTicking();
   }
   render();
 }
@@ -10990,14 +11091,20 @@ function resumeGpsRun(){
   if(!g) return;
   g.startedAt = Date.now();
   g.running = true;
-  startTicking('live', tickGpsRun);
+  if(!g.embedded) startTicking('live', tickGpsRun);
   render();
 }
 function stopGpsRun(){
   const g = state.tmp.gps;
   if(!g) return;
+  if(g.embedded){
+    finishEmbeddedGps(true, true);
+    render();
+    return;
+  }
   if(g.watchId!=null) navigator.geolocation.clearWatch(g.watchId);
   stopTicking();
+  releaseWakeLock();
   if(g.running){ g.elapsedMs += Date.now()-g.startedAt; g.running = false; }
   g.active = false;
   if(g.mode==='inline' && g.inlineTarget){
