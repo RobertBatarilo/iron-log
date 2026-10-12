@@ -3223,7 +3223,7 @@ function parseRepScheme(str){
   return (str||'').split(/[-,\/\s]+/).map(s=>parseInt(s)).filter(n=>!isNaN(n));
 }
 function blankRowSet(){ return {reps:'', weight:'', pct:null, autoFilled:false}; }
-function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
+function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', weightStep:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
 function ensureWodTemplate(){
   if(!state.tmp.wodTemplate){
     state.tmp.wodTemplate = [blankTemplateMove()];
@@ -4283,10 +4283,16 @@ function parseAmrapText(lines){
     if(multiSet){
       if(multiSetRe().some(re=>re.test(line)) || restRe().some(re=>re.test(line))) consumed = true;
     } else {
-      const dur = line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
-      if(dur){ durationMin = dur[1]; consumed = true; }
+      const clockDur = line.match(/^(\d+)\s*:\s*(\d+)\s*amrap/i);
+      const dur = clockDur || line.match(/amrap\D*(\d+)/i) || line.match(/(\d+)\D*min.*amrap/i);
+      if(dur){ durationMin = dur[1]; if(clockDur) durationSec = String(parseInt(clockDur[2])); consumed = true; }
     }
     if(consumed) return;
+    const prog = line.match(/^(\d+(?:\s*[-–]\s*\d+){2,})\s+(.+)$/);
+    if(prog){
+      const list = parseRepScheme(prog[1].replace(/–/g,'-'));
+      if(list.length>=2){ movements.push({ reps: String(list[0]), name: prog[2].trim(), repsProgression: list.join(',') }); return; }
+    }
     const mv = parseMovementLine(line);
     if(mv){ movements.push(mv); return; }
     leftover.push(line);
@@ -4350,10 +4356,12 @@ function parseEmomText(lines){
 }
 function parseForLoadText(text){
   const lines = ocrTextLines(text);
-  let name = '', timeCapMin = '10', timeCapSec = '0';
+  let name = '', timeCapMin = '10', timeCapSec = '0', targetReps = '1';
   lines.forEach(line=>{
     let m = line.match(/time\s*cap[:\s]*(\d+)\s*:?\s*(\d*)/i);
     if(m){ timeCapMin = m[1]; timeCapSec = m[2]||'0'; return; }
+    m = line.match(/\b(\d+)\s*-?\s*rep(?:s|etition)?\b/i);
+    if(m && parseInt(m[1])>0 && parseInt(m[1])<=10) targetReps = m[1];
     if(!name){
       m = line.match(/1rm|find your|max|heavy single|build to a/i);
       if(m){
@@ -4365,7 +4373,7 @@ function parseForLoadText(text){
       }
     }
   });
-  return { name, timeCapMin, timeCapSec };
+  return { name, timeCapMin, timeCapSec, targetReps };
 }
 function parseStrengthText(text){
   const lines = ocrTextLines(text);
@@ -4508,17 +4516,20 @@ function applyParsedWorkout(input){
     if(p.movements.length) b.movements = p.movements.map(mv=>{
       const exerciseId = resolveExerciseIdFromName(mv.name);
       const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
-      return {exerciseId, reps, weight: weightForExercise(exerciseId, mv.weight), unit};
+      const progList = parseRepScheme(mv.repsProgression);
+      const hasProgression = progList.length>=2 && getExerciseType(state.exercises.find(e=>e.id===exerciseId))!=='cardio';
+      return {exerciseId, reps: hasProgression ? String(progList[0]) : reps, weight: weightForExercise(exerciseId, mv.weight), unit, repsProgression: hasProgression ? progList.join(',') : ''};
     });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
   } else if(format==='for-load'){
-    const p = structured ? { name: input.name||'', timeCapMin: input.timeCapMin||'10', timeCapSec: input.timeCapSec||'0' } : parseForLoadText(text);
+    const p = structured ? { name: input.name||'', timeCapMin: input.timeCapMin||'10', timeCapSec: input.timeCapSec||'0', targetReps: input.targetReps||'1' } : parseForLoadText(text);
     state.tmp.wodFormat = 'for-load';
     ensureForLoadBuilder();
     const b = state.tmp.forLoadBuilder;
     if(p.name) b.exerciseId = resolveExerciseIdFromName(p.name) || b.exerciseId;
     b.timeCapMin = p.timeCapMin; b.timeCapSec = p.timeCapSec;
+    b.targetReps = String(parseInt(p.targetReps) || 1);
   } else if(format==='strength'){
     const p = structured ? { moves: input.moves||[] } : parseStrengthText(text);
     state.tmp.wodFormat = 'strength';
@@ -8480,19 +8491,38 @@ function exerciseDisplayName(id){
   const stem = id.replace(/-[a-z0-9]{1,4}$/,'').replace(/-/g,' ').trim();
   return stem ? stem.replace(/\b\w/g,c=>c.toUpperCase()) : '—';
 }
+// AMRAP-Bewegung mit Wiederholungen je Runde (z.B. "36,48,60,72 Double Unders"): Liste, die
+// Zahl fuer eine bestimmte Runde (nach dem Listenende mit dem letzten Schritt fortgesetzt, 72 -> 84)
+// und eine Kopie der Bewegung mit der Zahl der aktuellen Runde.
+function amrapProgressionList(m){
+  const l = parseRepScheme(m && m.repsProgression);
+  return l.length>=2 ? l : [];
+}
+function amrapRepsForRound(m, roundIdx){
+  const l = amrapProgressionList(m);
+  if(!l.length) return m.reps;
+  if(roundIdx < l.length) return String(l[roundIdx]);
+  const step = l[l.length-1] - l[l.length-2];
+  return String(Math.max(0, l[l.length-1] + step*(roundIdx-l.length+1)));
+}
+function amrapMoveForRound(m, roundIdx){
+  return amrapProgressionList(m).length ? { ...m, reps: amrapRepsForRound(m, roundIdx), repsProgression:'' } : m;
+}
 function formatMovementLine(m){
   const ex = state.exercises.find(e=>e.id===m.exerciseId);
   const name = exerciseDisplayName(m.exerciseId);
   const type = getExerciseType(ex);
+  const prog = amrapProgressionList(m);
+  const repsLabel = prog.length ? prog.join('-') : (m.reps||0);
   if(type==='cardio'){
     if(m.unit==='m') return `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}`;
     return `${m.reps||0} kcal ${name}`;
   }
   if(type==='mobility'){
-    if(m.unit==='sec') return `${m.reps||0}s ${name}`;
-    return `${m.reps||0}x ${name}`;
+    if(m.unit==='sec') return `${repsLabel}s ${name}`;
+    return `${repsLabel}x ${name}`;
   }
-  let line = `${m.reps||0}x ${name}`;
+  let line = `${repsLabel}x ${name}`;
   if(type==='weighted' && m.weight){
     line += ` - ${fmtWeight(m.weight)}`;
   }
@@ -8947,7 +8977,7 @@ function loadDoneWorkout(index){
     ensureForLoadBuilder();
     const fl = w.forLoad, b = state.tmp.forLoadBuilder;
     b.exerciseId = fl.exerciseId;
-    b.targetReps = String(fl.targetReps||3);
+    b.targetReps = String(fl.targetReps||1);
     b.unit = fl.unit || 'kcal';
     b.achievedWeight = String(fl.achievedWeight ?? '');
     if(fl.timeCapSec){
@@ -9089,6 +9119,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         ${!isWeighted ? repsTargetField : ''}
       </div>
       ${weightField}
+      ${isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:8px;"><label>Steigerung pro Satz (${weightUnitLabel()}, optional)</label><input type="number" step="0.5" value="${toDisplayWeight(t.weightStep)}" oninput="updateTemplateFieldWeightStep(${mi},this.value)" placeholder="z.B. 2,5 (1RM-Aufbau)"></div>` : ''}
       ${unitToggle}
       ${qtyField}
       ${groupToggle}
@@ -9214,6 +9245,7 @@ function renderLiveGroupBlocks(group){
           <div class="field"><label>${qtyLabel}</label><input type="number" step="1" id="liveReps_${mi}" value="${qtyValue}" placeholder="z.B. 5"></div>
           ${type!=='weighted' ? '' : `<div class="field"><label>kg</label><input type="number" step="0.5" id="liveWeight_${mi}" value="${s.weight}" placeholder="z.B. 48"></div>`}
         </div>
+        ${type!=='weighted' ? '' : `<label style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px;font-size:13px;color:var(--chalk-60);"><input type="checkbox" id="liveFail_${mi}" ${s.failed?'checked':''}> Fehlversuch (nicht werten)</label>`}
         ${gpsButton}
       </div>`;
   }).join('');
@@ -9236,6 +9268,7 @@ function goToNextLiveRound(){
   const live = state.tmp.live;
   if(!live || live.pos>=live.flat.length-1) return;
   captureLiveGroupValues(live.flat[live.pos]);
+  carryLiveWeights(live.flat[live.pos], live.flat[live.pos+1]);
   live.pos += 1;
   live.resting = false;
   live.restRunning = false;
@@ -9302,7 +9335,28 @@ function captureLiveGroupValues(group){
     }
     const weightEl = document.getElementById(`liveWeight_${mi}`);
     if(weightEl) mv.sets[si].weight = weightEl.value;
+    const failEl = document.getElementById(`liveFail_${mi}`);
+    if(failEl) mv.sets[si].failed = failEl.checked;
     mv.sets[si].autoFilled = false;
+  });
+}
+// 1RM-Aufbau: Das Gewicht des naechsten Satzes folgt dem zuletzt tatsaechlich gehobenen Gewicht
+// (+ Steigerung; nach einem Fehlversuch wird dasselbe Gewicht wiederholt). Nur bei gesetzter Steigerung.
+function carryLiveWeights(prevGroup, nextGroup){
+  if(!prevGroup || !nextGroup) return;
+  prevGroup.forEach(({mi,si})=>{
+    const mv = state.tmp.wodMoves[mi];
+    const step = parseFloat(mv.weightStep) || 0;
+    if(!(step>0)) return;
+    const prev = mv.sets[si];
+    const prevW = parseFloat(prev.weight);
+    if(isNaN(prevW)) return;
+    nextGroup.forEach(n=>{
+      if(n.mi!==mi) return;
+      const next = mv.sets[n.si];
+      if(!next || !next.autoFilled) return;
+      next.weight = String(Math.round((prev.failed ? prevW : prevW+step)*100)/100);
+    });
   });
 }
 function completeLiveSet(){
@@ -9314,6 +9368,7 @@ function completeLiveSet(){
     render();
     return;
   }
+  carryLiveWeights(live.flat[live.pos], live.flat[live.pos+1]);
   live.pos += 1;
   const restSec = (state.tmp.wodFormat==='emom' && getEmomIntervalSec()>0) ? getEmomIntervalSec() : 90;
   beginRest(restSec);
@@ -9421,6 +9476,7 @@ function tickEmomLive(){
     render();
     return;
   }
+  carryLiveWeights(live.flat[live.pos], live.flat[live.pos+1]);
   live.pos += 1;
   live.emomRemaining = live.emomTotal;
   live.emomStartedAt = Date.now();
@@ -9446,7 +9502,7 @@ function renderWodSummaryPhase(){
   let totalWeight = 0, totalSets = 0;
   state.tmp.wodMoves.forEach(mv=>{
     mv.sets.forEach(s=>{
-      if(s.reps && s.weight){ totalWeight += parseFloat(s.weight)*parseInt(s.reps); totalSets++; }
+      if(s.reps && s.weight && !s.failed){ totalWeight += parseFloat(s.weight)*parseInt(s.reps); totalSets++; }
     });
   });
   return `
@@ -10047,6 +10103,7 @@ function renderAmrapFlow(historyHtml){
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 10"></div>
         ${weightField}
       </div>
+      ${isCardio ? '' : `<div class="field" style="margin-bottom:8px;"><label>Wdh. je Runde (optional)</label><input type="text" value="${escapeHtml(m.repsProgression||'')}" oninput="updateAmrapMove(${mi},'repsProgression',this.value)" placeholder="z.B. 36,48,60,72"></div>`}
       ${gpsButton}
     </div>`;
   }).join('');
@@ -10255,7 +10312,7 @@ function renderAmrapRunning(b){
         <div class="stat-label">Pause</div>
         <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
         <div class="note" style="margin-bottom:10px;">Satz ${b.currentSet-1}/${setsCount} abgeschlossen: ${last.roundsCompleted} Runden${last.extraReps?' + '+last.extraReps+' Wdh.':''}</div>
-        <div class="note" style="margin-bottom:14px;">Nächster Satz (${b.currentSet}/${setsCount}): ${b.movements.map(m=>escapeHtml(formatMovementLine(m))).join(', ')}</div>
+        <div class="note" style="margin-bottom:14px;">Nächster Satz (${b.currentSet}/${setsCount}): ${b.movements.map(m=>escapeHtml(formatMovementLine(amrapMoveForRound(m,0)))).join(', ')}</div>
         <div class="row">
           <button class="btn ${b.running?'btn-ghost':'btn-primary'}" onclick="${b.running?'pauseAmrapClock()':'resumeAmrapClock()'}">${b.running?'Pause':'Weiter'}</button>
         </div>
@@ -10275,7 +10332,8 @@ function renderAmrapRunning(b){
       <div class="stat-label">Verbleibend</div>
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:10px 0;">${fmtClock(b.remainingMs,false)}</div>
       <div class="moves" style="text-align:left;margin-bottom:14px;">
-        ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(m))}</div>`).join('')}
+        ${b.movements.some(m=>amrapProgressionList(m).length) ? `<div class="stat-label" style="margin-bottom:4px;">Runde ${b.roundsCompleted+1}</div>` : ''}
+        ${b.movements.map(m=>`<div>${escapeHtml(formatMovementLine(amrapMoveForRound(m, b.roundsCompleted)))}</div>`).join('')}
       </div>
       <div class="stat-num" style="margin:10px 0;">${b.roundsCompleted}<span style="font-size:16px;"> Runden</span></div>
       <div class="row" style="margin-bottom:10px;">
@@ -10310,7 +10368,7 @@ async function saveAmrapWorkout(){
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
-  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||''}));
+  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||'', repsProgression: amrapProgressionList(m).join(',')}));
   const prMovements = buildPrMovementsFromFlat(movements);
   const durationSec = Math.round(b.durationMs/1000);
   const setsCount = parseInt(b.setsCount)||1;
@@ -10349,7 +10407,7 @@ async function saveAmrapWorkout(){
 /* ---------- FOR LOAD ---------- */
 function ensureForLoadBuilder(){
   if(!state.tmp.forLoadBuilder){
-    state.tmp.forLoadBuilder = { phase:'build', exerciseId: state.exercises[0]?.id, targetReps:'3', timeCapMin:'10', timeCapSec:'0', startedAt:null, running:false, elapsedMs:0, timeCapMs:0, achievedWeight:'', unit:'kcal' };
+    state.tmp.forLoadBuilder = { phase:'build', exerciseId: state.exercises[0]?.id, targetReps:'1', timeCapMin:'10', timeCapSec:'0', startedAt:null, running:false, elapsedMs:0, timeCapMs:0, achievedWeight:'', unit:'kcal' };
   }
 }
 function renderForLoadFlow(historyHtml){
@@ -10633,6 +10691,9 @@ function updateTemplateFieldVariant(mi, variantId){
 function updateTemplateFieldWeight(mi, displayVal){
   state.tmp.wodTemplate[mi].weight = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
 }
+function updateTemplateFieldWeightStep(mi, displayVal){
+  state.tmp.wodTemplate[mi].weightStep = displayVal==='' ? '' : String(fromDisplayWeight(displayVal));
+}
 function applySuggestedTemplateWeight(mi, kg){
   state.tmp.wodTemplate[mi].weight = String(kg);
   render();
@@ -10704,7 +10765,7 @@ function onWodNameChange(val){
     } else if(fmt==='for-load' && isForLoadBuilderEmpty() && match.forLoad){
       const fl = match.forLoad;
       state.tmp.forLoadBuilder.exerciseId = fl.exerciseId;
-      state.tmp.forLoadBuilder.targetReps = String(fl.targetReps||3);
+      state.tmp.forLoadBuilder.targetReps = String(fl.targetReps||1);
       state.tmp.forLoadBuilder.unit = fl.unit || 'reps';
       if(fl.timeCapSec){
         state.tmp.forLoadBuilder.timeCapMin = String(Math.floor(fl.timeCapSec/60));
@@ -10788,14 +10849,15 @@ function generateWodRows(){
           weight = roundToIncrement(known1rm*pct/100);
           autoFilled = true;
         } else if(t.weight){
-          weight = t.weight;
+          const step = parseFloat(t.weightStep) || 0;
+          weight = step>0 && !isNaN(parseFloat(t.weight)) ? String(Math.round((parseFloat(t.weight) + si*step)*100)/100) : t.weight;
           autoFilled = true;
         }
         sets.push({reps, weight, pct: pct||null, autoFilled});
       }
     }
     const timing = isEmom ? `Every ${state.tmp.emomMin}:${String(state.tmp.emomSec).padStart(2,'0')}` : t.timing;
-    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: (isCardio || isDistanceWeighted) ? t.unit : null, repsTarget: t.repsTarget||'', groupId: groupIdArr[ti], sets };
+    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: (isCardio || isDistanceWeighted) ? t.unit : null, repsTarget: t.repsTarget||'', weightStep: t.weightStep||'', groupId: groupIdArr[ti], sets };
   });
   state.tmp.wodPhase = 'rows';
   applyFeelingFillIfNeeded();
@@ -10877,7 +10939,7 @@ async function saveWod(liveFlat){
     const sets = isQtyBased
       ? mv.sets.filter(s=>s.reps).map(s=>({ reps: parseFloat(s.reps), weight: null, pct: null }))
       : isWeighted
-        ? mv.sets.filter(s=>s.reps && s.weight).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }))
+        ? mv.sets.filter(s=>s.reps && s.weight && !s.failed).map(s=>({ reps: parseInt(s.reps), weight: parseFloat(s.weight), pct: s.pct || null }))
         : mv.sets.filter(s=>s.reps).map(s=>({ reps: parseInt(s.reps), weight: null, pct: null }));
     return { exerciseId: mv.exerciseId, timing: mv.timing || '', unit: isQtyBased ? mv.unit : null, repsTarget: mv.repsTarget || '', groupId: mv.groupId ?? null, sets };
   }).filter(mv=>mv.sets.length>0);
@@ -10886,7 +10948,7 @@ async function saveWod(liveFlat){
   const roundsLog = (state.tmp.wodFormat==='emom' && liveFlat && liveFlat.length)
     ? liveFlat.map(group => group.map(({mi,si})=>{
         const mv = state.tmp.wodMoves[mi];
-        return { exerciseId: mv.exerciseId, reps: mv.sets[si].reps, weight: mv.sets[si].weight };
+        return { exerciseId: mv.exerciseId, reps: mv.sets[si].reps, weight: mv.sets[si].weight, failed: !!mv.sets[si].failed };
       }).filter(e=>e.reps!=='' && e.reps!=null)).filter(round=>round.length>0)
     : null;
   const workout = {id:uid(), date, name, note, format: state.tmp.wodFormat, movements, roundsLog};
