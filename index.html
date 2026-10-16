@@ -1964,6 +1964,19 @@ function isDistanceWeightedExercise(ex){
   const n = ex.name.toLowerCase();
   return DISTANCE_WEIGHTED_NAMES.some(k=>n.includes(k));
 }
+// Umrechnung von Whiteboard-Distanzen in Meter. ft/yd/mi werden auf "logische" Werte gerundet
+// (200 ft = 60,96 m -> 60 m), m/km bleiben exakt.
+const DISTANCE_UNIT_FACTORS = { m:1, meter:1, meters:1, km:1000, ft:0.3048, feet:0.3048, yd:0.9144, yds:0.9144, yard:0.9144, yards:0.9144, mi:1609.34 };
+function isDistanceUnitToken(u){ return !!u && Object.prototype.hasOwnProperty.call(DISTANCE_UNIT_FACTORS, String(u).toLowerCase()); }
+function distanceToMetersRounded(value, unit){
+  const v = parseFloat(String(value).replace(',', '.'));
+  const f = DISTANCE_UNIT_FACTORS[String(unit||'m').toLowerCase()];
+  if(isNaN(v) || !f) return null;
+  const m = v * f;
+  const u = String(unit||'m').toLowerCase();
+  if(u==='m' || u==='meter' || u==='meters' || u==='km') return Math.round(m);
+  return m>=20 ? Math.round(m/5)*5 : Math.round(m);
+}
 const JUMP_ROPE_NAME_RE = /\b(double|single|triple)[\s-]*unders?\b|\bjump\s*rope\b|\bskipping\b/i;
 function guessExerciseType(name){
   const n = name.toLowerCase();
@@ -3097,6 +3110,8 @@ function startPlannedWorkout(){
 /* ---------- WORKOUT TAB (merged Training + WOD, two-phase: template -> generated rows) ---------- */
 function exerciseLogs(exId){
   const out = [];
+  // Traglasten (Farmers Carry, Sled ...) werden in Metern erfasst - keine Wiederholungen fuer 1RM/PRs
+  if(isDistanceWeightedExercise(state.exercises.find(e=>e.id===exId))) return out;
   state.workouts.forEach(w=>{
     (w.movements||[]).forEach(m=>{
       if(m.exerciseId===exId){
@@ -3131,7 +3146,7 @@ function bestByRepScheme(exId){
 function buildPrMovementsFromFlat(list){
   return (list||[]).map(mv=>{
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
-    if(!ex || getExerciseType(ex)!=='weighted') return null;
+    if(!ex || getExerciseType(ex)!=='weighted' || isDistanceWeightedExercise(ex)) return null;
     const reps = parseFloat(mv.reps), weight = parseFloat(mv.weight);
     if(!reps || !weight) return null;
     return { exerciseId: mv.exerciseId, sets:[{reps: mv.reps, weight: mv.weight, pct:null}] };
@@ -3224,6 +3239,42 @@ function parseRepScheme(str){
 }
 function blankRowSet(){ return {reps:'', weight:'', pct:null, autoFilled:false}; }
 function blankTemplateMove(){ return {exerciseId: state.exercises[0]?.id, timing:'', setsCount:'', pctList:'', weight:'', weightStep:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
+// EMOM-Ablauf: Intervall-Liste (Uebung(en) oder Pause) x Wiederholungen. Eine Pause ist ein
+// Template-Eintrag {rest:true} ohne Uebung (nur Zeit = 1 Intervall) und taucht in keiner Uebungsliste auf.
+function blankRestMove(){ return {rest:true, exerciseId:null, timing:'', setsCount:'', pctList:'', weight:'', weightStep:'', unit:'kcal', qty:'', repsTarget:'', groupWithNext:false}; }
+function getEmomCycles(){
+  return Math.max(1, parseInt(state.tmp.emomAlternateCycles) || parseInt(state.tmp.emomRounds) || 1);
+}
+function setEmomCycles(val){
+  const n = Math.max(1, parseInt(val) || 1);
+  state.tmp.emomAlternateCycles = String(n);
+  state.tmp.emomRounds = String(n);
+  render();
+}
+// Gruppiert die Template-Eintraege in Intervalle (Komplex-Folgeeintraege gehoeren zum Intervall davor).
+function emomTemplateGroups(tmpl){
+  const groups = [];
+  tmpl.forEach((t,i)=>{
+    if(i>0 && tmpl[i-1].groupWithNext) groups[groups.length-1].push(t);
+    else groups.push([t]);
+  });
+  return groups;
+}
+function emomSlotText(t){
+  if(t.rest) return 'Pause';
+  const ex = state.exercises.find(e=>e.id===t.exerciseId);
+  const name = exerciseDisplayName(t.exerciseId);
+  const type = getExerciseType(ex);
+  if(type==='cardio' || type==='mobility'){
+    if(!t.qty) return `Max ${name}`;
+    return `${t.unit==='m' ? toDisplayDistance(t.qty)+distanceUnitLabel() : t.qty+(type==='mobility'&&t.unit==='sec'?'s':(type==='cardio'?' kcal':'x'))} ${name}`;
+  }
+  return t.repsTarget ? `${t.repsTarget}x ${name}` : `Max ${name}`;
+}
+function addTemplateRest(){
+  state.tmp.wodTemplate.push(blankRestMove());
+  render();
+}
 function ensureWodTemplate(){
   if(!state.tmp.wodTemplate){
     state.tmp.wodTemplate = [blankTemplateMove()];
@@ -3231,7 +3282,7 @@ function ensureWodTemplate(){
   }
 }
 function isTemplateEmpty(){
-  return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.timing && !t.setsCount && !t.pctList && !t.weight && !t.qty && !t.repsTarget);
+  return state.tmp.wodTemplate.length<=1 && state.tmp.wodTemplate.every(t=>!t.rest && !t.timing && !t.setsCount && !t.pctList && !t.weight && !t.qty && !t.repsTarget);
 }
 function findWorkoutByName(name, format){
   const n = (name||'').trim().toLowerCase();
@@ -3851,8 +3902,12 @@ function matchRoundsCount(line){
 }
 function parseMovementLine(line){
   if(!line) return null;
-  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(kcal|calories?|cal|km|m)\b\s+(.+)$/i);
-  if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2].toLowerCase() };
+  let m = line.match(/^(\d+(?:[.,]\d+)?)\s*(kcal|calories?|cal|km|meters?|m|ft|feet|yds?|yards?)\b\.?\s+(.+)$/i);
+  if(m){
+    const u = m[2].toLowerCase();
+    if(/^(ft|feet|yds?|yards?)$/.test(u)) return { reps: String(distanceToMetersRounded(m[1], u)), name: m[3].trim(), unit: 'm' };
+    return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: /^meters?$/.test(u) ? 'm' : u };
+  }
   m = line.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(?:\d+(?:[.,]\d+)?)\s*(kcal|calories?|cal|km|m)?\b\s+(.+)$/i);
   if(m) return { reps: m[1].replace(',', '.'), name: m[3].trim(), unit: m[2] ? m[2].toLowerCase() : undefined };
   m = line.match(/^(\d+)\s+(.+)$/);
@@ -3913,6 +3968,11 @@ function parseScalingLines(lines){
   });
   return { tiers, remainingLines };
 }
+function parseKgToken(v){
+  if(v==null || v==='') return null;
+  const n = parseFloat(String(v).replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
 function buildTiersFromStructured(raw){
   const tiers = {};
   if(!raw) return tiers;
@@ -3922,10 +3982,13 @@ function buildTiersFromStructured(raw){
     const male = parseFloat(t.male), female = parseFloat(t.female);
     const calMale = parseFloat(t.calMale), calFemale = parseFloat(t.calFemale);
     const moves = Array.isArray(t.moves) ? t.moves
-      .filter(m=>m && m.name && ((m.reps!=null && m.reps!=='') || (Array.isArray(m.substitutes) && m.substitutes.length)))
+      .map(m=>m && ({...m, weight: parseKgToken(m.weight), weightFemale: parseKgToken(m.weightFemale)}))
+      .filter(m=>m && m.name && ((m.reps!=null && m.reps!=='') || m.weight!=null || (Array.isArray(m.substitutes) && m.substitutes.length)))
       .map(m=>({
         name: String(m.name),
         reps: (m.reps!=null && m.reps!=='') ? String(m.reps) : undefined,
+        weight: m.weight!=null ? m.weight : undefined,
+        weightFemale: m.weightFemale!=null ? m.weightFemale : undefined,
         substitutes: Array.isArray(m.substitutes) ? m.substitutes.filter(s=>s && String(s).trim()).map(s=>String(s).trim()) : undefined
       })) : [];
     if(!isNaN(male) || !isNaN(female) || !isNaN(calMale) || !isNaN(calFemale) || moves.length){
@@ -4304,12 +4367,13 @@ function parseEmomText(lines){
   const leftover = [];
   let intervalMin = '1', intervalSec = '0', rounds = '10';
   let totalDurationMin = null;
+  let sawEvery = false;
   const minuteBlocks = [];
   lines.forEach(line=>{
     let consumed = false;
     const interval = line.match(/every\s+(\d+)\s*:\s*(\d+)/i);
-    if(interval){ intervalMin = interval[1]; intervalSec = interval[2]; consumed = true; }
-    const totalDur = !interval && line.match(/^(\d+)(?::(\d+))?\s*(?:min\.?)?\s*emom\b/i);
+    if(interval){ intervalMin = interval[1]; intervalSec = interval[2]; consumed = true; sawEvery = true; }
+    const totalDur = !interval && line.match(/^[^a-z\d]*(\d+)(?::(\d+))?\s*(?:min\.?)?\s*emom\b/i);
     if(totalDur){ totalDurationMin = parseInt(totalDur[1]) + (totalDur[2] ? parseInt(totalDur[2])/60 : 0); consumed = true; }
     const roundsM = matchRoundsCount(line) || line.match(/emom\D*(\d+)/i);
     if(roundsM){ rounds = roundsM[1]; consumed = true; }
@@ -4332,19 +4396,25 @@ function parseEmomText(lines){
   let minuteBlockCount = 0;
   let blockMovementGroups = [];
   let cyclesCount = 0;
-  if(minuteBlocks.length >= 2 && totalDurationMin){
+  if(minuteBlocks.length >= 2){
+    const totalMin = totalDurationMin || minuteBlocks.length;
     minuteBlockCount = minuteBlocks.length;
     intervalMin = '1';
     intervalSec = '0';
-    rounds = String(Math.round(totalDurationMin));
-    cyclesCount = Math.round(totalDurationMin / minuteBlockCount);
+    rounds = String(Math.round(totalMin));
+    cyclesCount = Math.max(1, Math.round(totalMin / minuteBlockCount));
     movements.length = 0;
     minuteBlocks.sort((a,b)=>a.num-b.num).forEach(block=>{
       const blockMovs = [];
       block.content.split('+').forEach(seg=>{
-        const segMv = parseMovementLine(seg.trim());
+        // Hoehenangaben wie "(24/20in)" gehoeren nicht in den Uebungsnamen
+        const text = seg.trim().replace(/\s*\(\s*\d+\s*\/\s*\d+\s*(?:in|cm|")?\s*\)\s*$/i, '');
+        if(/^(rest|pause)\b/i.test(text)){ const r = { rest:true, name:'Rest' }; blockMovs.push(r); movements.push(r); return; }
+        const maxM = text.match(/^max\.?\s+(?:(cal|calories?)\s+)?(.+)$/i);
+        if(maxM){ const mx = { name: maxM[2].trim(), reps:'', unit: maxM[1] ? 'cal' : undefined }; blockMovs.push(mx); movements.push(mx); return; }
+        const segMv = parseMovementLine(text);
         if(segMv){ blockMovs.push(segMv); movements.push(segMv); }
-        else if(seg.trim()) leftover.push(seg.trim());
+        else if(text) leftover.push(text);
       });
       blockMovementGroups.push(blockMovs);
     });
@@ -4352,7 +4422,7 @@ function parseEmomText(lines){
     minuteBlocks.forEach(b=>b.raw.forEach(r=>leftover.push(r)));
   }
 
-  return { movements, intervalMin, intervalSec, rounds, leftover, minuteBlockCount, blockMovementGroups, cyclesCount };
+  return { movements, intervalMin, intervalSec, rounds, leftover, minuteBlockCount, blockMovementGroups, cyclesCount, sameInterval: sawEvery };
 }
 function parseForLoadText(text){
   const lines = ocrTextLines(text);
@@ -4410,11 +4480,15 @@ function applyTargetingRepsFromLeftover(leftoverLines, movements){
 function resolveStructuredMoveUnitReps(mv, exerciseId){
   const ex = state.exercises.find(e=>e.id===exerciseId);
   const isCardioMove = getExerciseType(ex)==='cardio';
-  let unit = isCardioMove ? 'kcal' : 'reps', reps = mv.reps||'';
-  if(isCardioMove && mv.reps && mv.unit){
-    if(mv.unit==='m'){ unit = 'm'; }
-    else if(mv.unit==='km'){ unit = 'm'; reps = String(Math.round(parseFloat(mv.reps) * 1000)); }
-    else { unit = 'kcal'; }
+  // Traglasten (Farmers Carry, Sled ...) zaehlen in Metern statt Wiederholungen
+  const isDistanceLoadMove = !isCardioMove && isDistanceWeightedExercise(ex);
+  let unit = isCardioMove ? 'kcal' : (isDistanceLoadMove ? 'm' : 'reps'), reps = mv.reps||'';
+  if((isCardioMove || isDistanceLoadMove) && mv.reps && isDistanceUnitToken(mv.unit)){
+    unit = 'm';
+    const meters = distanceToMetersRounded(mv.reps, mv.unit);
+    if(meters!=null) reps = String(meters);
+  } else if(isCardioMove && mv.reps && mv.unit){
+    unit = 'kcal';
   }
   return { unit, reps };
 }
@@ -4423,18 +4497,19 @@ function weightForExercise(exerciseId, rawWeight){
   return getExerciseType(ex)==='weighted' ? (rawWeight||'') : '';
 }
 function buildEmomMovementEntry(mv, groupWithNext, setsCount, extraLeftover){
+  if(mv.rest===true || mv.rest==='true' || /^(rest|pause)$/i.test((mv.name||'').trim())) return blankRestMove();
   const exerciseId = resolveExerciseIdFromName(mv.name);
   const ex = state.exercises.find(e=>e.id===exerciseId);
   const isCardioMove = getExerciseType(ex)==='cardio';
   const isDistanceWeightedMove = !isCardioMove && isDistanceWeightedExercise(ex);
   let unit = 'kcal', qty = '', repsTarget = mv.reps || '';
+  const toMeters = ()=>{ const v = distanceToMetersRounded(mv.reps, mv.unit); return String(v!=null ? v : mv.reps); };
   if(isCardioMove && mv.reps && mv.unit){
-    if(mv.unit==='m'){ unit = 'm'; qty = mv.reps; repsTarget = ''; }
-    else if(mv.unit==='km'){ unit = 'm'; qty = String(Math.round(parseFloat(mv.reps) * 1000)); repsTarget = ''; }
+    if(isDistanceUnitToken(mv.unit)){ unit = 'm'; qty = toMeters(); repsTarget = ''; }
     else { unit = 'kcal'; qty = mv.reps; repsTarget = ''; }
   } else if(isDistanceWeightedMove){
     unit = 'm';
-    if(mv.reps) qty = mv.unit==='km' ? String(Math.round(parseFloat(mv.reps) * 1000)) : mv.reps;
+    if(mv.reps) qty = isDistanceUnitToken(mv.unit) ? toMeters() : mv.reps;
     repsTarget = '';
   } else if(!isCardioMove && mv.reps && (mv.unit==='m' || mv.unit==='km') && extraLeftover){
     repsTarget = '';
@@ -4476,7 +4551,7 @@ function applyParsedWorkout(input){
   let leftoverLines = [];
 
   if(format==='emom'){
-    const p = structured ? { intervalMin: input.intervalMin||'1', intervalSec: input.intervalSec||'0', rounds: input.rounds||'10', movements: input.movements||[], leftover: [], minuteBlockCount: 0, blockMovementGroups: [], cyclesCount: 0 } : parseEmomText(parseLines);
+    const p = structured ? { intervalMin: input.intervalMin||'1', intervalSec: input.intervalSec||'0', rounds: input.rounds||'10', movements: input.movements||[], leftover: [], minuteBlockCount: 0, blockMovementGroups: [], cyclesCount: parseInt(input.cycles)||0 } : parseEmomText(parseLines);
     state.tmp.wodFormat = 'emom';
     state.tmp.emomMin = p.intervalMin;
     state.tmp.emomSec = p.intervalSec;
@@ -4486,15 +4561,27 @@ function applyParsedWorkout(input){
       const extraLeftover = [];
       p.blockMovementGroups.forEach(blockMovs=>{
         blockMovs.forEach((mv, mi)=>{
-          built.push(buildEmomMovementEntry(mv, mi < blockMovs.length-1, '', extraLeftover));
+          built.push(buildEmomMovementEntry(mv, mi < blockMovs.length-1 && !blockMovs[mi+1].rest && !mv.rest, '', extraLeftover));
         });
       });
       state.tmp.wodTemplate = built;
-      state.tmp.emomAlternateCycles = p.cyclesCount || 0;
+      state.tmp.emomAlternateCycles = state.tmp.emomRounds = String(Math.max(1, p.cyclesCount || 1));
       leftoverLines = p.leftover.concat(extraLeftover);
     } else if(p.movements.length){
       const extraLeftover = [];
-      state.tmp.wodTemplate = p.movements.map(mv=>buildEmomMovementEntry(mv, false, '', extraLeftover));
+      const built = p.movements.map((mv,i)=>{
+        const next = p.movements[i+1];
+        const wantsGroup = mv.groupWithNext===true || mv.groupWithNext==='true' || !!p.sameInterval;
+        const group = wantsGroup && !!next && !(next.rest===true || next.rest==='true' || /^(rest|pause)$/i.test((next.name||'').trim()));
+        return buildEmomMovementEntry(mv, group, '', extraLeftover);
+      });
+      state.tmp.wodTemplate = built;
+      // Wiederholungen des Ablaufs automatisch ableiten: "rounds" = Gesamt-Intervalle (z.B. 20:00 EMOM = 20),
+      // der Ablauf besteht aus G Intervallen (z.B. 4 Uebungen + Pause = 5) -> 20 / 5 = 4 Durchgaenge.
+      const groupCount = emomTemplateGroups(built).length;
+      const totalIntervals = parseInt(p.rounds) || 1;
+      const cycles = p.cyclesCount || (groupCount>1 ? Math.max(1, Math.round(totalIntervals / groupCount)) : totalIntervals);
+      state.tmp.emomAlternateCycles = state.tmp.emomRounds = String(Math.max(1, cycles));
       leftoverLines = p.leftover.concat(extraLeftover);
     } else if(nameInfo.name){
       state.tmp.wodTemplate = [{
@@ -4616,6 +4703,12 @@ function applyParsedWorkout(input){
           }
         }
         if(tm.reps) match.reps = tm.reps;
+        // Gewicht je Bewegung (z.B. "Rx: 24/16kg, 2x22,5/2x15kg" = Kettlebell vs. Hanteln)
+        const perMoveKg = (state.profile && state.profile.gender==='w' && tm.weightFemale!=null) ? tm.weightFemale : tm.weight;
+        if(perMoveKg!=null && !tm.substitutes){
+          const mex = state.exercises.find(e=>e.id===match.exerciseId);
+          if(getExerciseType(mex)==='weighted') match.weight = String(perMoveKg);
+        }
       });
     }
   }
@@ -8522,7 +8615,7 @@ function formatMovementLine(m){
     if(m.unit==='sec') return `${repsLabel}s ${name}`;
     return `${repsLabel}x ${name}`;
   }
-  let line = `${repsLabel}x ${name}`;
+  let line = (m.unit==='m' && isDistanceWeightedExercise(ex)) ? `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}` : `${repsLabel}x ${name}`;
   if(type==='weighted' && m.weight){
     line += ` - ${fmtWeight(m.weight)}`;
   }
@@ -8552,22 +8645,13 @@ function formatBoxWorkoutPreview(w){
     return `${m.setsCount||''}x${m.repsTarget||''} ${exerciseDisplayName(m.exerciseId)}`.trim();
   });
   if(w.format==='emom'){
-    const totalSec = ((p.emomMin||0)*60 + (p.emomSec||0)) *
-      (p.emomAlternateCycles>1
-        ? (p.wodTemplate||[]).filter((t,i)=>i===0 || !p.wodTemplate[i-1].groupWithNext).length * p.emomAlternateCycles
-        : (p.emomRounds||1));
-    const header = `EMOM ${Math.floor(totalSec/60)}:${String(totalSec%60).padStart(2,'0')}`;
-    if(p.emomAlternateCycles>1){
-      const blocks = [];
-      let cur = [];
-      (p.wodTemplate||[]).forEach(m=>{
-        cur.push(`${m.setsCount||''}x${m.repsTarget||''} ${exerciseDisplayName(m.exerciseId)}`.trim());
-        if(!m.groupWithNext){ blocks.push(cur.join(' + ')); cur = []; }
-      });
-      return `${header} (alternierend, ${p.emomAlternateCycles}× je Block)\n` +
-        blocks.map((b,i)=>`Minute ${i+1}: ${b}`).join('\n');
-    }
-    return `${header} × ${p.emomRounds||1} — ${lines.join(', ')}`;
+    const groups = emomTemplateGroups(p.wodTemplate||[]);
+    const cycles = Math.max(1, parseInt(p.emomAlternateCycles) || parseInt(p.emomRounds) || 1);
+    const intervalSec = (parseInt(p.emomMin)||0)*60 + (parseInt(p.emomSec)||0);
+    const totalSec = intervalSec * groups.length * cycles;
+    const header = `EMOM ${Math.floor(totalSec/60)}:${String(totalSec%60).padStart(2,'0')}${cycles>1 ? ` (${cycles}× wiederholt)` : ''}`;
+    const word = intervalSec===60 ? 'Minute' : 'Intervall';
+    return `${header}\n` + groups.map((g,i)=>`${word} ${i+1}: ${g.map(emomSlotText).join(' + ')}`).join('\n');
   }
   return lines.join(', ');
 }
@@ -8677,6 +8761,7 @@ function buildWorkoutTextForAi(w){
   } else if(w.roundsLog && w.roundsLog.length){
     w.roundsLog.forEach((round,ri)=>{
       lines.push(`Runde ${ri+1}: ` + round.map(item=>{
+        if(item.rest) return 'Pause';
         const ex = state.exercises.find(e=>e.id===item.exerciseId);
         const isWeighted = getExerciseType(ex)==='weighted';
         return `${ex?ex.name:'—'} ${item.reps}${isWeighted?'x'+item.weight+'kg':'x'}`;
@@ -8831,11 +8916,12 @@ function renderWorkoutHistoryEntry(w){
       <div><span>Ø Pace</span><span>${formatPace(r.distanceM||0, (r.elapsedSec||0)*1000)}</span></div>
     </div>`;
   } else if(w.roundsLog && w.roundsLog.length){
-    const totalSets = w.roundsLog.reduce((n,round)=>n+round.length,0);
+    const totalSets = w.roundsLog.reduce((n,round)=>n+round.filter(item=>!item.rest).length,0);
     summaryLine = `${w.movements.length} Übungen · ${totalSets} Sätze`;
     body = `<div class="moves">
       ${w.roundsLog.map((round,ri)=>{
         const line = round.map(item=>{
+          if(item.rest) return 'Pause';
           const ex = state.exercises.find(e=>e.id===item.exerciseId);
           const isWeighted = getExerciseType(ex)==='weighted';
           return `${ex?ex.name:'—'} ${item.reps}${isWeighted?'×'+item.weight+'kg':'x'}`;
@@ -8924,6 +9010,14 @@ function renderWorkoutInner(){
     : renderWodTemplatePhase(headerFields, historyHtml));
 }
 
+// Stellt Intervall, Wiederholungen und den Ablauf (inkl. Pausen) eines gespeicherten EMOM wieder her.
+function applyEmomConfig(cfg){
+  state.tmp.wodTemplate = JSON.parse(JSON.stringify(cfg.template));
+  const sec = cfg.intervalSec || 60;
+  state.tmp.emomMin = String(Math.floor(sec/60));
+  state.tmp.emomSec = String(sec%60);
+  state.tmp.emomAlternateCycles = state.tmp.emomRounds = String(cfg.cycles || 1);
+}
 function loadDoneWorkout(index){
   const doneNames = [...new Set(state.workouts.map(w=>w.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'de'));
   const name = doneNames[index];
@@ -8939,7 +9033,10 @@ function loadDoneWorkout(index){
   state.tmp.gps = null;
   state.tmp.wodFormat = fmt;
 
-  if(fmt==='strength' || fmt==='emom'){
+  if(fmt==='emom' && w.emom && w.emom.template && w.emom.template.length){
+    applyEmomConfig(w.emom);
+  } else if(fmt==='strength' || fmt==='emom'){
+    if(fmt==='emom' && w.movements[0]) state.tmp.emomAlternateCycles = state.tmp.emomRounds = String(w.movements[0].sets.length || 1);
     state.tmp.wodTemplate = w.movements.map((m,mi)=>{
       const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
       const next = w.movements[mi+1];
@@ -9016,10 +9113,6 @@ function renderBoxCategoryPicker(){
 function getEmomIntervalSec(){
   return (parseInt(state.tmp.emomMin)||0)*60 + (parseInt(state.tmp.emomSec)||0);
 }
-function toggleEmomAlternate(checked){
-  state.tmp.emomAlternateCycles = checked ? (parseInt(state.tmp.emomAlternateCycles)>0 ? state.tmp.emomAlternateCycles : (state.tmp.emomRounds || 1)) : 0;
-  render();
-}
 function renderWodTemplatePhase(headerFields, historyHtml){
   const isEmom = state.tmp.wodFormat==='emom';
   const refNote = state.tmp.wodNameMatch
@@ -9031,29 +9124,36 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       <button type="button" class="btn-sm btn-ghost" style="margin-top:6px;" onclick="state.tmp.missing1RMWarning=null; render();">Verstanden</button>
     </div>` : '';
 
-  const emomGroupCount = isEmom ? state.tmp.wodTemplate.filter((t,i)=>i===0 || !state.tmp.wodTemplate[i-1].groupWithNext).length : 0;
-  const isAlternating = isEmom && (parseInt(state.tmp.emomAlternateCycles)||0) > 0;
-  const totalEmomSec = ((parseInt(state.tmp.emomMin)||0)*60 + (parseInt(state.tmp.emomSec)||0)) *
-    (isAlternating ? emomGroupCount * (parseInt(state.tmp.emomAlternateCycles)||0) : (parseInt(state.tmp.emomRounds)||0));
+  const emomGroups = isEmom ? emomTemplateGroups(state.tmp.wodTemplate) : [];
+  const emomCycles = isEmom ? getEmomCycles() : 0;
+  const emomIntervalSec = isEmom ? getEmomIntervalSec() : 0;
+  const totalEmomSec = emomIntervalSec * emomGroups.length * emomCycles;
+  const emomIntervalWord = emomIntervalSec===60 ? 'Minute' : 'Intervall';
 
   const emomFields = isEmom ? `
     <div class="row">
       <div class="field"><label>Intervall Min.</label><input type="number" step="1" min="0" value="${state.tmp.emomMin}" onchange="state.tmp.emomMin=this.value; render();"></div>
       <div class="field"><label>Intervall Sek.</label><input type="number" step="1" min="0" max="59" value="${state.tmp.emomSec}" onchange="state.tmp.emomSec=this.value; render();"></div>
     </div>
-    ${emomGroupCount>1 ? `
-    <div class="checkbox-row" style="margin-bottom:14px;">
-      <input type="checkbox" id="emomAlternate" ${isAlternating?'checked':''} onchange="toggleEmomAlternate(this.checked)">
-      Alternierend (Blöcke wechseln sich jede Runde ab, statt nacheinander)
-    </div>` : ''}
-    ${isAlternating
-      ? `<div class="field"><label>Wiederholungen je Block</label><input type="number" step="1" min="1" value="${state.tmp.emomAlternateCycles}" onchange="state.tmp.emomAlternateCycles=this.value; render();"></div>`
-      : `<div class="field"><label>Runden</label><input type="number" step="1" min="1" value="${state.tmp.emomRounds}" onchange="state.tmp.emomRounds=this.value; render();"></div>`
-    }
-    ${totalEmomSec>0 ? `<div class="note" style="margin-top:-6px;margin-bottom:10px;">Gesamtdauer: ${Math.floor(totalEmomSec/60)}:${String(totalEmomSec%60).padStart(2,'0')} min</div>` : ''}
+    <div class="field"><label>${emomGroups.length>1 ? 'Ablauf wiederholen (×)' : 'Wiederholungen (×)'}</label><input type="number" step="1" min="1" value="${emomCycles}" onchange="setEmomCycles(this.value)"></div>
+    ${totalEmomSec>0 ? `<div class="note" style="margin-top:-6px;margin-bottom:10px;"><b>Gesamtdauer: ${Math.floor(totalEmomSec/60)}:${String(totalEmomSec%60).padStart(2,'0')} min</b> (${emomGroups.length} ${emomGroups.length===1?'Intervall':'Intervalle'} × ${emomCycles})</div>` : ''}
+    <div class="note" style="margin-bottom:12px;">
+      <div style="font-weight:600;margin-bottom:4px;">Ablauf${emomCycles>1 ? ` (${emomCycles}× wiederholt)` : ''}:</div>
+      ${emomGroups.map((g,gi)=>`<div>${emomIntervalWord} ${gi+1}: ${escapeHtml(g.map(emomSlotText).join(' + '))}</div>`).join('')}
+    </div>
   ` : '';
 
   const moveBlocks = state.tmp.wodTemplate.map((t,mi)=>{
+    if(t.rest){
+      return `
+    <div class="wod-move-row" data-idx="${mi}">
+      <div class="top">
+        <div style="flex:1;font-weight:600;">😮‍💨 Pause</div>
+        <button class="remove-row" onclick="removeTemplateMove(${mi})">✕</button>
+      </div>
+      <div class="note">Nur Zeit: ein ganzes Intervall (${fmtClock(getEmomIntervalSec()*1000,false)}) Erholung.</div>
+    </div>`;
+    }
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const type = getExerciseType(ex);
     const isWeighted = type==='weighted';
@@ -9070,7 +9170,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         </select>
       </div>` : '';
     const distanceField = isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>Distanz (${distanceUnitLabel()})</label><input type="number" step="1" value="${toDisplayDistance(t.qty)}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 15"></div>` : '';
-    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label style="white-space:nowrap;">Ziel-WH (pro Satz)</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="z.B. 1 oder 7,5,3"></div>` : '';
+    const repsTargetField = (isWeighted || isBodyweight) && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label style="white-space:nowrap;">Ziel-WH (pro Satz)</label><input type="text" value="${escapeHtml(t.repsTarget)}" onchange="updateTemplateField(${mi},'repsTarget',this.value)" placeholder="${isEmom ? 'leer = Max' : 'z.B. 1 oder 7,5,3'}"></div>` : '';
     const pctField = isWeighted && !isDistanceWeighted ? `<div class="field" style="margin-bottom:0;"><label>% vom 1RM</label><input type="text" value="${escapeHtml(t.pctList)}" onchange="updateTemplateField(${mi},'pctList',this.value)" placeholder="z.B. 75"></div>` : '';
     const e1rmSuggestion = isWeighted && !isDistanceWeighted ? bestE1RM(t.exerciseId) : null;
     const weightSuggestionNote = e1rmSuggestion ? `
@@ -9091,15 +9191,15 @@ function renderWodTemplatePhase(headerFields, historyHtml){
         <button type="button" class="btn ${t.unit!=='sec'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'reps')">Wiederholungen</button>
         <button type="button" class="btn ${t.unit==='sec'?'btn-primary':'btn-ghost'}" onclick="setTemplateMoveUnit(${mi},'sec')">Sekunden</button>
       </div>` : '';
-    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 500"></div></div>`
+    const qtyField = isCardio ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='m'?distanceUnitLabel():'kcal'})</label><input type="number" step="1" value="${t.unit==='m'?toDisplayDistance(t.qty):t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="${isEmom ? 'leer = Max' : 'z.B. 500'}"></div></div>`
       : isMobility ? `<div class="row"><div class="field" style="margin-bottom:0;"><label>Ziel pro Satz (${t.unit==='sec'?'Sek.':'Wdh.'})</label><input type="number" step="1" value="${t.qty}" oninput="updateTemplateFieldQty(${mi},this.value)" placeholder="z.B. 10"></div></div>` : '';
     const setsField = isEmom
       ? ''
       : `<div class="field" style="margin-bottom:0;"><label>Sets</label><input type="number" step="1" value="${t.setsCount}" onchange="updateTemplateField(${mi},'setsCount',this.value)" placeholder="z.B. 5"></div>`;
-    const groupToggle = ((isEmom || state.tmp.wodFormat==='strength') && mi < state.tmp.wodTemplate.length-1) ? `
+    const groupToggle = ((isEmom || state.tmp.wodFormat==='strength') && mi < state.tmp.wodTemplate.length-1 && !state.tmp.wodTemplate[mi+1].rest) ? `
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;color:var(--chalk-60);">
         <input type="checkbox" ${t.groupWithNext?'checked':''} onchange="updateTemplateField(${mi},'groupWithNext',this.checked)">
-        Mit nächster Übung zu einem Komplex kombinieren
+        ${isEmom ? 'Im selben Intervall mit der nächsten Übung' : 'Mit nächster Übung zu einem Komplex kombinieren'}
       </label>` : '';
     return `
     <div class="wod-move-row" data-idx="${mi}">
@@ -9135,6 +9235,7 @@ function renderWodTemplatePhase(headerFields, historyHtml){
       ${pr1rmBanner}
       ${moveBlocks}
       <button class="add-move-btn" onclick="addTemplateMove()">+ Bewegung hinzufügen</button>
+      ${isEmom ? `<button class="add-move-btn" onclick="addTemplateRest()">+ Pause hinzufügen</button>` : ''}
       <div class="row">
         <button class="btn btn-ghost" onclick="saveWodDraft()">📝 Entwurf speichern</button>
         <button class="btn btn-primary" onclick="generateWodRows()">WOD erstellen</button>
@@ -9175,8 +9276,8 @@ function startLiveWorkout(){
     groups.push(groupIdx);
     i = j+1;
   }
-  const alternateCycles = parseInt(state.tmp.emomAlternateCycles) || 0;
-  if(state.tmp.wodFormat==='emom' && alternateCycles > 1){
+  if(state.tmp.wodFormat==='emom'){
+    const alternateCycles = getEmomCycles();
     for(let si=0; si<alternateCycles; si++){
       groups.forEach(groupIdx=>{
         flat.push(groupIdx.map(mi=>({mi, si})));
@@ -9221,6 +9322,9 @@ function startLiveWorkout(){
 function renderLiveGroupBlocks(group){
   return group.map(({mi,si})=>{
     const mv = state.tmp.wodMoves[mi];
+    if(mv.rest){
+      return `<div style="margin:6px 0 16px;text-align:center;"><div style="font-size:42px;">😮‍💨</div><h3 style="margin:6px 0 4px;">Pause</h3><div class="note">Durchatmen, Wasser trinken – nächstes Intervall startet automatisch.</div></div>`;
+    }
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const s = mv.sets[si];
     const type = getExerciseType(ex);
@@ -9236,6 +9340,7 @@ function renderLiveGroupBlocks(group){
       ? `<div style="text-align:center;margin-bottom:10px;"><button type="button" class="btn-sm btn-ghost" onclick="startGpsRun('inline',{flow:'wod',mi:${mi},si:${si}})">📍 Lauf starten</button></div>` : '';
     const prescriptionBits = [];
     if(mv.repsTarget) prescriptionBits.push(mv.repsTarget+' Wdh.');
+    else if(mv.max) prescriptionBits.push('Max');
     if(s.pct) prescriptionBits.push(s.pct+'% 1RM');
     return `
       <div style="margin-bottom:16px;">
@@ -9304,17 +9409,36 @@ function renderWodLivePhase(){
     </div>
   `;
 }
+function liveGroupText(group){
+  return group.map(({mi})=>{
+    const mv = state.tmp.wodMoves[mi];
+    if(mv.rest) return 'Pause';
+    const ex = state.exercises.find(e=>e.id===mv.exerciseId);
+    const name = ex ? exerciseDisplayName(ex.id) : '—';
+    const type = getExerciseType(ex);
+    const target = mv.repsTarget || ((type==='cardio'||type==='mobility') ? (mv.sets[0] && mv.sets[0].reps) : '');
+    return target ? `${target} ${name}` : `Max ${name}`;
+  }).join(' + ');
+}
 function renderEmomLivePhase(live){
   const group = live.flat[live.pos];
   const isComplex = group.length>1;
   const blocks = renderLiveGroupBlocks(group);
+  const cycles = getEmomCycles();
+  const perCycle = Math.max(1, Math.round(live.flat.length / cycles));
+  const intervalWord = getEmomIntervalSec()===60 ? 'Minute' : 'Intervall';
+  const posLabel = (cycles>1 && perCycle>1)
+    ? `Durchgang ${Math.floor(live.pos/perCycle)+1} / ${cycles} · ${intervalWord} ${live.pos%perCycle+1} / ${perCycle}`
+    : `${intervalWord} ${live.pos+1} / ${live.flat.length}`;
+  const next = live.flat[live.pos+1];
   return `
     <div class="card" style="text-align:center;">
-      <div class="stat-label">${isComplex?'Runde':'Satz'} ${live.pos+1} / ${live.flat.length}</div>
+      <div class="stat-label">${posLabel}</div>
+      ${next ? `<div class="note" style="margin-top:4px;">Als Nächstes: ${escapeHtml(liveGroupText(next))}</div>` : `<div class="note" style="margin-top:4px;">Letztes Intervall</div>`}
       <div id="timerBigDisplay" class="stat-num" style="font-size:48px;margin:14px 0;">${fmtClock(live.emomRemaining,false)}</div>
       <div style="text-align:left;">${blocks}</div>
       <div class="row" style="margin-bottom:10px;">
-        <button class="btn btn-ghost" onclick="${live.emomRunning?'pauseEmomLiveTimer()':'resumeEmomLiveTimer()'}">${live.emomRunning?'Pause':'Weiter'}</button>
+        <button class="btn btn-ghost" onclick="${live.emomRunning?'pauseEmomLiveTimer()':'resumeEmomLiveTimer()'}">${live.emomRunning?'⏸ Timer anhalten':'▶ Timer weiter'}</button>
         <button class="btn btn-ghost" onclick="captureLiveGroupValues(state.tmp.live.flat[state.tmp.live.pos]); showToast('Werte gespeichert'); render();">Werte speichern</button>
       </div>
       <div class="row">
@@ -9328,6 +9452,7 @@ function renderEmomLivePhase(live){
 function captureLiveGroupValues(group){
   group.forEach(({mi,si})=>{
     const mv = state.tmp.wodMoves[mi];
+    if(mv.rest) return;
     const repsEl = document.getElementById(`liveReps_${mi}`);
     if(repsEl){
       const rawReps = repsEl.value;
@@ -9549,11 +9674,13 @@ function renderForTimeFlow(historyHtml){
     const type = getExerciseType(ex);
     const isCardio = type==='cardio';
     const isMobility = type==='mobility';
+    const isDistLoad = !isCardio && m.unit==='m' && isDistanceWeightedExercise(ex);
     const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien')
+      : isDistLoad ? `Distanz (${distanceUnitLabel()})`
       : isMobility ? (m.unit==='sec' ? 'Sekunden' : 'Wiederholungen')
       : 'Wiederholungen';
-    const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
-    const qtyHandler = isCardio ? `updateForTimeMoveQty(${mi},this.value)` : `updateForTimeMove(${mi},'reps',this.value)`;
+    const qtyValue = (isCardio || isDistLoad) && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
+    const qtyHandler = (isCardio || isDistLoad) ? `updateForTimeMoveQty(${mi},this.value)` : `updateForTimeMove(${mi},'reps',this.value)`;
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setForTimeMoveUnit(${mi},'kcal')">Kalorien</button>
@@ -9629,7 +9756,7 @@ function updateForTimeMove(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : 'reps');
+    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : (isDistanceWeightedExercise(ex) ? 'm' : 'reps'));
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
@@ -9816,6 +9943,7 @@ function forTimeQtyUnitSuffix(m){
   const type = getExerciseType(ex);
   if(type==='cardio') return m.unit==='m' ? distanceUnitLabel() : 'kcal';
   if(type==='mobility') return m.unit==='sec' ? 's' : 'reps';
+  if(m.unit==='m' && isDistanceWeightedExercise(ex)) return distanceUnitLabel();
   return 'reps';
 }
 // GPS-Start/-Live-Widget/Messergebnis fuer Lauf-Items (Meter) in der Running-Checkliste.
@@ -10062,11 +10190,13 @@ function renderAmrapFlow(historyHtml){
     const type = getExerciseType(ex);
     const isCardio = type==='cardio';
     const isMobility = type==='mobility';
+    const isDistLoad = !isCardio && m.unit==='m' && isDistanceWeightedExercise(ex);
     const qtyLabel = isCardio ? (m.unit==='m' ? `Distanz (${distanceUnitLabel()})` : 'Kalorien')
+      : isDistLoad ? `Distanz (${distanceUnitLabel()})`
       : isMobility ? (m.unit==='sec' ? 'Sekunden pro Runde' : 'WH pro Runde')
       : 'WH pro Runde';
-    const qtyValue = isCardio && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
-    const qtyHandler = isCardio ? `updateAmrapMoveQty(${mi},this.value)` : `updateAmrapMove(${mi},'reps',this.value)`;
+    const qtyValue = (isCardio || isDistLoad) && m.unit==='m' ? toDisplayDistance(m.reps) : m.reps;
+    const qtyHandler = (isCardio || isDistLoad) ? `updateAmrapMoveQty(${mi},this.value)` : `updateAmrapMove(${mi},'reps',this.value)`;
     const unitToggle = isCardio ? `
       <div class="row" style="margin-bottom:8px;">
         <button type="button" class="btn ${m.unit==='kcal'?'btn-primary':'btn-ghost'}" onclick="setAmrapMoveUnit(${mi},'kcal')">Kalorien</button>
@@ -10147,7 +10277,7 @@ function updateAmrapMove(mi, field, val){
   if(field==='exerciseId'){
     const ex = state.exercises.find(e=>e.id===val);
     const type = getExerciseType(ex);
-    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : 'reps');
+    b.movements[mi].unit = isRunExercise(ex) ? 'm' : (type==='cardio' ? 'kcal' : (isDistanceWeightedExercise(ex) ? 'm' : 'reps'));
     if(type!=='weighted') b.movements[mi].weight = '';
     render();
   }
@@ -10734,7 +10864,10 @@ function onWodNameChange(val){
   state.tmp.wodNameMatch = match || null;
   state.tmp.wodFeeling = null;
   if(match){
-    if((fmt==='strength'||fmt==='emom') && isTemplateEmpty()){
+    if(fmt==='emom' && isTemplateEmpty() && match.emom && match.emom.template && match.emom.template.length){
+      applyEmomConfig(match.emom);
+    } else if((fmt==='strength'||fmt==='emom') && isTemplateEmpty()){
+      if(fmt==='emom' && match.movements[0]) state.tmp.emomAlternateCycles = state.tmp.emomRounds = String(match.movements[0].sets.length || 1);
       state.tmp.wodTemplate = match.movements.map((m,mi)=>{
         const pcts = m.sets.map(s=>s.pct).filter(p=>p!=null);
         const next = match.movements[mi+1];
@@ -10784,6 +10917,7 @@ function generateWodRows(){
   const effectiveSetsCount = tmpl.map((t,ti)=>{
     const isFollower = ti>0 && tmpl[ti-1].groupWithNext;
     if(isFollower) return null;
+    if(isEmom) return getEmomCycles();
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const type = getExerciseType(ex);
     const isCardio = type==='cardio' || type==='mobility';
@@ -10826,6 +10960,10 @@ function generateWodRows(){
   });
 
   state.tmp.wodMoves = tmpl.map((t,ti)=>{
+    if(t.rest){
+      return { rest:true, exerciseId:null, timing:'', pctList:'', setsCountRaw:'', unit:null, repsTarget:'', weightStep:'', groupId: groupIdArr[ti],
+        sets: Array.from({length: effectiveSetsCount[ti]}, ()=>({reps:'', weight:'', pct:null, autoFilled:false})) };
+    }
     const ex = state.exercises.find(e=>e.id===t.exerciseId);
     const type = getExerciseType(ex);
     const isCardio = type==='cardio' || type==='mobility';
@@ -10857,7 +10995,7 @@ function generateWodRows(){
       }
     }
     const timing = isEmom ? `Every ${state.tmp.emomMin}:${String(state.tmp.emomSec).padStart(2,'0')}` : t.timing;
-    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: (isCardio || isDistanceWeighted) ? t.unit : null, repsTarget: t.repsTarget||'', weightStep: t.weightStep||'', groupId: groupIdArr[ti], sets };
+    return { exerciseId:t.exerciseId, timing, pctList: isCardio ? '' : t.pctList, setsCountRaw:t.setsCount, unit: (isCardio || isDistanceWeighted) ? t.unit : null, repsTarget: t.repsTarget||'', weightStep: t.weightStep||'', max: isEmom && (isCardio ? !t.qty : !t.repsTarget), groupId: groupIdArr[ti], sets };
   });
   state.tmp.wodPhase = 'rows';
   applyFeelingFillIfNeeded();
@@ -10931,7 +11069,7 @@ async function saveWod(liveFlat){
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
-  const movements = state.tmp.wodMoves.map(mv=>{
+  const movements = state.tmp.wodMoves.filter(mv=>!mv.rest).map(mv=>{
     const ex = state.exercises.find(e=>e.id===mv.exerciseId);
     const type = getExerciseType(ex);
     const isQtyBased = type==='cardio' || type==='mobility';
@@ -10948,10 +11086,14 @@ async function saveWod(liveFlat){
   const roundsLog = (state.tmp.wodFormat==='emom' && liveFlat && liveFlat.length)
     ? liveFlat.map(group => group.map(({mi,si})=>{
         const mv = state.tmp.wodMoves[mi];
+        if(mv.rest) return { rest:true };
         return { exerciseId: mv.exerciseId, reps: mv.sets[si].reps, weight: mv.sets[si].weight, failed: !!mv.sets[si].failed };
-      }).filter(e=>e.reps!=='' && e.reps!=null)).filter(round=>round.length>0)
+      }).filter(e=>e.rest || (e.reps!=='' && e.reps!=null))).filter(round=>round.length>0)
     : null;
   const workout = {id:uid(), date, name, note, format: state.tmp.wodFormat, movements, roundsLog};
+  if(state.tmp.wodFormat==='emom'){
+    workout.emom = { intervalSec: getEmomIntervalSec(), cycles: getEmomCycles(), template: JSON.parse(JSON.stringify(state.tmp.wodTemplate||[])) };
+  }
   state.workouts.push(workout);
   await saveKey('workouts', state.workouts);
   if(state.tmp.loadedDraftId){
