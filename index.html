@@ -2716,7 +2716,8 @@ async function initApp(){
   // eine geraetespezifische UI-Praeferenz handelt, keine "echten" Nutzerdaten.
   let restoredTab = null;
   try{ restoredTab = localStorage.getItem('ironlog:lastActiveTab'); }catch(e){}
-  if(restoredTab && ['today','workout','nutrition','box','progress','profile'].includes(restoredTab)) state.activeTab = restoredTab;
+  if(restoredTab==='progress'){ state.activeTab = 'profile'; state.tmp.profileSection = 'progress'; }
+  else if(restoredTab && ['today','workout','nutrition','box','profile'].includes(restoredTab)) state.activeTab = restoredTab;
 
   let restoredBoxSubTab = null;
   try{ restoredBoxSubTab = localStorage.getItem('ironlog:lastBoxSubTab'); }catch(e){}
@@ -2787,7 +2788,6 @@ function bottomNavHtml(){
     navBtn('workout','Workout', iconBarbell()),
     navBtn('nutrition','Ernährung', iconApple()),
     ...(showBoxTab ? [navBtn('box','Box', iconBuilding())] : []),
-    navBtn('progress','Fortschritt', iconChart()),
     navBtn('profile','Profil', iconUser())
   ].join('');
 }
@@ -2838,7 +2838,6 @@ function render(){
   if(state.activeTab==='workout') content.innerHTML = renderWorkout();
   if(state.activeTab==='nutrition') content.innerHTML = renderNutrition();
   if(state.activeTab==='box') content.innerHTML = renderBox();
-  if(state.activeTab==='progress') content.innerHTML = renderProgress();
   if(state.activeTab==='profile') content.innerHTML = renderProfile();
 
   document.getElementById('modalRoot').innerHTML = renderExerciseModalRoot() + renderDayDetailModalRoot() + renderClassDetailModalRoot() + renderPlanPickerModalRoot() + renderPhotoImportModal() + renderOnboardingModal() + renderEditWorkoutModalRoot() + renderAiReviewModal() + renderFoodAddModal();
@@ -2853,7 +2852,7 @@ function render(){
       }
     }
   }
-  if(state.activeTab==='progress') setTimeout(mountProgressCharts, 0);
+  if(state.activeTab==='profile' && state.tmp.profileSection==='progress') setTimeout(mountProgressCharts, 0);
   if(state.tmp.photoImport?.loading) setTimeout(mountMuscleUpLottie, 0);
   window.scrollTo(0, scrollY);
 }
@@ -13426,6 +13425,10 @@ function renderProfile(){
   if(section==='data') return renderProfileData();
   if(section==='exercises') return renderMyExercisesScreen();
   if(section==='trainingplan') return renderTrainingPlanScreen();
+  if(section==='progress'){
+    const back = state.tmp.progressSection ? '' : `<button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>`;
+    return back + renderProgress();
+  }
   return renderProfileMenu();
 }
 function renderMyExercisesScreen(){
@@ -13524,6 +13527,11 @@ function renderProfileMenu(){
       </div>
     </div>
     ` : ''}
+    ${isBoxAdminView() ? '' : `
+    <div class="card">
+      <h2 class="small">Fortschritt</h2>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="state.tmp.progressSection=null; setProfileSection('progress')">📈 Ruhmeshalle, Verlauf &amp; Körpermaße →</button>
+    </div>`}
     <div class="card">
       <h2>Profil</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;margin-bottom:10px;" onclick="setProfileSection('account')">👤 Persönliche Daten</button>
