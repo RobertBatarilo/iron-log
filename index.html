@@ -12044,11 +12044,12 @@ const DEFAULT_MEAL_SLOTS = [
   {id:'snack', name:'Snack', icon:'🍎', active:true}
 ];
 const FOOD_UNITS = ['g','ml','Stk','Portion'];
+// Alltags-Aktivitaet OHNE Training (das Training wird separat gerechnet)
 const ACTIVITY_LEVELS = [
-  {id:'sedentary', label:'Kaum Bewegung (Büro, wenig Training)', factor:1.2},
-  {id:'light', label:'Leicht aktiv (1-2 Trainings/Woche)', factor:1.375},
-  {id:'moderate', label:'Aktiv (3-4 Trainings/Woche)', factor:1.55},
-  {id:'high', label:'Sehr aktiv (5+ Trainings/Woche)', factor:1.725}
+  {id:'sedentary', label:'Überwiegend sitzend (z.B. Büro)', factor:1.2},
+  {id:'light', label:'Leicht aktiv (viel Stehen/Gehen im Alltag)', factor:1.3},
+  {id:'moderate', label:'Viel auf den Beinen (z.B. Handwerk, Pflege)', factor:1.4},
+  {id:'high', label:'Körperlich fordernder Beruf', factor:1.5}
 ];
 function foodState(){
   if(!state.food) state.food = { byDate:{}, loading:{}, loaded:{}, recents:null, customFoods:null, range:null, flushing:false };
@@ -12072,7 +12073,7 @@ function renderTodayNutritionCard(){
   ensureFoodDay(date);
   const entries = foodState().byDate[date] || [];
   const t = foodTotals(entries);
-  const kT = foodNum(state.profile && state.profile.kcalTarget);
+  const kT = nutritionDayTargets(date).kcal;
   return `
     <div class="card" style="cursor:pointer;" onclick="setTab('nutrition')">
       <h2 class="small">Ernährung heute</h2>
@@ -12351,7 +12352,10 @@ function renderNutrition(){
   const entries = (foodState().byDate[date]) || [];
   const totals = foodTotals(entries);
   const p = state.profile || {};
-  const kT = foodNum(p.kcalTarget), pT = foodNum(p.proteinTarget), cT = foodNum(p.carbsTarget), fT = foodNum(p.fatTarget);
+  const tg = nutritionDayTargets(date);
+  const kT = tg.kcal, pT = tg.protein, cT = tg.carbs, fT = tg.fat;
+  const targetLine = nutritionDayTargetLine(tg);
+  const canEditBurn = !!p.addTrainingKcal && !!kT;
   const slots = mealSlots().filter(s=>s.active!==false);
   const knownIds = new Set(mealSlots().map(s=>s.id));
   const visibleIds = new Set(slots.map(s=>s.id));
@@ -12376,6 +12380,9 @@ function renderNutrition(){
         <div><div class="stat-num">${Math.round(totals.kcal)}</div><div class="stat-label">kcal gegessen</div></div>
         <div style="text-align:right;"><div class="stat-num" style="font-size:22px;${remaining!==null && remaining<0?'color:var(--plate-red);':''}">${remaining!==null ? Math.abs(remaining) : '–'}</div><div class="stat-label">${remaining===null ? 'Kein Ziel' : (remaining<0 ? 'kcal drüber' : 'kcal übrig')}</div></div>
       </div>
+      ${targetLine ? `<div class="note" style="margin:-4px 0 10px;">${targetLine}${canEditBurn && tg.isTraining ? ` <a href="#" onclick="event.preventDefault();startBurnEdit('${date}')" style="color:var(--chalk-yellow);">✎ anpassen</a>` : ''}${canEditBurn && !tg.isTraining ? ` <a href="#" onclick="event.preventDefault();startBurnEdit('${date}')" style="color:var(--chalk-yellow);">+ Sport eintragen</a>` : ''}</div>` : ''}
+      ${tg.training.noWeight && tg.mode==='added' ? `<div class="note" style="margin:-6px 0 8px;">Tipp: Trage dein Körpergewicht unter Fortschritt → Körpermaße ein, dann wird der Verbrauch genauer geschätzt.</div>` : ''}
+      ${state.tmp.burnEdit===date ? renderBurnEditHtml(date, tg) : ''}
       ${foodMacroBar('Eiweiß', totals.protein, pT, 'var(--chalk-yellow, #E8B93F)')}
       ${foodMacroBar('Kohlenhydrate', totals.carbs, cT, 'var(--success-green, #4caf50)')}
       ${foodMacroBar('Fett', totals.fat, fT, 'var(--plate-red)')}
@@ -12388,9 +12395,115 @@ function renderNutrition(){
   `;
 }
 
+/* --- Trainingsverbrauch & Tagesziele (Ruhetag / Trainingstag) --- */
+// Net-Verbrauch = (MET - 1) x kg x Stunden: der Ruhe-Grundumsatz steckt schon im Basis-Bedarf,
+// sonst wuerde er doppelt angerechnet. Gewicht ohne Eintrag -> 75 kg als Annahme.
+const WORKOUT_MET = { 'for-time':8, amrap:8, emom:7.5, strength:6, 'for-load':5 };
+function workoutDurationSec(w){
+  if(w.format==='for-time'){ const f = w.forTime||{}; return f.elapsedSec || f.timeCapSec || 900; }
+  if(w.format==='amrap'){ const a = w.amrap||{}; return (a.durationSec||900) * (parseInt(a.setsCount)||1); }
+  if(w.format==='emom'){
+    if(w.emom && w.emom.template){ return (w.emom.intervalSec||60) * (emomTemplateGroups(w.emom.template).length||1) * (w.emom.cycles||1); }
+    return (w.roundsLog && w.roundsLog.length) ? w.roundsLog.length*60 : 900;
+  }
+  if(w.format==='for-load') return (w.forLoad && w.forLoad.timeCapSec) || 600;
+  const sets = (w.movements||[]).reduce((n,m)=>n+((m.sets||[]).length),0);
+  return Math.max(600, sets*150);
+}
+function estimateWorkoutKcal(w, weightKg){
+  const kg = weightKg || 75;
+  if(w.format==='run'){ return Math.round(((w.run && w.run.distanceM)||0)/1000 * kg * 1.0); }
+  const met = WORKOUT_MET[w.format] || 6;
+  return Math.round(Math.max(0, met-1) * kg * workoutDurationSec(w) / 3600);
+}
+function trainingKcalForDate(date){
+  const ws = (state.workouts||[]).filter(w=>w.date===date);
+  const kg = latestBodyWeightKg();
+  const estimated = ws.reduce((s,w)=>s+estimateWorkoutKcal(w, kg), 0);
+  const ov = state.profile && state.profile.burnOverrides ? state.profile.burnOverrides[date] : undefined;
+  return { count: ws.length, estimated, override: (ov===undefined || ov===null) ? null : ov, noWeight: !kg };
+}
+// Tagesziel fuer ein Datum: Ruhetag = Basisziel; Trainingstag = Basisziel + (angerechneter) Trainingsverbrauch
+// ODER ein festes eigenes Trainingstag-Ziel - je nach Einstellung "Trainingskalorien dazurechnen".
+function nutritionDayTargets(date){
+  const p = state.profile || {};
+  const base = { kcal:foodNum(p.kcalTarget), protein:foodNum(p.proteinTarget), carbs:foodNum(p.carbsTarget), fat:foodNum(p.fatTarget) };
+  const t = trainingKcalForDate(date);
+  const isTraining = t.count>0 || (t.override||0)>0;
+  const res = { ...base, baseKcal:base.kcal, isTraining, extra:0, mode:'rest', training:t };
+  if(!base.kcal) return res;
+  if(p.addTrainingKcal){
+    res.mode = isTraining ? 'added' : 'rest';
+    if(isTraining){
+      const share = (foodNum(p.burnShare)||100)/100;
+      const extra = t.override!==null ? Math.round(t.override) : Math.round(t.estimated*share/10)*10;
+      res.extra = Math.max(0, extra);
+      res.kcal = base.kcal + res.extra;
+      if(base.carbs!==null) res.carbs = Math.round(base.carbs + res.extra/4);
+    }
+  } else if(isTraining && foodNum(p.kcalTargetTrain)){
+    res.mode = 'trainingDay';
+    res.kcal = foodNum(p.kcalTargetTrain);
+    const cTrain = foodNum(p.carbsTargetTrain);
+    if(cTrain!==null) res.carbs = cTrain;
+    else if(base.carbs!==null) res.carbs = Math.round(base.carbs + (res.kcal-base.kcal)/4);
+  }
+  return res;
+}
+function nutritionDayTargetLine(tg){
+  const p = state.profile || {};
+  if(!tg.kcal) return '';
+  if(tg.mode==='added') return `Ziel ${Math.round(tg.baseKcal)} + Training ${tg.extra} = <b>${Math.round(tg.kcal)} kcal</b>`;
+  if(tg.mode==='trainingDay') return `Trainingstag-Ziel <b>${Math.round(tg.kcal)} kcal</b>`;
+  if(p.addTrainingKcal || foodNum(p.kcalTargetTrain)) return `Ruhetag-Ziel <b>${Math.round(tg.kcal)} kcal</b>`;
+  return '';
+}
+function startBurnEdit(date){ state.tmp.burnEdit = date; render(); }
+function cancelBurnEdit(){ state.tmp.burnEdit = null; render(); }
+async function saveBurnOverride(date, useEstimate){
+  const map = { ...((state.profile && state.profile.burnOverrides) || {}) };
+  if(useEstimate){ delete map[date]; }
+  else {
+    const v = foodNum(document.getElementById('burnInput').value);
+    if(v===null || v<0){ showToast('Bitte eine gültige kcal-Zahl eingeben'); return; }
+    map[date] = Math.round(v);
+  }
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-400);
+  const cutStr = localDateStr(cutoff);
+  Object.keys(map).forEach(d=>{ if(d<cutStr) delete map[d]; });
+  state.tmp.burnEdit = null;
+  await saveProfileNutrition({ burnOverrides: map });
+  render();
+}
+function renderBurnEditHtml(date, tg){
+  const t = tg.training;
+  const current = t.override!==null ? t.override : (tg.mode==='added' ? tg.extra : t.estimated);
+  return `
+    <div style="margin-top:8px;padding:8px;border:1px solid var(--iron-700,#333);border-radius:8px;">
+      <div class="note" style="margin-bottom:6px;">Verbrauch durch Training an diesem Tag (kcal). Die Schätzung beträgt ${t.estimated} kcal${t.noWeight?' (ohne Körpergewicht, Annahme 75 kg)':''}.</div>
+      <div style="display:flex;gap:6px;">
+        <input type="number" id="burnInput" inputmode="numeric" value="${current}" style="flex:1;min-width:0;">
+        <button class="btn btn-primary" style="width:auto;" onclick="saveBurnOverride('${date}',false)">OK</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <button class="btn btn-ghost" onclick="saveBurnOverride('${date}',true)">Schätzung verwenden</button>
+        <button class="btn btn-ghost" onclick="cancelBurnEdit()">Abbrechen</button>
+      </div>
+    </div>`;
+}
+
 /* --- Einstellungen: Ziele + Mahlzeiten --- */
-function openNutritionSettings(){ state.tmp.nutritionView = 'settings'; render(); window.scrollTo(0,0); }
-function closeNutritionSettings(){ state.tmp.nutritionView = null; render(); window.scrollTo(0,0); }
+function nutDraftFromProfile(){
+  const p = state.profile || {};
+  return { heightCm:p.heightCm||'', goal:p.nutritionGoal||'maintain', activity:p.activityLevel||'sedentary',
+    addTraining: !!p.addTrainingKcal, burnShare: String(p.burnShare||100),
+    kcal:p.kcalTarget||'', protein:p.proteinTarget||'', carbs:p.carbsTarget||'', fat:p.fatTarget||'',
+    kcalTrain:p.kcalTargetTrain||'', carbsTrain:p.carbsTargetTrain||'' };
+}
+function openNutritionSettings(){ state.tmp.nutritionView = 'settings'; state.tmp.nutDraft = nutDraftFromProfile(); render(); window.scrollTo(0,0); }
+function closeNutritionSettings(){ state.tmp.nutritionView = null; state.tmp.nutDraft = null; render(); window.scrollTo(0,0); }
+function setNutDraft(key, val){ if(state.tmp.nutDraft) state.tmp.nutDraft[key] = val; }
+function toggleNutAddTraining(checked){ setNutDraft('addTraining', checked); render(); }
 async function saveProfileNutrition(patch){
   state.profile = { ...(state.profile||{}), ...patch };
   await saveKey('profile', state.profile);
@@ -12407,42 +12520,52 @@ function latestBodyWeightKg(){
   const list = (state.measurements||[]).filter(m=>m.weight!=null && m.weight!=='').sort((a,b)=>a.date.localeCompare(b.date));
   return list.length ? parseFloat(list[list.length-1].weight) : null;
 }
+// Durchschnittlicher Trainingsverbrauch an Trainingstagen der letzten 28 Tage (Fallback 300 kcal)
+function averageTrainingKcal(){
+  const kg = latestBodyWeightKg();
+  const from = new Date(); from.setDate(from.getDate()-28);
+  const fromStr = localDateStr(from);
+  const perDay = {};
+  (state.workouts||[]).filter(w=>w.date>=fromStr).forEach(w=>{ perDay[w.date] = (perDay[w.date]||0) + estimateWorkoutKcal(w, kg); });
+  const vals = Object.values(perDay);
+  if(!vals.length) return 300;
+  return Math.max(100, Math.round(vals.reduce((s,v)=>s+v,0)/vals.length/10)*10);
+}
 function computeNutritionSuggestion(heightCm, activityId, goalId){
   const p = state.profile || {};
   const age = nutritionAge(), weight = latestBodyWeightKg();
   const missing = [];
   if(!age) missing.push('Geburtsdatum (Profil)');
   if(p.gender!=='m' && p.gender!=='w') missing.push('Geschlecht (Profil)');
-  if(!weight) missing.push('Körpergewicht (Fortschritt → Körpermaße)');
+  if(!weight) missing.push('Körpergewicht (Profil → Fortschritt → Körpermaße)');
   if(!heightCm) missing.push('Größe');
   if(missing.length) return { missing };
   const bmr = 10*weight + 6.25*heightCm - 5*age + (p.gender==='m' ? 5 : -161);
-  const factor = (ACTIVITY_LEVELS.find(a=>a.id===activityId)||ACTIVITY_LEVELS[2]).factor;
+  const factor = (ACTIVITY_LEVELS.find(a=>a.id===activityId)||ACTIVITY_LEVELS[0]).factor;
   const adj = goalId==='lose' ? -400 : goalId==='gain' ? 300 : 0;
   const minKcal = p.gender==='m' ? 1600 : 1300;
   const kcal = Math.max(minKcal, Math.round((bmr*factor + adj)/10)*10);
   const protein = Math.round(1.8*weight);
   const fat = Math.round(kcal*0.27/9);
   const carbs = Math.max(0, Math.round((kcal - protein*4 - fat*9)/4));
-  return { kcal, protein, carbs, fat };
+  const extra = averageTrainingKcal();
+  return { kcal, protein, carbs, fat, kcalTrain: kcal+extra, carbsTrain: carbs+Math.round(extra/4), extra };
 }
 function suggestNutritionGoals(){
-  const h = foodNum(document.getElementById('nutHeight').value);
-  const act = document.getElementById('nutActivity').value;
-  const goal = document.getElementById('nutGoal').value;
-  const s = computeNutritionSuggestion(h, act, goal);
+  const d = state.tmp.nutDraft; if(!d) return;
+  const s = computeNutritionSuggestion(foodNum(d.heightCm), d.activity, d.goal);
   if(s.missing){ showToast('Dafür fehlt noch: '+s.missing.join(', ')); return; }
-  document.getElementById('nutKcalT').value = s.kcal;
-  document.getElementById('nutProteinT').value = s.protein;
-  document.getElementById('nutCarbsT').value = s.carbs;
-  document.getElementById('nutFatT').value = s.fat;
+  Object.assign(d, { kcal:s.kcal, protein:s.protein, carbs:s.carbs, fat:s.fat, kcalTrain:s.kcalTrain, carbsTrain:s.carbsTrain });
   showToast('Vorschlag eingetragen – bitte prüfen und speichern');
+  render();
 }
 async function saveNutritionGoals(){
-  const g = id => foodNum(document.getElementById(id).value);
+  const d = state.tmp.nutDraft; if(!d) return;
   await saveProfileNutrition({
-    heightCm: g('nutHeight'), activityLevel: document.getElementById('nutActivity').value, nutritionGoal: document.getElementById('nutGoal').value,
-    kcalTarget: g('nutKcalT'), proteinTarget: g('nutProteinT'), carbsTarget: g('nutCarbsT'), fatTarget: g('nutFatT')
+    heightCm: foodNum(d.heightCm), activityLevel: d.activity, nutritionGoal: d.goal,
+    addTrainingKcal: !!d.addTraining, burnShare: parseInt(d.burnShare)||100,
+    kcalTarget: foodNum(d.kcal), proteinTarget: foodNum(d.protein), carbsTarget: foodNum(d.carbs), fatTarget: foodNum(d.fat),
+    kcalTargetTrain: foodNum(d.kcalTrain), carbsTargetTrain: foodNum(d.carbsTrain)
   });
   showToast('Ziele gespeichert');
   render();
@@ -12481,34 +12604,53 @@ function removeMealSlot(i){
 function resetMealSlots(){ saveMealSlots(DEFAULT_MEAL_SLOTS.map(x=>({...x}))); }
 function renderNutritionSettings(){
   const p = state.profile || {};
+  const d = state.tmp.nutDraft || (state.tmp.nutDraft = nutDraftFromProfile());
   const slots = mealSlots();
+  const inp = (key, label, extra) => `<div class="field"><label>${label}</label><input type="number" inputmode="decimal" step="any" value="${escapeHtml(String(d[key]===null||d[key]===undefined?'':d[key]))}" oninput="setNutDraft('${key}',this.value)" ${extra||''}></div>`;
   return `
     <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeNutritionSettings()">← Zurück</button>
     <div class="card">
-      <h2 class="small">Tagesziele</h2>
+      <h2 class="small">Dein Ziel</h2>
       <div class="row">
-        <div class="field"><label>Größe (cm)</label><input type="number" id="nutHeight" value="${p.heightCm||''}" placeholder="z.B. 180"></div>
+        ${inp('heightCm','Größe (cm)','placeholder="z.B. 180"')}
         <div class="field"><label>Ziel</label>
-          <select id="nutGoal">
-            <option value="lose" ${p.nutritionGoal==='lose'?'selected':''}>Abnehmen</option>
-            <option value="maintain" ${(!p.nutritionGoal||p.nutritionGoal==='maintain')?'selected':''}>Gewicht halten</option>
-            <option value="gain" ${p.nutritionGoal==='gain'?'selected':''}>Aufbauen</option>
+          <select onchange="setNutDraft('goal',this.value)">
+            <option value="lose" ${d.goal==='lose'?'selected':''}>Abnehmen</option>
+            <option value="maintain" ${d.goal==='maintain'?'selected':''}>Gewicht halten</option>
+            <option value="gain" ${d.goal==='gain'?'selected':''}>Zunehmen / Aufbauen</option>
           </select>
         </div>
       </div>
-      <div class="field"><label>Aktivität</label>
-        <select id="nutActivity">${ACTIVITY_LEVELS.map(a=>`<option value="${a.id}" ${(p.activityLevel||'moderate')===a.id?'selected':''}>${a.label}</option>`).join('')}</select>
+      <div class="field"><label>Alltag (ohne Training)</label>
+        <select onchange="setNutDraft('activity',this.value)">${ACTIVITY_LEVELS.map(a=>`<option value="${a.id}" ${d.activity===a.id?'selected':''}>${a.label}</option>`).join('')}</select>
       </div>
+      <div class="note" style="margin-bottom:10px;">Abnehmen = Ruhetag-Ziel −400 kcal, Halten = Bedarf, Zunehmen = +300 kcal. Training kommt zusätzlich dazu (siehe unten).</div>
       <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="suggestNutritionGoals()">✨ Vorschlag berechnen</button>
-      <div class="row">
-        <div class="field"><label>Kalorien (kcal)</label><input type="number" id="nutKcalT" value="${p.kcalTarget||''}"></div>
-        <div class="field"><label>Eiweiß (g)</label><input type="number" id="nutProteinT" value="${p.proteinTarget||''}"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Kohlenhydrate (g)</label><input type="number" id="nutCarbsT" value="${p.carbsTarget||''}"></div>
-        <div class="field"><label>Fett (g)</label><input type="number" id="nutFatT" value="${p.fatTarget||''}"></div>
-      </div>
-      <button class="btn btn-primary" onclick="saveNutritionGoals()">Ziele speichern</button>
+    </div>
+    <div class="card">
+      <h2 class="small">Ruhetag-Ziele</h2>
+      <div class="row">${inp('kcal','Kalorien (kcal)','')}${inp('protein','Eiweiß (g)','')}</div>
+      <div class="row">${inp('carbs','Kohlenhydrate (g)','')}${inp('fat','Fett (g)','')}</div>
+    </div>
+    <div class="card">
+      <h2 class="small">Trainingstage</h2>
+      <label style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <input type="checkbox" ${d.addTraining?'checked':''} onchange="toggleNutAddTraining(this.checked)">
+        <span>Trainingskalorien zum Tagesziel dazurechnen</span>
+      </label>
+      <div class="note" style="margin-bottom:12px;text-transform:none;letter-spacing:0;">Ja: An Tagen mit Workout wird der geschätzte Verbrauch (Gewicht × Dauer × Intensität) zusätzlich erlaubt – z. B. Ziel 2000 + 500 Training = 2500 kcal. Den Wert kannst du pro Tag anpassen. Nein: Du legst unten ein festes Trainingstag-Ziel fest.</div>
+      ${d.addTraining ? `
+        <div class="field"><label>Anteil des Verbrauchs, der angerechnet wird</label>
+          <select onchange="setNutDraft('burnShare',this.value)">
+            ${['100','75','50'].map(v=>`<option value="${v}" ${String(d.burnShare)===v?'selected':''}>${v} %${v==='100'?' (volle Schätzung)':v==='75'?' (vorsichtig)':' (sehr vorsichtig)'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="note">Schätzungen sind grob – wer abnimmt, sollte eher vorsichtig anrechnen.</div>
+      ` : `
+        <div class="row">${inp('kcalTrain','Kalorien Trainingstag (optional)','')}${inp('carbsTrain','Kohlenhydrate Trainingstag (optional)','')}</div>
+        <div class="note">Leer = gleiches Ziel wie am Ruhetag. Eiweiß und Fett bleiben gleich.</div>
+      `}
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="saveNutritionGoals()">Ziele speichern</button>
       <div class="note" style="margin-top:10px;">Der Vorschlag nutzt die Mifflin-St-Jeor-Formel (Geburtsdatum, Geschlecht, letztes Körpergewicht) und ist nur eine grobe Orientierung – keine medizinische oder ernährungstherapeutische Beratung.</div>
     </div>
     <div class="card">
