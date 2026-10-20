@@ -2723,6 +2723,7 @@ async function initApp(){
   try{ restoredBoxSubTab = localStorage.getItem('ironlog:lastBoxSubTab'); }catch(e){}
   if(restoredBoxSubTab && ['home','schedule','workouts','social'].includes(restoredBoxSubTab)) state.tmp.boxSubTab = restoredBoxSubTab;
 
+  restoreFoodAiDraft();
   document.getElementById('app').innerHTML = appShell();
   render();
   // im Hintergrund, damit Rollen-Badge (Profil/Box-Tab) unabhängig vom besuchten Tab verfügbar ist -
@@ -2853,7 +2854,7 @@ function render(){
     }
   }
   if(state.activeTab==='profile' && state.tmp.profileSection==='progress') setTimeout(mountProgressCharts, 0);
-  if(state.tmp.photoImport?.loading) setTimeout(mountMuscleUpLottie, 0);
+  if(state.tmp.photoImport?.loading || state.tmp.foodAdd?.ai?.loading) setTimeout(mountMuscleUpLottie, 0);
   window.scrollTo(0, scrollY);
 }
 
@@ -12680,10 +12681,11 @@ function openFoodAdd(slotId){
   ensureFoodRecents(); ensureCustomFoods();
   render();
 }
-function closeFoodAdd(){ stopFoodScan(); state.tmp.foodAdd = null; render(); }
+function closeFoodAdd(){ stopFoodScan(); stopMealCamera(); teardownMuscleUpLottie(); foodAiDraftClear(); state.tmp.foodAdd = null; render(); }
 function setFoodAddTab(tab){
   const f = state.tmp.foodAdd; if(!f) return;
   if(f.tab==='barcode' && tab!=='barcode') stopFoodScan();
+  if(f.tab==='ai' && tab!=='ai') stopMealCamera();
   f.tab = tab; f.food = null; f.editId = null; f.notFound = null;
   render();
   if(tab==='barcode') startFoodScan();
@@ -13000,6 +13002,8 @@ async function startFoodScan(){
 function reattachFoodScanVideo(){
   const v = document.getElementById('foodScanVideo');
   if(v && foodScan.stream && v.srcObject!==foodScan.stream){ v.srcObject = foodScan.stream; v.play && v.play().catch(()=>{}); }
+  const mv = document.getElementById('mealCamVideo');
+  if(mv && mealCam.stream && mv.srcObject!==mealCam.stream){ mv.srcObject = mealCam.stream; mv.play && mv.play().catch(()=>{}); }
 }
 function stopFoodScan(){
   if(foodScan.timer){ clearTimeout(foodScan.timer); foodScan.timer = null; }
@@ -13090,8 +13094,34 @@ function downscaleImageToJpeg(file, maxDim, quality){
 }
 function ensureFoodAi(){
   const f = state.tmp.foodAdd;
-  if(!f.ai) f.ai = { text:'', image:null, loading:false, error:'', result:null };
+  if(!f.ai) f.ai = { text:'', image:null, loading:false, error:'', result:null, camera:false };
   return f.ai;
+}
+/* Entwurf (Text/Foto/Ergebnis) lokal sichern: Android laedt die App gelegentlich neu, wenn eine
+   externe Kamera-/Galerie-App geoeffnet wird - der Entwurf wird dann beim Start wiederhergestellt. */
+function foodAiDraftSave(){
+  try{
+    const f = state.tmp.foodAdd; if(!f || !f.ai) return;
+    localStorage.setItem('ironlog:foodAiDraft', JSON.stringify({ ts:Date.now(), slotId:f.slotId, date:f.date, text:f.ai.text||'',
+      image: f.ai.image ? f.ai.image.dataUrl : null, result: f.ai.result || null }));
+  }catch(e){}
+}
+function foodAiDraftClear(){ try{ localStorage.removeItem('ironlog:foodAiDraft'); }catch(e){} }
+function markFoodAiPending(){ ensureFoodAi(); foodAiDraftSave(); }
+function restoreFoodAiDraft(){
+  try{
+    const raw = localStorage.getItem('ironlog:foodAiDraft');
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    if(!d || Date.now()-d.ts > 900000){ foodAiDraftClear(); return; }
+    const hasContent = !!(d.image || d.result || (d.text||'').trim());
+    state.activeTab = 'nutrition';
+    state.tmp.foodDate = d.date;
+    state.tmp.foodAdd = { slotId:d.slotId, date:d.date, tab:'ai', query:'', food:null, editId:null, scanMsg:'', scanning:false, notFound:null,
+      ai:{ text:d.text||'', image: d.image ? { dataUrl:d.image, base64:d.image.split(',')[1] } : null, loading:false, camera:false, result:d.result||null,
+        error: (d.image || d.result) ? '' : 'Die App wurde beim Wechsel zur Kamera-/Galerie-App neu geladen – das Foto ging dabei verloren. Nutze „Kamera in der App“, damit das nicht passiert.' } };
+    if(!hasContent) state.tmp.foodAdd.ai.error = 'Die App wurde beim Wechsel zur Kamera-/Galerie-App neu geladen – das Foto ging dabei verloren. Nutze „Kamera in der App“, damit das nicht passiert.';
+  }catch(e){ foodAiDraftClear(); }
 }
 async function onFoodAiPhoto(input){
   const file = input.files && input.files[0];
@@ -13101,26 +13131,64 @@ async function onFoodAiPhoto(input){
   try{ ai.image = await downscaleImageToJpeg(file, 1024, 0.8); }
   catch(err){ ai.error = err.message; }
   input.value = '';
+  foodAiDraftSave();
   render();
 }
-function clearFoodAiPhoto(){ ensureFoodAi().image = null; render(); }
-function resetFoodAi(){ const ai = ensureFoodAi(); ai.result = null; ai.error = ''; render(); }
+function clearFoodAiPhoto(){ ensureFoodAi().image = null; foodAiDraftSave(); render(); }
+function resetFoodAi(){ const ai = ensureFoodAi(); ai.result = null; ai.error = ''; foodAiDraftSave(); render(); }
+/* Kamera direkt in der App (kein Wechsel zu einer anderen App, daher kein Neuladen) */
+let mealCam = { stream:null };
+async function startMealCamera(){
+  const ai = ensureFoodAi();
+  ai.error = '';
+  try{
+    mealCam.stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ ideal:1280 } }, audio:false });
+    ai.camera = true;
+  }catch(err){
+    ai.error = 'Kamerazugriff nicht möglich – nutze „Foto aus der Galerie“ oder erlaube die Kamera in den Einstellungen.';
+  }
+  render();
+}
+function stopMealCamera(){
+  if(mealCam.stream){ mealCam.stream.getTracks().forEach(t=>t.stop()); mealCam.stream = null; }
+  const f = state.tmp.foodAdd; if(f && f.ai) f.ai.camera = false;
+}
+function cancelMealCamera(){ stopMealCamera(); render(); }
+function captureMealPhoto(){
+  const v = document.getElementById('mealCamVideo');
+  if(!v || !v.videoWidth) { showToast('Kamera ist noch nicht bereit'); return; }
+  const s = Math.min(1, 1024/Math.max(v.videoWidth, v.videoHeight));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(v.videoWidth*s); cv.height = Math.round(v.videoHeight*s);
+  cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+  const dataUrl = cv.toDataURL('image/jpeg', 0.8);
+  const ai = ensureFoodAi();
+  ai.image = { base64: dataUrl.split(',')[1], dataUrl };
+  stopMealCamera();
+  foodAiDraftSave();
+  render();
+}
 async function runMealAnalysis(){
   const f = state.tmp.foodAdd; if(!f) return;
   const ai = ensureFoodAi();
   const text = (ai.text||'').trim();
   if(!ai.image && !text){ ai.error = 'Mach ein Foto oder beschreibe die Mahlzeit.'; render(); return; }
-  ai.loading = true; ai.error = ''; ai.result = null; render();
+  stopMealCamera();
+  ai.loading = true; ai.error = ''; ai.result = null; foodAiDraftSave(); render();
   try{
     const res = await pb.send('/ai-meal-analyze', { method:'POST', body:{ imageBase64: ai.image ? ai.image.base64 : '', mimeType: ai.image ? 'image/jpeg' : '', text } });
     if(!res || !res.ok) throw new Error((res && res.error) || 'Analyse fehlgeschlagen');
     ai.result = { mealName: res.mealName||'', notes: res.notes||'', remaining: res.remaining, source: ai.image ? 'ai-photo' : 'ai-text', merge:false,
       items: (res.items||[]).map(it=>({ ...it, include:true, grams: it.grams==null ? '' : it.grams })) };
     if(!ai.result.items.length){ ai.error = res.notes || 'Es wurde kein Essen erkannt.'; ai.result = null; }
+    else await Promise.race([playMuscleUpFinishAndWait(), new Promise(r=>setTimeout(r, 2500))]);
   }catch(err){
+    stopMuscleUpForError();
     ai.error = (err && err.response && err.response.error) || (err && err.message) || 'Analyse fehlgeschlagen';
   }
+  teardownMuscleUpLottie();
   ai.loading = false;
+  foodAiDraftSave();
   render();
 }
 function onFoodAiItem(i, field, val){
@@ -13146,6 +13214,7 @@ async function saveFoodAiResult(){
   const entries = r.merge
     ? (()=>{ const t = foodAiSelectedTotals({ items:picked }); return [{ ...base, name:(r.mealName||'KI-Mahlzeit').trim()||'KI-Mahlzeit', amount:null, unit:'', kcal:Math.round(t.kcal), protein:foodR(t.protein,1), carbs:foodR(t.carbs,1), fat:foodR(t.fat,1), note:picked.map(i=>i.name).join(', ').slice(0,480) }]; })()
     : picked.map(i=>({ ...base, name:i.name.trim(), amount:foodNum(i.grams), unit: foodNum(i.grams)!==null ? 'g' : '', kcal:Math.round(foodNum(i.kcal)||0), protein:foodNum(i.protein)||0, carbs:foodNum(i.carbs)||0, fat:foodNum(i.fat)||0, note:i.portion||'' }));
+  foodAiDraftClear();
   state.tmp.foodAdd = null;
   state.tmp.foodDate = base.date;
   for(const e of entries) await addFoodEntry(e);
@@ -13196,16 +13265,31 @@ function renderFoodAiHtml(){
   }
   const ai = ensureFoodAi();
   if(ai.loading){
-    return `<div style="text-align:center;padding:30px 0;"><div style="font-size:36px;">✨</div><div class="note" style="margin-top:8px;">KI analysiert deine Mahlzeit …</div></div>`;
+    return `
+      <div style="text-align:center;padding:10px 0 20px;">
+        ${ai.image ? `<img src="${ai.image.dataUrl}" alt="" style="width:100%;max-height:150px;object-fit:cover;border-radius:10px;opacity:.55;margin-bottom:8px;">` : ''}
+        ${renderMuscleUpLoader('KI analysiert deine Mahlzeit …')}
+        <div class="note">Das dauert meist 5–15 Sekunden. Bitte die App geöffnet lassen.</div>
+      </div>`;
   }
   if(ai.result) return renderFoodAiResultHtml();
+  if(ai.camera){
+    return `
+      <div style="position:relative;background:#000;border-radius:10px;overflow:hidden;margin-bottom:10px;">
+        <video id="mealCamVideo" playsinline muted autoplay style="width:100%;display:block;max-height:340px;object-fit:cover;"></video>
+      </div>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="cancelMealCamera()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="captureMealPhoto()">📸 Aufnehmen</button>
+      </div>`;
+  }
   return `
     <div class="note" style="margin-bottom:10px;">Foto machen und/oder beschreiben – die KI schätzt Kalorien und Makros. Du kannst alles vor dem Speichern anpassen.</div>
     ${ai.image ? `<div style="position:relative;margin-bottom:10px;"><img src="${ai.image.dataUrl}" alt="Mahlzeit" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;display:block;"><button class="remove-row" style="position:absolute;top:6px;right:6px;" onclick="clearFoodAiPhoto()">✕</button></div>` : ''}
-    <div class="field"><label>Foto aufnehmen</label><input type="file" accept="image/*" capture="environment" onchange="onFoodAiPhoto(this)"></div>
-    <div class="field"><label>Oder Foto aus der Galerie</label><input type="file" accept="image/*" onchange="onFoodAiPhoto(this)"></div>
+    <button class="btn btn-ghost" style="margin-bottom:10px;" onclick="startMealCamera()">📷 Kamera in der App</button>
+    <div class="field"><label>Oder Foto aus der Galerie</label><input type="file" accept="image/*" onclick="markFoodAiPending()" onchange="onFoodAiPhoto(this)"></div>
     <div class="field"><label>Beschreibung (optional, auch ohne Foto)</label>
-      <textarea rows="3" oninput="ensureFoodAi().text=this.value" placeholder="z.B. 2 Rühreier, 1 Scheibe Vollkornbrot, Kaffee mit Milch">${escapeHtml(ai.text||'')}</textarea>
+      <textarea rows="3" oninput="ensureFoodAi().text=this.value" onchange="foodAiDraftSave()" placeholder="z.B. 2 Rühreier, 1 Scheibe Vollkornbrot, Kaffee mit Milch">${escapeHtml(ai.text||'')}</textarea>
     </div>
     ${ai.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(ai.error)}</div>` : ''}
     <button class="btn btn-primary" onclick="runMealAnalysis()">✨ Analysieren</button>
@@ -13219,7 +13303,7 @@ function renderFoodAddModal(){
   if(f.food) body = renderFoodPortionHtml();
   else {
     const tabs = [['search','Suchen'],['barcode','Barcode'],['manual','Manuell'],['ai','✨ KI']];
-    const tabBar = `<div class="row" style="margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${f.tab===t[0]?'btn-primary':'btn-ghost'}" onclick="setFoodAddTab('${t[0]}')">${t[1]}</button>`).join('')}</div>`;
+    const tabBar = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${f.tab===t[0]?'btn-primary':'btn-ghost'}" style="padding:9px 4px;font-size:13px;white-space:nowrap;min-width:0;" onclick="setFoodAddTab('${t[0]}')">${t[1]}</button>`).join('')}</div>`;
     const slotName = escapeHtml(foodSlotName(f.slotId) || 'Mahlzeit');
     body = `
       <h2 style="margin:0 0 4px;">Zu „${slotName}“ hinzufügen</h2>
