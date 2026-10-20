@@ -126,9 +126,104 @@ function extractJson(text) {
   return JSON.parse(raw);
 }
 
+const MEAL_MODEL = process.env.MEAL_ANALYSIS_MODEL || MODEL;
+const MEAL_SYSTEM_PROMPT = `Du bist ein Ernaehrungs-Assistent und schaetzt aus einem Foto einer Mahlzeit und/oder einer kurzen Textbeschreibung die enthaltenen Lebensmittel und deren Naehrwerte. Antworte NUR mit einem einzigen JSON-Objekt (kein Markdown, kein Fliesstext, keine Erklaerung) in genau dieser Form:
+{"mealName":"<kurzer Titel der Mahlzeit, max 40 Zeichen>","items":[{"name":"<Lebensmittel auf Deutsch>","portion":"<geschaetzte Menge, z.B. '2 Scheiben' oder '150 g'>","grams":<geschaetzte Gramm bzw. Milliliter als Zahl>,"kcal":<Zahl>,"protein":<Gramm, Zahl>,"carbs":<Gramm, Zahl>,"fat":<Gramm, Zahl>,"confidence":"hoch"|"mittel"|"niedrig"}],"notes":"<optional: ein kurzer Satz zu Unsicherheiten, sonst leer>"}
+
+Regeln:
+- Ein Eintrag pro erkennbarem Lebensmittel bzw. Bestandteil (maximal 12). Alle Werte gelten fuer die geschaetzte Portion, NICHT je 100 g.
+- Mengenangaben aus der Textbeschreibung haben Vorrang vor Schaetzungen aus dem Bild. Fehlt eine Menge, nimm eine uebliche Portionsgroesse an.
+- Nutze realistische Durchschnittswerte (wie in ueblichen Naehrwerttabellen). Die Kalorien sollen zu Eiweiss*4 + Kohlenhydrate*4 + Fett*9 passen (Abweichung hoechstens ca. 10 %).
+- Erfinde nichts, was weder erkennbar noch genannt ist (z.B. keine versteckten Saucen, Oele oder Zucker, ausser sie sind sichtbar oder genannt). Bei unklarer Zubereitung oder Menge setze confidence niedriger und erwaehne es kurz in notes.
+- Zeigt das Bild bzw. der Text kein Essen oder Getraenk: items = [] und notes erklaert das kurz.
+- Zahlen sind JSON-Zahlen (keine Strings, keine Einheiten). kcal als ganze Zahl, Gramm-Werte mit hoechstens einer Nachkommastelle.
+- Gib IMMER gueltiges JSON zurueck.`;
+
+function numOrNull(v, max) {
+  const n = typeof v === 'number' ? v : parseFloat(String(v === undefined || v === null ? '' : v).replace(',', '.'));
+  if (!isFinite(n) || n < 0) return null;
+  return Math.min(n, max);
+}
+function sanitizeMeal(parsed) {
+  const items = (Array.isArray(parsed.items) ? parsed.items : []).slice(0, 12).map(it => {
+    if (!it || typeof it !== 'object') return null;
+    const name = String(it.name || '').trim().slice(0, 120);
+    if (!name) return null;
+    const conf = ['hoch', 'mittel', 'niedrig'].includes(it.confidence) ? it.confidence : 'mittel';
+    return {
+      name,
+      portion: String(it.portion || '').trim().slice(0, 60),
+      grams: numOrNull(it.grams, 5000),
+      kcal: Math.round(numOrNull(it.kcal, 5000) || 0),
+      protein: Math.round((numOrNull(it.protein, 500) || 0) * 10) / 10,
+      carbs: Math.round((numOrNull(it.carbs, 800) || 0) * 10) / 10,
+      fat: Math.round((numOrNull(it.fat, 500) || 0) * 10) / 10,
+      confidence: conf
+    };
+  }).filter(Boolean);
+  const total = items.reduce((a, i) => ({ kcal: a.kcal + i.kcal, protein: a.protein + i.protein, carbs: a.carbs + i.carbs, fat: a.fat + i.fat }), { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  return {
+    mealName: String(parsed.mealName || '').trim().slice(0, 60),
+    items,
+    total: { kcal: Math.round(total.kcal), protein: Math.round(total.protein * 10) / 10, carbs: Math.round(total.carbs * 10) / 10, fat: Math.round(total.fat * 10) / 10 },
+    notes: String(parsed.notes || '').trim().slice(0, 300)
+  };
+}
+async function handleAnalyzeMeal(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch (e) {
+    res.writeHead(400); res.end('invalid json'); return;
+  }
+  const { imageBase64, mimeType, text } = payload || {};
+  const hasImage = !!imageBase64 && typeof imageBase64 === 'string' && /^image\/(jpeg|png|webp)$/.test(mimeType || '');
+  const hasText = !!text && typeof text === 'string' && text.trim().length > 0;
+  const reply = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  if (!hasImage && !hasText) return reply(400, { ok: false, error: 'Foto oder Text fehlt' });
+  if (hasImage && imageBase64.length > MAX_BASE64_LEN) return reply(413, { ok: false, error: 'Bild zu gross' });
+  if (hasText && text.length > 1000) return reply(413, { ok: false, error: 'Text zu lang' });
+
+  const content = [];
+  if (hasImage) content.push({ type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } });
+  content.push({
+    type: 'text',
+    text: (hasImage ? 'Analysiere die Mahlzeit auf dem Foto.' : 'Analysiere diese Mahlzeit.') +
+      (hasText ? `\n\nBeschreibung/Mengenangaben des Nutzers:\n${text.trim()}` : '') +
+      '\n\nGib das JSON gemaess Systemanweisung zurueck.'
+  });
+
+  try {
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: MEAL_MODEL, max_tokens: 1500, temperature: 0, system: MEAL_SYSTEM_PROMPT, messages: [{ role: 'user', content }] })
+    });
+    if (!anthropicRes.ok) {
+      const errBody = await anthropicRes.text().catch(() => '');
+      console.error('Anthropic API Fehler (meal)', anthropicRes.status, errBody);
+      return reply(502, { ok: false, error: 'AI-Anfrage fehlgeschlagen' });
+    }
+    const data = await anthropicRes.json();
+    const aiText = (data.content || []).map(b => b.text || '').join('');
+    let parsed;
+    try { parsed = extractJson(aiText); } catch (e) {
+      console.error('Konnte KI-Mahlzeit-Antwort nicht als JSON parsen', aiText);
+      return reply(502, { ok: false, error: 'KI-Antwort ungueltig' });
+    }
+    if (!parsed || typeof parsed !== 'object') return reply(502, { ok: false, error: 'KI-Antwort ungueltig' });
+    return reply(200, Object.assign({ ok: true }, sanitizeMeal(parsed)));
+  } catch (e) {
+    console.error('ai-photo-service Fehler (meal)', e);
+    return reply(502, { ok: false, error: 'unerwarteter Fehler' });
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200); res.end('ok'); return;
+  }
+  if (req.method === 'POST' && req.url === '/analyze-meal') {
+    if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }
+    return handleAnalyzeMeal(req, res);
   }
   if (req.method === 'POST' && req.url === '/parse-photo') {
     if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) { res.writeHead(401); res.end(); return; }

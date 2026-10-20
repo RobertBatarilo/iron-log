@@ -12928,13 +12928,155 @@ function renderFoodBarcodeHtml(){
     </div>
   `;
 }
+/* --- KI (Pro): Foto/Text -> kcal & Makros --- */
+function downscaleImageToJpeg(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const s = Math.min(1, maxDim/Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width*s)), h = Math.max(1, Math.round(img.height*s));
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      const dataUrl = cv.toDataURL('image/jpeg', quality);
+      resolve({ base64: dataUrl.split(',')[1], dataUrl });
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Bild konnte nicht gelesen werden')); };
+    img.src = url;
+  });
+}
+function ensureFoodAi(){
+  const f = state.tmp.foodAdd;
+  if(!f.ai) f.ai = { text:'', image:null, loading:false, error:'', result:null };
+  return f.ai;
+}
+async function onFoodAiPhoto(input){
+  const file = input.files && input.files[0];
+  if(!file || !state.tmp.foodAdd) return;
+  const ai = ensureFoodAi();
+  ai.error = '';
+  try{ ai.image = await downscaleImageToJpeg(file, 1024, 0.8); }
+  catch(err){ ai.error = err.message; }
+  input.value = '';
+  render();
+}
+function clearFoodAiPhoto(){ ensureFoodAi().image = null; render(); }
+function resetFoodAi(){ const ai = ensureFoodAi(); ai.result = null; ai.error = ''; render(); }
+async function runMealAnalysis(){
+  const f = state.tmp.foodAdd; if(!f) return;
+  const ai = ensureFoodAi();
+  const text = (ai.text||'').trim();
+  if(!ai.image && !text){ ai.error = 'Mach ein Foto oder beschreibe die Mahlzeit.'; render(); return; }
+  ai.loading = true; ai.error = ''; ai.result = null; render();
+  try{
+    const res = await pb.send('/ai-meal-analyze', { method:'POST', body:{ imageBase64: ai.image ? ai.image.base64 : '', mimeType: ai.image ? 'image/jpeg' : '', text } });
+    if(!res || !res.ok) throw new Error((res && res.error) || 'Analyse fehlgeschlagen');
+    ai.result = { mealName: res.mealName||'', notes: res.notes||'', remaining: res.remaining, source: ai.image ? 'ai-photo' : 'ai-text', merge:false,
+      items: (res.items||[]).map(it=>({ ...it, include:true, grams: it.grams==null ? '' : it.grams })) };
+    if(!ai.result.items.length){ ai.error = res.notes || 'Es wurde kein Essen erkannt.'; ai.result = null; }
+  }catch(err){
+    ai.error = (err && err.response && err.response.error) || (err && err.message) || 'Analyse fehlgeschlagen';
+  }
+  ai.loading = false;
+  render();
+}
+function onFoodAiItem(i, field, val){
+  const f = state.tmp.foodAdd; if(!f || !f.ai || !f.ai.result) return;
+  const it = f.ai.result.items[i];
+  it[field] = (field==='include') ? !!val : val;
+  const el = document.getElementById('foodAiTotals');
+  if(el) el.innerHTML = foodAiTotalsHtml(f.ai.result);
+}
+function foodAiSelectedTotals(r){
+  return foodTotals(r.items.filter(i=>i.include).map(i=>({ kcal:foodNum(i.kcal)||0, protein:foodNum(i.protein)||0, carbs:foodNum(i.carbs)||0, fat:foodNum(i.fat)||0 })));
+}
+function foodAiTotalsHtml(r){
+  const t = foodAiSelectedTotals(r);
+  return `<b>${Math.round(t.kcal)} kcal</b> · ${foodR(t.protein,1)} g Eiweiß · ${foodR(t.carbs,1)} g KH · ${foodR(t.fat,1)} g Fett`;
+}
+async function saveFoodAiResult(){
+  const f = state.tmp.foodAdd; if(!f || !f.ai || !f.ai.result) return;
+  const r = f.ai.result;
+  const picked = r.items.filter(i=>i.include && foodNum(i.kcal)!==null && (i.name||'').trim());
+  if(!picked.length){ showToast('Nichts zum Speichern ausgewählt'); return; }
+  const base = { date:f.date, slotId:f.slotId, slotName:foodSlotName(f.slotId), source:r.source, brand:'' };
+  const entries = r.merge
+    ? (()=>{ const t = foodAiSelectedTotals({ items:picked }); return [{ ...base, name:(r.mealName||'KI-Mahlzeit').trim()||'KI-Mahlzeit', amount:null, unit:'', kcal:Math.round(t.kcal), protein:foodR(t.protein,1), carbs:foodR(t.carbs,1), fat:foodR(t.fat,1), note:picked.map(i=>i.name).join(', ').slice(0,480) }]; })()
+    : picked.map(i=>({ ...base, name:i.name.trim(), amount:foodNum(i.grams), unit: foodNum(i.grams)!==null ? 'g' : '', kcal:Math.round(foodNum(i.kcal)||0), protein:foodNum(i.protein)||0, carbs:foodNum(i.carbs)||0, fat:foodNum(i.fat)||0, note:i.portion||'' }));
+  state.tmp.foodAdd = null;
+  state.tmp.foodDate = base.date;
+  for(const e of entries) await addFoodEntry(e);
+  showToast(entries.length>1 ? `${entries.length} Einträge gespeichert` : 'Eintrag gespeichert');
+}
+function renderFoodAiResultHtml(){
+  const f = state.tmp.foodAdd; const r = f.ai.result;
+  const confLabel = { hoch:'sicher', mittel:'ca.', niedrig:'unsicher' };
+  const num = (i, field, label, width) => `<div><div style="font-size:10px;color:var(--chalk-60);">${label}</div><input type="number" step="any" inputmode="decimal" value="${escapeHtml(String(r.items[i][field]===null||r.items[i][field]===undefined?'':r.items[i][field]))}" oninput="onFoodAiItem(${i},'${field}',this.value)" style="width:100%;padding:6px 4px;"></div>`;
+  return `
+    <h3 style="margin:0 0 4px;">${escapeHtml(r.mealName||'KI-Schätzung')}</h3>
+    <div class="note" style="margin-bottom:8px;">✨ KI-Schätzung – bitte prüfen und bei Bedarf anpassen.${r.notes ? ' '+escapeHtml(r.notes) : ''}</div>
+    ${r.items.map((it,i)=>`
+      <div style="border:1px solid var(--iron-700, #333);border-radius:8px;padding:8px;margin-bottom:8px;${it.include?'':'opacity:.5;'}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <input type="checkbox" ${it.include?'checked':''} onchange="onFoodAiItem(${i},'include',this.checked); render();">
+          <input type="text" value="${escapeHtml(it.name)}" oninput="onFoodAiItem(${i},'name',this.value)" style="flex:1;min-width:0;">
+          <span class="chip" style="font-size:10px;">${confLabel[it.confidence]||'ca.'}</span>
+        </div>
+        ${it.portion ? `<div style="font-size:11px;color:var(--chalk-60);margin:-2px 0 6px 24px;">${escapeHtml(it.portion)}</div>` : ''}
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;">
+          ${num(i,'grams','g/ml')}${num(i,'kcal','kcal')}${num(i,'protein','Eiweiß')}${num(i,'carbs','KH')}${num(i,'fat','Fett')}
+        </div>
+      </div>`).join('')}
+    <div id="foodAiTotals" class="note" style="margin:6px 0 10px;">${foodAiTotalsHtml(r)}</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;color:var(--chalk-60);">
+      <input type="checkbox" ${r.merge?'checked':''} onchange="state.tmp.foodAdd.ai.result.merge=this.checked"> Als einen Eintrag speichern
+    </label>
+    <div class="row">
+      <div class="field"><label>Mahlzeit</label>
+        <select onchange="setFoodAddSlot(this.value)">${mealSlots().filter(s=>s.active!==false || s.id===f.slotId).map(s=>`<option value="${escapeHtml(s.id)}" ${s.id===f.slotId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Datum</label><input type="date" value="${f.date}" onchange="setFoodAddDate(this.value)"></div>
+    </div>
+    <button class="btn btn-primary" onclick="saveFoodAiResult()">Hinzufügen</button>
+    <button class="btn btn-ghost" style="margin-top:8px;" onclick="resetFoodAi()">Neu analysieren</button>
+    ${r.remaining!=null ? `<div class="note" style="margin-top:8px;text-align:center;">Noch ${r.remaining} KI-Analysen heute</div>` : ''}
+  `;
+}
+function renderFoodAiHtml(){
+  if(!(state.profile && state.profile.hasPro)){
+    return `
+      <div class="suggestion-box">
+        <div class="stat-label"><span class="chip">Pro</span></div>
+        <div style="margin:6px 0;"><b>Foto oder Text → Kalorien &amp; Makros</b></div>
+        <div class="note">Fotografiere dein Essen oder beschreibe es kurz – die KI erkennt, was es ist, und schätzt Kalorien, Eiweiß, Kohlenhydrate und Fett. Als Pro-Funktion verfügbar.</div>
+      </div>`;
+  }
+  const ai = ensureFoodAi();
+  if(ai.loading){
+    return `<div style="text-align:center;padding:30px 0;"><div style="font-size:36px;">✨</div><div class="note" style="margin-top:8px;">KI analysiert deine Mahlzeit …</div></div>`;
+  }
+  if(ai.result) return renderFoodAiResultHtml();
+  return `
+    <div class="note" style="margin-bottom:10px;">Foto machen und/oder beschreiben – die KI schätzt Kalorien und Makros. Du kannst alles vor dem Speichern anpassen.</div>
+    ${ai.image ? `<div style="position:relative;margin-bottom:10px;"><img src="${ai.image.dataUrl}" alt="Mahlzeit" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;display:block;"><button class="remove-row" style="position:absolute;top:6px;right:6px;" onclick="clearFoodAiPhoto()">✕</button></div>` : ''}
+    <div class="field"><label>Foto aufnehmen</label><input type="file" accept="image/*" capture="environment" onchange="onFoodAiPhoto(this)"></div>
+    <div class="field"><label>Oder Foto aus der Galerie</label><input type="file" accept="image/*" onchange="onFoodAiPhoto(this)"></div>
+    <div class="field"><label>Beschreibung (optional, auch ohne Foto)</label>
+      <textarea rows="3" oninput="ensureFoodAi().text=this.value" placeholder="z.B. 2 Rühreier, 1 Scheibe Vollkornbrot, Kaffee mit Milch">${escapeHtml(ai.text||'')}</textarea>
+    </div>
+    ${ai.error ? `<div class="note" style="color:var(--plate-red);margin-bottom:10px;">${escapeHtml(ai.error)}</div>` : ''}
+    <button class="btn btn-primary" onclick="runMealAnalysis()">✨ Analysieren</button>
+    <div class="note" style="margin-top:8px;">Hinweis: Foto/Text werden zur Analyse an die KI-Schnittstelle von Anthropic (USA) übermittelt. Das Foto wird nicht gespeichert.</div>
+  `;
+}
 function renderFoodAddModal(){
   const f = state.tmp.foodAdd;
   if(!f) return '';
   let body;
   if(f.food) body = renderFoodPortionHtml();
   else {
-    const tabs = [['search','Suchen'],['barcode','Barcode'],['manual','Manuell']];
+    const tabs = [['search','Suchen'],['barcode','Barcode'],['manual','Manuell'],['ai','✨ KI']];
     const tabBar = `<div class="row" style="margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${f.tab===t[0]?'btn-primary':'btn-ghost'}" onclick="setFoodAddTab('${t[0]}')">${t[1]}</button>`).join('')}</div>`;
     const slotName = escapeHtml(foodSlotName(f.slotId) || 'Mahlzeit');
     body = `
@@ -12945,6 +13087,7 @@ function renderFoodAddModal(){
         <div id="foodSearchResults">${foodSearchResultsHtml()}</div>` : ''}
       ${f.tab==='barcode' ? renderFoodBarcodeHtml() : ''}
       ${f.tab==='manual' ? renderFoodManualHtml() : ''}
+      ${f.tab==='ai' ? renderFoodAiHtml() : ''}
     `;
   }
   return `

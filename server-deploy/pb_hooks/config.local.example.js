@@ -5,6 +5,8 @@ module.exports = {
   pushInternalSecret: "HIER_DAS_GLEICHE_SECRET_WIE_INTERNAL_SECRET_IM_PUSH_SERVICE",
   aiPhotoServiceUrl: "http://ai-photo-service:3002/parse-photo",
   aiPhotoInternalSecret: "HIER_DAS_GLEICHE_SECRET_WIE_AI_PHOTO_INTERNAL_SECRET_IM_AI_PHOTO_SERVICE",
+  // Optional: KI-Mahlzeit-Analysen pro Nutzer und Tag (Kostenschutz), Standard 30
+  // mealAnalysesPerDay: 30,
   // Guthabenkarten-Modul (credit_checkout.pb.js, credit_redemption.pb.js):
   stripeSecretKey: "sk_test_...", // Stripe Testmodus-Secret-Key der Plattform
   // Muss exakt STRIPE_WEBHOOK_INTERNAL_SECRET im .env des stripe-webhook-service entsprechen
