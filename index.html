@@ -67,8 +67,8 @@
     background:var(--graphite-800);
     border:1px solid var(--iron-600);
     color:var(--chalk-50);
-    border-radius:8px;
-    padding:10px 12px;
+    border-radius:12px;
+    padding:11px 14px;
     font-size:15px;
     width:100%;
   }
@@ -131,10 +131,11 @@
   }
   .card{
     background:var(--graphite-800);
-    border:1px solid var(--iron-700);
-    border-radius:14px;
-    padding:16px;
+    border:1px solid color-mix(in srgb, var(--iron-700) 55%, transparent);
+    border-radius:20px;
+    padding:18px;
     margin-bottom:16px;
+    box-shadow:0 10px 28px -16px rgba(0,0,0,0.55);
   }
   .card h2{
     font-family:var(--font-display);
@@ -148,27 +149,40 @@
   .card h2.small{font-size:12px;color:var(--iron-500);}
   .row{display:flex;gap:10px;}
   .row > *{flex:1;}
-  .btn{
+  /* Gemeinsame Basis: auch .btn-sm/.btn-ghost etc. ohne .btn bekommen so das App-Styling statt des Browser-Standards */
+  .btn,.btn-sm,.btn-ghost,.btn-primary,.btn-danger{
     display:inline-flex;
     align-items:center;
     justify-content:center;
     gap:6px;
     border:none;
-    border-radius:9px;
-    padding:12px 16px;
+    border-radius:12px;
+    padding:10px 14px;
+    font-family:inherit;
     font-weight:600;
-    font-size:14px;
+    font-size:13px;
+    line-height:1.25;
     cursor:pointer;
-    width:100%;
-    transition:transform 0.08s ease;
+    text-decoration:none;
+    -webkit-tap-highlight-color:transparent;
+    transition:transform 0.1s ease, background 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
   }
-  .btn:active{transform:scale(0.97);}
-  .btn-primary{background:var(--plate-red);color:var(--chalk-50);box-shadow:0 0 20px -6px var(--plate-red);}
-  .btn-primary:active{background:var(--plate-red-dim);box-shadow:0 0 10px -6px var(--plate-red-dim);}
+  .btn{padding:13px 16px;font-size:14px;width:100%;}
+  .btn:active,.btn-sm:active{transform:scale(0.97);}
+  .btn-primary{background:linear-gradient(180deg, color-mix(in srgb, var(--plate-red) 86%, #fff) 0%, var(--plate-red) 100%);color:#F1EDE4;box-shadow:0 6px 18px -8px var(--plate-red);}
+  .btn-primary:active{background:var(--plate-red-dim);box-shadow:0 2px 8px -4px var(--plate-red-dim);}
   .btn-ghost{background:var(--iron-700);color:var(--chalk-50);}
   .btn-ghost:active{background:var(--iron-600);}
-  .btn-sm{padding:8px 10px;font-size:12px;width:auto;}
-  .btn-danger{background:transparent;color:var(--plate-red);border:1px solid var(--plate-red-dim);}
+  .btn-sm{padding:8px 12px;font-size:12px;width:auto;}
+  .btn-danger{background:transparent;color:var(--plate-red);box-shadow:inset 0 0 0 1px var(--plate-red-dim);}
+  button:disabled{opacity:0.5;cursor:default;}
+  .seg{display:flex;gap:4px;background:var(--graphite-900);border-radius:14px;padding:4px;}
+  .seg-btn{flex:1;border:none;background:transparent;color:var(--chalk-200);font-family:inherit;font-size:13px;font-weight:600;padding:10px 4px;border-radius:10px;cursor:pointer;transition:background 0.15s ease, color 0.15s ease;-webkit-tap-highlight-color:transparent;}
+  .seg-btn.active{background:var(--chalk-yellow);color:#1B1D21;box-shadow:0 4px 12px -6px var(--chalk-yellow);}
+  .seg-btn.num{padding:10px 0;font-family:var(--font-mono);}
+  .field-label{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--chalk-200);margin:14px 0 6px;font-weight:600;}
+  .field-label:first-of-type{margin-top:4px;}
+  .field-label .val{font-family:var(--font-mono);color:var(--chalk-yellow);}
   .format-btn{gap:8px;}
   .format-btn svg{width:16px;height:16px;flex:0 0 auto;}
   .format-btn.btn-primary{background:var(--format-accent);box-shadow:0 0 20px -6px var(--format-accent);}
@@ -178,8 +192,8 @@
     background:var(--graphite-900);
     border:1px solid var(--iron-600);
     color:var(--chalk-50);
-    border-radius:9px;
-    padding:10px 6px;
+    border-radius:12px;
+    padding:11px 6px;
     font-size:13px;
     font-weight:600;
     cursor:pointer;
@@ -388,8 +402,11 @@
     margin:0 auto;
     background:var(--graphite-800);
     border-top:1px solid var(--iron-700);
+    border-radius:22px 22px 0 0;
+    box-shadow:0 -10px 30px -18px rgba(0,0,0,0.6);
     display:flex;
-    padding:8px 4px calc(8px + env(safe-area-inset-bottom));
+    gap:2px;
+    padding:8px 6px calc(8px + env(safe-area-inset-bottom));
     z-index:10;
   }
   nav.bottom button{
@@ -407,8 +424,11 @@
     letter-spacing:0.03em;
     cursor:pointer;
     padding:6px 2px;
+    border-radius:14px;
+    -webkit-tap-highlight-color:transparent;
+    transition:background 0.15s ease, color 0.15s ease;
   }
-  nav.bottom button.active{color:var(--chalk-yellow);}
+  nav.bottom button.active{color:var(--chalk-yellow);background:color-mix(in srgb, var(--chalk-yellow) 13%, transparent);}
   nav.bottom button.active svg{filter:drop-shadow(0 0 6px var(--chalk-yellow));}
   nav.bottom svg{width:20px;height:20px;}
   .toast{
@@ -450,8 +470,8 @@
   .modal-box{
     background:var(--graphite-800);
     border:1px solid var(--iron-700);
-    border-radius:16px 16px 0 0;
-    padding:20px;
+    border-radius:24px 24px 0 0;
+    padding:22px 20px;
     width:100%; max-width:480px;
     max-height:85vh; overflow-y:auto;
   }
@@ -2947,52 +2967,60 @@ function readinessHint(log){
   if(flags===1) return 'Ein Faktor ist heute nicht optimal — hör auf deinen Körper und passe die Intensität bei Bedarf an.';
   return 'Alles im grünen Bereich — heute darf es ruhig etwas mehr sein.';
 }
+function readinessDraft(){
+  if(!state.tmp.readinessDraft) state.tmp.readinessDraft = { energy:null, soreness:'keine', sleep:'mittel' };
+  return state.tmp.readinessDraft;
+}
+function setReadinessDraft(key, val){
+  readinessDraft()[key] = val;
+  render();
+}
 async function saveReadinessLog(){
-  const energy = parseInt(document.getElementById('readinessEnergy')?.value);
-  if(!energy || energy<1 || energy>10){ showToast('Bitte Energie-Level 1–10 angeben'); return; }
-  const soreness = document.getElementById('readinessSoreness')?.value || 'keine';
-  const sleep = document.getElementById('readinessSleep')?.value || 'mittel';
+  const { energy, soreness, sleep } = readinessDraft();
+  if(!energy || energy<1 || energy>10){ showToast('Bitte Energie-Level 1–10 wählen'); return; }
   const todayD = todayStr();
   state.readinessLogs = state.readinessLogs.filter(r=>r.date!==todayD);
   state.readinessLogs.push({id:uid(), date:todayD, energy, soreness, sleep});
+  state.tmp.readinessDraft = null;
   await saveKey('readinessLogs', state.readinessLogs);
   render();
 }
 function editReadinessLog(){
   const todayD = todayStr();
+  const log = todaysReadinessLog();
+  if(log) state.tmp.readinessDraft = { energy:log.energy, soreness:log.soreness, sleep:log.sleep };
   state.readinessLogs = state.readinessLogs.filter(r=>r.date!==todayD);
   render();
+}
+function readinessSegHtml(key, options, current){
+  return `<div class="seg">${options.map(([val,label])=>
+    `<button class="seg-btn ${current===val?'active':''}" onclick="setReadinessDraft('${key}','${val}')">${label}</button>`).join('')}</div>`;
 }
 function renderReadinessCard(){
   const log = todaysReadinessLog();
   if(log){
     return `
       <div class="card">
-        <h2 class="small">Tagesform</h2>
-        <div class="note" style="margin-bottom:8px;">${readinessHint(log)}</div>
-        <button class="btn-sm btn-ghost" style="width:auto;" onclick="editReadinessLog()">Bearbeiten</button>
+        <div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+          <h2 class="small" style="margin:0;">Tagesform</h2>
+          <button class="btn-sm btn-ghost" style="flex:0 0 auto;" onclick="editReadinessLog()">Bearbeiten</button>
+        </div>
+        <div class="note" style="margin:0;">${readinessHint(log)}</div>
       </div>
     `;
   }
+  const d = readinessDraft();
   return `
     <div class="card">
       <h2 class="small">Tagesform</h2>
-      <div class="field"><label>Energie heute (1–10)</label><input type="number" id="readinessEnergy" min="1" max="10" step="1" placeholder="z.B. 7"></div>
-      <div class="field"><label>Muskelkater/Beschwerden</label>
-        <select id="readinessSoreness">
-          <option value="keine">Keine</option>
-          <option value="leicht">Leicht</option>
-          <option value="stark">Stark</option>
-        </select>
-      </div>
-      <div class="field"><label>Schlafqualität</label>
-        <select id="readinessSleep">
-          <option value="schlecht">Schlecht</option>
-          <option value="mittel" selected>Mittel</option>
-          <option value="gut">Gut</option>
-        </select>
-      </div>
-      <button class="btn btn-ghost" onclick="saveReadinessLog()">Speichern</button>
+      <div class="field-label">Energie heute <span class="val">${d.energy ? d.energy+' / 10' : ''}</span></div>
+      <div class="seg" style="gap:2px;padding:3px;">${[1,2,3,4,5,6,7,8,9,10].map(n=>
+        `<button class="seg-btn num ${d.energy===n?'active':''}" onclick="setReadinessDraft('energy',${n})">${n}</button>`).join('')}</div>
+      <div class="field-label">Muskelkater / Beschwerden</div>
+      ${readinessSegHtml('soreness', [['keine','Keine'],['leicht','Leicht'],['stark','Stark']], d.soreness)}
+      <div class="field-label">Schlafqualität</div>
+      ${readinessSegHtml('sleep', [['schlecht','Schlecht'],['mittel','Mittel'],['gut','Gut']], d.sleep)}
+      <button class="btn btn-primary" style="margin-top:16px;" onclick="saveReadinessLog()">Speichern</button>
     </div>
   `;
 }
@@ -3048,7 +3076,6 @@ function renderToday(){
       </div>
       <div class="row" style="gap:4px;touch-action:pan-y;" ontouchstart="weekSwipeStart(event)" ontouchend="weekSwipeEnd(event, ()=>shiftTodayWeek(1), ()=>shiftTodayWeek(-1))">${weekStrip}</div>
     </div>
-    ${renderReadinessCard()}
     ${planHtml ? `<div class="card">
       <h2>Heute</h2>
       ${planHtml}
@@ -8991,7 +9018,7 @@ function renderWorkoutInner(){
   if(state.tmp.gps && state.tmp.gps.active && !state.tmp.gps.embedded) return renderGpsLiveView();
   const historyHtml = ''; // Verlauf ist jetzt unter Fortschritt zu finden
   const inProgress = isWodInProgress();
-  const formatSelector = inProgress ? '' : renderFormatSelector();
+  const formatSelector = inProgress ? '' : renderReadinessCard() + renderFormatSelector();
 
   if(!inProgress && state.tmp.workoutMenu==='timer'){
     return formatSelector + renderTimer() + historyHtml;
