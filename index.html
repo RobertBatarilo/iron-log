@@ -574,7 +574,7 @@ function renderNotificationSettings(){
   const prefs = me?.notificationPrefs || {};
   return `
     <div class="note" style="margin-bottom:6px;">Einzelne Kategorien abschalten:</div>
-    ${NOTIFICATION_CATEGORIES.map(c=>`
+    ${NOTIFICATION_CATEGORIES.filter(c=>boxSystemEnabled() || c.key==='reactivation').map(c=>`
       <div class="row" style="align-items:center;justify-content:space-between;margin:10px 0;">
         <span>${c.label}</span>
         <label class="toggle-switch">
@@ -2737,7 +2737,7 @@ async function initApp(){
   let restoredTab = null;
   try{ restoredTab = localStorage.getItem('ironlog:lastActiveTab'); }catch(e){}
   if(restoredTab==='progress'){ state.activeTab = 'profile'; state.tmp.profileSection = 'progress'; }
-  else if(restoredTab && ['today','workout','nutrition','box','profile'].includes(restoredTab)) state.activeTab = restoredTab;
+  else if(restoredTab && ['today','workout','nutrition','box','profile'].includes(restoredTab)) state.activeTab = (restoredTab==='box' && !boxSystemEnabled()) ? 'today' : restoredTab;
 
   let restoredBoxSubTab = null;
   try{ restoredBoxSubTab = localStorage.getItem('ironlog:lastBoxSubTab'); }catch(e){}
@@ -2750,7 +2750,10 @@ async function initApp(){
   // .then() holt danach die Datenlade-Seiteneffekte nach, die setBoxSubTab() beim Klick ausloest
   // (state.box.membership existiert erst nach loadBoxData(), sonst haengt die wiederhergestellte
   // Unteransicht dauerhaft bei "Laedt ...").
-  loadBoxData().then(()=>{
+  if(!boxSystemEnabled()){
+    state.box.loaded = true;
+    if(pendingJoinCode){ pendingJoinCode = null; showToast('Boxsystem ist ausgeschaltet – Einladungslink ignoriert'); }
+  } else loadBoxData().then(()=>{
     if(state.box.membership?.status !== 'active') return;
     if(state.tmp.boxSubTab==='schedule'){
       selectScheduleDate(state.tmp.scheduleSelectedDate || todayStr());
@@ -2803,7 +2806,7 @@ function bottomNavHtml(){
       navBtn('profile','Profil', iconUser())
     ].join('');
   }
-  const showBoxTab = !state.box.loaded || state.box.membership?.status==='active';
+  const showBoxTab = boxSystemEnabled() && (!state.box.loaded || state.box.membership?.status==='active');
   return [
     navBtn('today','Today', iconHome()),
     navBtn('workout','Workout', iconBarbell()),
@@ -2832,6 +2835,7 @@ function navBtn(tab,label,icon){
   return `<button class="${state.activeTab===tab?'active':''}" onclick="setTab('${tab}')">${icon}${label}</button>`;
 }
 function setTab(tab){
+  if(tab==='box' && !boxSystemEnabled()) tab = 'today';
   if(tab !== state.activeTab && tickHandle){
     if(activeTicker==='timer') pauseActiveTimer();
     else if(activeTicker==='live') pauseLiveRest();
@@ -4980,8 +4984,25 @@ function isBoxOwner(){
   const m = state.box.membership;
   return !!(m && m.status==='active' && m.role==='owner');
 }
+// Admin-"Softclose": blendet die komplette Box-Oberfläche aus (Daten bleiben unberührt).
+// Wirkt nur bei App-Admins, ein altes Flag bei anderen Konten bleibt ohne Effekt.
+function boxSystemEnabled(){
+  return !(state.profile?.boxSystemOff && pb.authStore.record?.isAppAdmin);
+}
+async function setBoxSystem(on){
+  state.profile = state.profile || {};
+  state.profile.boxSystemOff = !on;
+  if(!on){
+    state.profile.boxViewMode = 'athlete';
+    if(state.activeTab==='box') state.activeTab = 'today';
+  }
+  applyTheme(state.profile.themeByMode?.[currentViewMode()] || 'dark');
+  await saveKey('profile', state.profile);
+  showToast(on ? 'Boxsystem eingeschaltet' : 'Boxsystem ausgeschaltet');
+  render();
+}
 function isBoxAdminView(){
-  return isBoxOwner() && state.profile?.boxViewMode==='box';
+  return boxSystemEnabled() && isBoxOwner() && state.profile?.boxViewMode==='box';
 }
 function userTierLabel(user, hasActiveBox){
   if(user.isAppAdmin) return 'Admin';
@@ -6541,6 +6562,36 @@ function setMpAllUsersMode(on){
     render();
   }
 }
+// Suche + Liste aller Nutzer (App-Admin); genutzt im Box-Reiter ("Alle Nutzer") und im Profil ("Nutzerverwaltung")
+function renderAdminUsersList(){
+  const users = state.tmp.adminUsers;
+  const q = (state.tmp.adminSearch||'').toLowerCase().trim();
+  const filteredUsers = users==null ? null : (q ? users.filter(u=>(u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)) : users);
+  return `
+    <div class="card">
+      <h2>Alle Nutzer</h2>
+      <div class="field" style="margin-bottom:0;">
+        <input type="text" id="adminSearchInput" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
+      </div>
+    </div>
+    ${users===null ? `<div class="note">Lädt …</div>` : (filteredUsers.length ? filteredUsers.map(u=>`
+      <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
+        <span class="row" style="align-items:center;gap:10px;width:auto;flex:1;">
+          <span class="box-avatar" style="width:32px;height:32px;font-size:12px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
+          <span style="display:flex;flex-direction:column;overflow:hidden;">
+            <span class="val">${escapeHtml(u.name||'—')}</span>
+            <span class="note" style="margin:0;">${escapeHtml(u.email||'')}</span>
+          </span>
+        </span>
+        <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
+          ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
+          ${u.isPro?'<span class="chip">Pro</span>':''}
+          ${u.disabled?'<span class="chip">Deaktiviert</span>':''}
+        </span>
+      </div>
+    `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
+  `;
+}
 function renderBoxMembersScreen(box){
   if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
   if(state.tmp.mpMemberDetailId) return renderBoxMemberDetail();
@@ -6556,34 +6607,10 @@ function renderBoxMembersScreen(box){
     </div>
   ` : '';
   if(isAdmin && state.tmp.mpAllUsersMode){
-    const users = state.tmp.adminUsers;
-    const q = (state.tmp.adminSearch||'').toLowerCase().trim();
-    const filteredUsers = users==null ? null : (q ? users.filter(u=>(u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)) : users);
     return `
       <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="closeBoxMembersScreen()">← Zurück</button>
       ${toggleHtml}
-      <div class="card">
-        <h2>Alle Nutzer</h2>
-        <div class="field" style="margin-bottom:0;">
-          <input type="text" id="adminSearchInput" value="${escapeHtml(state.tmp.adminSearch||'')}" oninput="state.tmp.adminSearch=this.value; debounceRender('adminSearch');" placeholder="Name oder E-Mail suchen …">
-        </div>
-      </div>
-      ${users===null ? `<div class="note">Lädt …</div>` : (filteredUsers.length ? filteredUsers.map(u=>`
-        <div class="history-item" style="cursor:pointer;" onclick="openAdminUserDetail('${u.id}')">
-          <span class="row" style="align-items:center;gap:10px;width:auto;flex:1;">
-            <span class="box-avatar" style="width:32px;height:32px;font-size:12px;flex:0 0 auto;">${escapeHtml((u.name||u.email||'?').slice(0,2).toUpperCase())}</span>
-            <span style="display:flex;flex-direction:column;overflow:hidden;">
-              <span class="val">${escapeHtml(u.name||'—')}</span>
-              <span class="note" style="margin:0;">${escapeHtml(u.email||'')}</span>
-            </span>
-          </span>
-          <span class="row" style="width:auto;gap:4px;flex:0 0 auto;">
-            ${u.isAppAdmin?'<span class="chip chip-owner">Admin</span>':''}
-            ${u.isPro?'<span class="chip">Pro</span>':''}
-            ${u.disabled?'<span class="chip">Deaktiviert</span>':''}
-          </span>
-        </div>
-      `).join('') : `<div class="note">Keine Treffer${q?` für "${escapeHtml(state.tmp.adminSearch)}"`:''}.</div>`)}
+      ${renderAdminUsersList()}
     `;
   }
   const pending = state.box.pendingMemberships;
@@ -13411,7 +13438,7 @@ function renderProgressMenu(){
   // Solange loadBoxData() noch nicht fertig ist, state.box.membership optimistisch als
   // "noch aktiv" behandeln statt den Button kurz auszublenden - sonst flackert "Disziplin"
   // bei jedem Neuladen kurz weg und wieder rein (gleiches Muster wie showBoxTab in bottomNavHtml()).
-  const showDiscipline = !state.box.loaded || state.box.membership?.status==='active';
+  const showDiscipline = boxSystemEnabled() && (!state.box.loaded || state.box.membership?.status==='active');
   return `
     <div class="card">
       <h2 class="small">Ruhmeshalle</h2>
@@ -13819,6 +13846,7 @@ function renderProfile(){
   if(section==='notifications') return renderProfileNotificationsPage();
   if(section==='appsettings') return renderProfileAppSettings();
   if(section==='data') return renderProfileData();
+  if(section==='adminusers') return renderAdminUsersScreen();
   if(section==='exercises') return renderMyExercisesScreen();
   if(section==='trainingplan') return renderTrainingPlanScreen();
   if(section==='progress'){
@@ -13907,12 +13935,14 @@ function renderMyExercisesScreen(){
 function renderProfileMenu(){
   const mode = state.profile?.boxViewMode==='box' ? 'box' : 'athlete';
   const m = state.box.membership;
-  const showBoxSettings = !m || m.status==='pending' || isBoxOwner();
+  const boxOn = boxSystemEnabled();
+  const isAdmin = !!pb.authStore.record?.isAppAdmin;
+  const showBoxSettings = boxOn && (!m || m.status==='pending' || isBoxOwner());
   // Solange loadBoxData() noch nicht fertig ist (state.box.membership noch null), isBoxOwner()
   // optimistisch als "vermutlich noch true" behandeln statt "Rolle" kurz auszublenden - sonst
   // flackert die Karte bei jedem Neuladen kurz weg und wieder rein (gleiches Muster wie
   // showBoxTab in bottomNavHtml()).
-  const showRoleSwitch = !state.box.loaded || isBoxOwner();
+  const showRoleSwitch = boxOn && (!state.box.loaded || isBoxOwner());
   return `
     ${showRoleSwitch ? `
     <div class="card">
@@ -13942,6 +13972,28 @@ function renderProfileMenu(){
       <h2 class="small">Trainingsplan</h2>
       <button class="btn btn-ghost" style="justify-content:space-between;" onclick="setProfileSection('trainingplan')">📅 Verwalten →</button>
     </div>
+    ${isAdmin ? `
+    <div class="card">
+      <h2 class="small">Admin</h2>
+      <button class="btn ${boxOn?'btn-ghost':'btn-primary'}" style="justify-content:space-between;margin-bottom:6px;" onclick="setBoxSystem(${!boxOn})">${boxOn?'🔒 Boxsystem ausschalten':'🔓 Boxsystem einschalten'}</button>
+      <div class="note" style="margin:0 0 12px;">${boxOn ? 'Blendet Box-Reiter und alle Box-Funktionen bei dir aus – die App läuft dann wie für Privatnutzer. Daten bleiben erhalten.' : 'Das Boxsystem ist bei dir ausgeschaltet. Einschalten bringt Box-Reiter und Box-Funktionen zurück.'}</div>
+      <button class="btn btn-ghost" style="justify-content:space-between;" onclick="openAdminUsersSection()">👥 Nutzerverwaltung →</button>
+    </div>` : ''}
+  `;
+}
+function openAdminUsersSection(){
+  state.tmp.adminSelectedUserId = null;
+  state.tmp.adminSearch = '';
+  state.tmp.adminUsers = null;
+  setProfileSection('adminusers');
+  loadAdminUsers();
+}
+function renderAdminUsersScreen(){
+  if(!pb.authStore.record?.isAppAdmin) return renderProfileMenu();
+  if(state.tmp.adminSelectedUserId) return renderAdminUserDetail();
+  return `
+    <button class="btn btn-ghost" style="margin-bottom:14px;" onclick="setProfileSection(null)">← Zurück</button>
+    ${renderAdminUsersList()}
   `;
 }
 function setProfileSection(s){
