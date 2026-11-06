@@ -4414,10 +4414,11 @@ function parseAmrapText(lines){
       if(dur){ durationMin = dur[1]; if(clockDur) durationSec = String(parseInt(clockDur[2])); consumed = true; }
     }
     if(consumed) return;
-    const prog = line.match(/^(\d+(?:\s*[-–]\s*\d+){2,})\s+(.+)$/);
+    // "9-7-5 Hang Power Clean" = Folge wiederholt sich; "9-7-5... Hang Power Clean" (mit Punkten) = Folge wird fortgesetzt (9-7-5-3-1)
+    const prog = line.match(/^(\d+(?:\s*[-–]\s*\d+){2,})(?:\s*[-–]?\s*(\.{2,}|…))?\s+(.+)$/);
     if(prog){
       const list = parseRepScheme(prog[1].replace(/–/g,'-'));
-      if(list.length>=2){ movements.push({ reps: String(list[0]), name: prog[2].trim(), repsProgression: list.join(',') }); return; }
+      if(list.length>=2){ movements.push({ reps: String(list[0]), name: prog[3].trim(), repsProgression: list.join(',') + (prog[2] ? '...' : '') }); return; }
     }
     const mv = parseMovementLine(line);
     if(mv){ movements.push(mv); return; }
@@ -4669,7 +4670,7 @@ function applyParsedWorkout(input){
       const {unit, reps} = resolveStructuredMoveUnitReps(mv, exerciseId);
       const progList = parseRepScheme(mv.repsProgression);
       const hasProgression = progList.length>=2 && getExerciseType(state.exercises.find(e=>e.id===exerciseId))!=='cardio';
-      return {exerciseId, reps: hasProgression ? String(progList[0]) : reps, weight: weightForExercise(exerciseId, mv.weight), unit, repsProgression: hasProgression ? progList.join(',') : ''};
+      return {exerciseId, reps: hasProgression ? String(progList[0]) : reps, weight: weightForExercise(exerciseId, mv.weight), unit, repsProgression: hasProgression ? joinProgression(progList, mv.repsProgression) : ''};
     });
     activeMovements = b.movements;
     leftoverLines = p.leftover;
@@ -8672,17 +8673,26 @@ function exerciseDisplayName(id){
   const stem = id.replace(/-[a-z0-9]{1,4}$/,'').replace(/-/g,' ').trim();
   return stem ? stem.replace(/\b\w/g,c=>c.toUpperCase()) : '—';
 }
-// AMRAP-Bewegung mit Wiederholungen je Runde (z.B. "36,48,60,72 Double Unders"): Liste, die
-// Zahl fuer eine bestimmte Runde (nach dem Listenende mit dem letzten Schritt fortgesetzt, 72 -> 84)
-// und eine Kopie der Bewegung mit der Zahl der aktuellen Runde.
+// AMRAP-Bewegung mit Wiederholungen je Runde (z.B. "9,7,5 Hang Power Clean"): Liste, die Zahl
+// fuer eine bestimmte Runde und eine Kopie der Bewegung mit der Zahl der aktuellen Runde.
+// Nach dem Listenende beginnt die Folge wieder von vorn (9-7-5-9-7-5); nur wenn sie mit
+// Punkten endet ("9-7-5...", intern "9,7,5...") wird sie mit dem letzten Schritt fortgesetzt (9-7-5-3-1).
 function amrapProgressionList(m){
   const l = parseRepScheme(m && m.repsProgression);
   return l.length>=2 ? l : [];
+}
+function amrapProgressionContinues(m){
+  return /\.{2,}|…/.test((m && m.repsProgression) || '');
+}
+// Liste wieder als Text speichern; das Fortsetzungs-Zeichen "..." bleibt dabei erhalten
+function joinProgression(list, rawStr){
+  return list.join(',') + (/\.{2,}|…/.test(rawStr||'') ? '...' : '');
 }
 function amrapRepsForRound(m, roundIdx){
   const l = amrapProgressionList(m);
   if(!l.length) return m.reps;
   if(roundIdx < l.length) return String(l[roundIdx]);
+  if(!amrapProgressionContinues(m)) return String(l[roundIdx % l.length]);
   const step = l[l.length-1] - l[l.length-2];
   return String(Math.max(0, l[l.length-1] + step*(roundIdx-l.length+1)));
 }
@@ -8694,7 +8704,7 @@ function formatMovementLine(m){
   const name = exerciseDisplayName(m.exerciseId);
   const type = getExerciseType(ex);
   const prog = amrapProgressionList(m);
-  const repsLabel = prog.length ? prog.join('-') : (m.reps||0);
+  const repsLabel = prog.length ? prog.join('-') + (amrapProgressionContinues(m) ? '…' : '') : (m.reps||0);
   if(type==='cardio'){
     if(m.unit==='m') return `${toDisplayDistance(m.reps)}${distanceUnitLabel()} ${name}`;
     return `${m.reps||0} kcal ${name}`;
@@ -10492,7 +10502,7 @@ function renderAmrapFlow(historyHtml){
         <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" step="1" value="${qtyValue}" oninput="${qtyHandler}" placeholder="z.B. 10"></div>
         ${weightField}
       </div>
-      ${isCardio ? '' : `<div class="field" style="margin-bottom:8px;"><label>Wdh. je Runde (optional)</label><input type="text" value="${escapeHtml(m.repsProgression||'')}" oninput="updateAmrapMove(${mi},'repsProgression',this.value)" placeholder="z.B. 36,48,60,72"></div>`}
+      ${isCardio ? '' : `<div class="field" style="margin-bottom:8px;"><label>Wdh. je Runde (optional)</label><input type="text" value="${escapeHtml(m.repsProgression||'')}" oninput="updateAmrapMove(${mi},'repsProgression',this.value)" placeholder="z.B. 9,7,5"><div class="note" style="margin:4px 0 0;">Die Folge wiederholt sich (9-7-5-9-7-5). Mit Punkten am Ende ("9,7,5...") wird sie fortgesetzt (9-7-5-3-1).</div></div>`}
       ${gpsButton}
     </div>`;
   }).join('');
@@ -10782,7 +10792,7 @@ async function saveAmrapWorkout(){
   const date = state.tmp.wodDate || todayStr();
   const name = (state.tmp.wodName||'').trim();
   const note = state.tmp.wodNote || '';
-  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||'', repsProgression: amrapProgressionList(m).join(',')}));
+  const movements = b.movements.filter(m=>m.exerciseId).map(m=>({exerciseId:m.exerciseId, reps:m.reps||'', unit:m.unit||'reps', weight:m.weight||'', repsProgression: amrapProgressionList(m).length ? joinProgression(amrapProgressionList(m), m.repsProgression) : ''}));
   const prMovements = buildPrMovementsFromFlat(movements);
   const durationSec = Math.round(b.durationMs/1000);
   const setsCount = parseInt(b.setsCount)||1;
